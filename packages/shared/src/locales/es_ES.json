@@ -1213,7 +1213,8 @@
     "already_reported": "Ya reportaste esta textura",
     "not_found": "Informe no encontrado",
     "already_reviewed": "Informe ya revisado",
-    "reason_required": "Ingrese un motivo de informe"
+    "reason_required": "Ingrese un motivo de informe",
+    "self": "No puedes reportar tu propia textura"
   },
   "texture": {
     "not_found": "No existe la textura.",

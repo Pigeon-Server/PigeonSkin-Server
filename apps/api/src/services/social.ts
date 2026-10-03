@@ -148,6 +148,8 @@ export async function submitReport(
   const database = db(env);
   const texture = await textureRepo.findTextureById(database, textureId);
   if (!texture) throw fail.notFound('texture.not_found');
+  // 举报是社区监督机制：拥有者举报自己没有意义，还会空转押金/奖励的积分流动
+  if (texture.uploaderId === reporter.id) throw fail.invalid('report.self');
 
   // 同一举报人对同一纹理只能报一次（新 schema 有 UNIQUE 约束兜底）
   if (await repo.findReportByReporterAndTexture(database, reporter.id, textureId)) {

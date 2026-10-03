@@ -1213,7 +1213,8 @@
     "already_reported": "你已檢舉此材質",
     "not_found": "檢舉不存在",
     "already_reviewed": "檢舉已處理",
-    "reason_required": "請填寫檢舉理由"
+    "reason_required": "請填寫檢舉理由",
+    "self": "不能舉報自己的材質"
   },
   "texture": {
     "not_found": "無此材質。",

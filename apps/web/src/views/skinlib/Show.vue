@@ -565,9 +565,9 @@ async function removeTexture() {
                   <span>{{ i18n.t('editor.edit') }}</span>
                 </router-link>
 
-                <!-- 举报违规 -->
+                <!-- 举报违规（拥有者不显示：不能举报自己的材质） -->
                 <AppButton
-                  v-if="session.user.value"
+                  v-if="session.user.value && !isOwner"
                   class="btn flex-1 !text-xs justify-center text-muted hover:text-danger"
                   :title="i18n.t('skinlib.report.title')"
                   @click="reportOpen = true"

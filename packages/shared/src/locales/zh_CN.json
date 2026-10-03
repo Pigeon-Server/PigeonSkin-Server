@@ -1213,7 +1213,8 @@
     "already_reported": "你已举报此材质",
     "not_found": "举报不存在",
     "already_reviewed": "举报已处理",
-    "reason_required": "请填写举报理由"
+    "reason_required": "请填写举报理由",
+    "self": "不能举报自己的材质"
   },
   "texture": {
     "not_found": "材质不存在",
