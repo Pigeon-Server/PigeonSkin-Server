@@ -1,3 +1,12 @@
 import type { TextureSummary } from '@/api';
-import type { FeedSnapshot } from '@/lib/resource-feed';
-export const skinlibCache = new Map<string, FeedSnapshot<TextureSummary> & { scrollY: number }>();
+
+export interface SkinlibCacheData {
+  items: TextureSummary[];
+  total: number;
+  totalPages: number;
+  page: number;
+  savedAt: number;
+  scrollY: number;
+}
+
+export const skinlibCache = new Map<string, SkinlibCacheData>();
