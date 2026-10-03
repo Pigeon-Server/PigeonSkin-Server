@@ -94,6 +94,7 @@ export const ERROR_CODES = [
   'closet.insufficient_score',
   // 举报
   'report.already_reported',
+  'report.self',
   'report.not_found',
   'report.already_reviewed',
   'report.reason_required',

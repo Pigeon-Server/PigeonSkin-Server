@@ -1213,7 +1213,8 @@
     "already_reported": "このテクスチャはすでに報告済みです",
     "not_found": "レポートが見つかりません",
     "already_reviewed": "レポートはすでにレビューされています",
-    "reason_required": "報告理由を入力してください"
+    "reason_required": "報告理由を入力してください",
+    "self": "自分のテクスチャは報告できません"
   },
   "texture": {
     "not_found": "テクスチャが見つかりません",

@@ -17,7 +17,7 @@ describe('shared locale messages', () => {
     const english = flattenMessages(UI_MESSAGES.en);
     for (const locale of LOCALES) {
       const dictionary = flattenMessages(UI_MESSAGES[locale]);
-      expect(Object.keys(dictionary)).toHaveLength(1521);
+      expect(Object.keys(dictionary)).toHaveLength(1522);
       expect(Object.keys(dictionary).sort(), locale).toEqual(Object.keys(english).sort());
       expect(Object.keys(UI_MESSAGES[locale]).every(key => !key.includes('.'))).toBe(true);
       if (locale === 'zh_CN' || locale === 'zh_TW') {

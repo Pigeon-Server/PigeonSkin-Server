@@ -406,6 +406,19 @@ describe('纹理上传', () => {
     const texture = await res.json<{ id: number }>();
     expect((await (await authedFetch(cookie, `https://x/api/v1/textures/${texture.id}`)).json<{ origin: string }>()).origin).toBe('repost');
   });
+  it('拒绝拥有者举报自己的纹理', async () => {
+    const u = await registerUser();
+    const cookie = await login(u.email);
+    const up = await uploadTexture(cookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'default' });
+    const { id } = await up.json<{ id: number }>();
+    const res = await authedFetch(cookie, 'https://x/api/v1/reports', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ textureId: id, reason: 'self report' }),
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json<{ error: string }>()).error).toBe('report.self');
+  });
   it('keeps texture awards intact when switching from private to public and claws them back only when privatizing', async () => {
     const user = await registerUser();
     const cookie = await login(user.email);
