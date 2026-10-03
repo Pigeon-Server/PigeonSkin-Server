@@ -6,10 +6,12 @@
 
 ```sh
 npm run typecheck
-npm test
 npm run build --workspace @pigeon-skin/web
+npm test
 npm run check:public
 ```
+
+注意先构建 web（API 测试经 wrangler 配置挂载 `apps/web/dist` 作为 SPA 资产，目录缺失时测试无法启动）。
 
 修改应围绕明确需求，保留 Minecraft 协议、权限与迁移兼容性。前端使用 `@/` 别名和 Material Design Icons；新增文案应补齐 `zh_CN`、`zh_TW`、`en`、`es_ES`、`ru_RU`、`ja_JP`，并检查插值参数和各语言原始词典。
 

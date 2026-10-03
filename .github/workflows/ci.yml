@@ -47,11 +47,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
-
+      # API 测试经 wrangler 配置挂载 apps/web/dist（SPA 资产），必须先构建
       - name: Web build
         run: npm run build
+
+      - name: Test
+        run: npm test
 
       - name: 本地化资源检查
         run: |
