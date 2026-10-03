@@ -32,7 +32,7 @@ function request(path: string, cookie = '', method = 'GET', body?: unknown) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
-async function upload(cookie: string) {
+async function upload(cookie: string, visibility: 'public' | 'private' = 'public') {
   const form = new FormData();
   form.set('file', new Blob([makePng({ width: 64, height: 64 })]), 'skin.png');
   form.set('name', 'Comment texture');
@@ -42,8 +42,30 @@ async function upload(cookie: string) {
     body: form,
   });
   expect(response.status).toBe(201);
-  return (await response.json<{ id: number }>()).id;
+  const id = (await response.json<{ id: number }>()).id;
+  if (visibility === 'private') {
+    const patch = await SELF.fetch(`https://x/api/v1/textures/${id}`, {
+      method: 'PATCH',
+      headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ visibility: 'private' }),
+    });
+    expect(patch.status).toBe(200);
+  }
+  return id;
 }
+describe('private textures have no comment section', () => {
+  it('hides comments on private textures even from the owner and admins', async () => {
+    const owner = await user('private_owner');
+    const admin = await user('private_admin', true);
+    const texture = await upload(owner.cookie, 'private');
+
+    expect((await request(`/textures/${texture}/comments`, owner.cookie)).status).toBe(404);
+    expect((await request(`/textures/${texture}/comments`, admin.cookie)).status).toBe(404);
+    expect(
+      (await request(`/textures/${texture}/comments`, owner.cookie, 'POST', { content: 'self comment' })).status,
+    ).toBe(404);
+  });
+});
 describe('user comment workflow', () => {
   it('publishes a comment, exposes it to visitors and keeps deletion restricted to its author', async () => {
     const author = await user('comment_author');

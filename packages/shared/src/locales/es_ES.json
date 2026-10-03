@@ -765,7 +765,8 @@
     "hero_7_title": "Una cara familiar,\nincluso desde lejos.",
     "hero_8_title": "¿Quién serás\nel día de hoy?",
     "hero_9_title": "En cada encuentro,\ninconfundiblemente tú.",
-    "hero_10_title": "Viste tu inspiración.\nConstruye tu historia."
+    "hero_10_title": "Viste tu inspiración.\nConstruye tu historia.",
+    "logout_confirm": "¿Quieres cerrar la sesión?"
   },
   "admin": {
     "owner": "Dueño",

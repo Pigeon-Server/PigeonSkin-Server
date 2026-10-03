@@ -363,10 +363,10 @@ onBeforeUnmount(() => {
 <template>
   <div class="resource-page">
     <!-- 头部与操作区 -->
-    <header class="resource-heading">
+    <header class="resource-heading w-full flex items-center justify-between pb-3">
       <div class="flex items-baseline gap-3">
-        <h1>{{ i18n.t('general.skinlib') }}</h1>
-        <span v-if="total > 0" class="resource-count">
+        <h1 class="text-xl font-bold tracking-tight text-ink">{{ i18n.t('general.skinlib') }}</h1>
+        <span v-if="total > 0" class="resource-count text-xs text-muted">
           {{ i18n.t('common.count', { count: i18n.n(total) }, total) }}
         </span>
       </div>
@@ -383,18 +383,18 @@ onBeforeUnmount(() => {
     </header>
 
     <!-- 综合控制工具栏 -->
-    <div class="resource-toolbar flex-col items-stretch gap-3 !py-3">
-      <!-- 第一行：搜索 + 排序 + 快捷按钮 -->
-      <div class="flex flex-wrap items-center justify-between gap-2.5">
+    <div class="resource-toolbar w-full border-b border-line pb-4 pt-1 space-y-3">
+      <!-- 搜索、排序与快捷操作 -->
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <!-- 搜索表单 -->
         <form
-          class="flex min-w-[240px] flex-1 items-center gap-1.5 sm:max-w-md"
+          class="flex items-center gap-1.5 w-full sm:w-auto flex-1 max-w-md"
           @submit.prevent="handleSearchSubmit"
         >
           <div class="relative flex-1">
             <AppInput
               v-model="searchInput"
-              class="w-full !pr-7"
+              class="w-full !pr-7 !bg-surface"
               :aria-label="i18n.t('general.search')"
               :placeholder="i18n.t('general.search')"
             />
@@ -461,8 +461,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- 第二行：材质分类胶囊选项卡 -->
-      <div class="flex items-center overflow-x-auto pb-0.5 pt-0.5">
+      <!-- 材质分类胶囊选项卡：左边缘与下方卡片网格严格对齐 -->
+      <div class="flex items-center overflow-x-auto pb-0.5">
         <div
           class="filter-tabs flex-nowrap shrink-0"
           role="group"

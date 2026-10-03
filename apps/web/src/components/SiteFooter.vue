@@ -35,28 +35,30 @@ const copyright = computed(() => {
 </script>
 <template>
   <footer class="app-footer">
-    <div class="footer-site-info">
-      <div v-if="copyright" v-html="copyright" />
-      <span v-else>
-        {{ i18n.t('common.copyright', { year: new Date().getFullYear(), name: site.get('site_name') || i18n.t('home.title') }) }}
-      </span>
-      <div v-if="icpBeian || publicSecurityBeian" class="footer-beian-links">
-        <a v-if="icpBeian" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">{{ icpBeian }}</a>
-        <a v-if="publicSecurityBeian" :href="publicSecurityUrl" target="_blank" rel="noopener noreferrer">
-          <img src="/beian.svg" alt="" width="16" height="16" />
-          <span>{{ publicSecurityBeian }}</span>
-        </a>
+    <div class="app-container flex flex-wrap items-center justify-between w-full gap-3">
+      <div class="footer-site-info">
+        <div v-if="copyright" v-html="copyright" />
+        <span v-else>
+          {{ i18n.t('common.copyright', { year: new Date().getFullYear(), name: site.get('site_name') || i18n.t('home.title') }) }}
+        </span>
+        <div v-if="icpBeian || publicSecurityBeian" class="footer-beian-links">
+          <a v-if="icpBeian" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">{{ icpBeian }}</a>
+          <a v-if="publicSecurityBeian" :href="publicSecurityUrl" target="_blank" rel="noopener noreferrer">
+            <img src="/beian.svg" alt="" width="16" height="16" />
+            <span>{{ publicSecurityBeian }}</span>
+          </a>
+        </div>
       </div>
+      <span class="footer-credit">
+        <a :aria-describedby="creditId" href="https://github.com/bs-community/blessing-skin-server" target="_blank" rel="noopener noreferrer">
+          <I18nT scope="global" :keypath="`common.copyright_presets.${preset}`" tag="span">
+            <template #product>{{ i18n.t('common.product_name') }}</template>
+            <template #love><AppIcon name="favorite" class="!text-xs text-red-500" /><span class="sr-only">{{ i18n.t('common.care') }}</span></template>
+          </I18nT>
+        </a>
+        <span :id="creditId" role="tooltip" class="footer-credit-tooltip">{{ i18n.t('common.upstream_credit', { upstream: i18n.t('common.upstream_product_name') }) }}</span>
+      </span>
     </div>
-    <span class="footer-credit">
-      <a :aria-describedby="creditId" href="https://github.com/bs-community/blessing-skin-server" target="_blank" rel="noopener noreferrer">
-        <I18nT scope="global" :keypath="`common.copyright_presets.${preset}`" tag="span">
-          <template #product>{{ i18n.t('common.product_name') }}</template>
-          <template #love><AppIcon name="favorite" class="!text-xs text-red-500" /><span class="sr-only">{{ i18n.t('common.care') }}</span></template>
-        </I18nT>
-      </a>
-      <span :id="creditId" role="tooltip" class="footer-credit-tooltip">{{ i18n.t('common.upstream_credit', { upstream: i18n.t('common.upstream_product_name') }) }}</span>
-    </span>
   </footer>
 </template>
 <style scoped>

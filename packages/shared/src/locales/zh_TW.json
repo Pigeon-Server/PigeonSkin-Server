@@ -765,7 +765,8 @@
     "hero_7_title": "讓朋友一眼，\n就認出你。",
     "hero_8_title": "今天的你，\n想是什麼模樣？",
     "hero_9_title": "每一次相遇，\n都有鮮明的你。",
-    "hero_10_title": "把靈感穿在身上，\n把故事留在世界。"
+    "hero_10_title": "把靈感穿在身上，\n把故事留在世界。",
+    "logout_confirm": "確定要登出嗎？"
   },
   "admin": {
     "owner": "所有者",

@@ -68,17 +68,13 @@ function safeParse(text: string): { safe?: boolean; category?: string } | null {
   }
 }
 
-async function assertTextureVisible(c: Ctx, textureId: number): Promise<void> {
+// 评论区只存在于公开材质：私密材质不设评论区（拥有者与管理员亦然），
+// 对任何人都不可读、不可评，避免借评论侧信道披露私密材质的存在。
+async function assertTextureCommentable(c: Ctx, textureId: number): Promise<void> {
   const [t] = await createDb(c.env.DB)
-    .select({ visibility: textures.visibility, uploaderId: textures.uploaderId })
+    .select({ visibility: textures.visibility })
     .from(textures).where(eq(textures.id, textureId)).limit(1);
-  if (!t) throw fail.notFound('texture.not_found');
-  if (t.visibility === 'private') {
-    const user = currentUser(c);
-    if (t.uploaderId !== user.id && user.role !== 'admin' && user.role !== 'super_admin') {
-      throw fail.notFound('texture.not_found');
-    }
-  }
+  if (!t || t.visibility !== 'public') throw fail.notFound('texture.not_found');
 }
 
 export const commentRoutes = new Hono<AppEnv>();
@@ -87,7 +83,7 @@ export const commentAdminRoutes = new Hono<AppEnv>();
 commentRoutes.get('/textures/:id/comments', async (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id) || id <= 0) throw fail.notFound();
-  await assertTextureVisible(c, id);
+  await assertTextureCommentable(c, id);
 
   const page = readPagination(c, { defaultPerPage: 20 });
   const db = createDb(c.env.DB);
@@ -124,7 +120,7 @@ commentRoutes.post('/textures/:id/comments', async (c) => {
   const user = currentUser(c);
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id) || id <= 0) throw fail.notFound();
-  await assertTextureVisible(c, id);
+  await assertTextureCommentable(c, id);
 
   if (!await getSettingBool(c.env, 'comments_enabled')) {
     throw fail.forbidden('comment.disabled');

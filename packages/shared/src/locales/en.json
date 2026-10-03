@@ -765,7 +765,8 @@
     "hero_7_title": "A familiar face,\neven from afar.",
     "hero_8_title": "Who will you\nbe today?",
     "hero_9_title": "Every encounter.\nUnmistakably you.",
-    "hero_10_title": "Wear your inspiration.\nBuild your story."
+    "hero_10_title": "Wear your inspiration.\nBuild your story.",
+    "logout_confirm": "Sign out of your account?"
   },
   "admin": {
     "owner": "Owner",
