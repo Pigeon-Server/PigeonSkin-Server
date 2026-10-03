@@ -14,6 +14,7 @@ const route = useRoute();
 const i18n = useI18n();
 const site = useSiteSettings();
 const session = useSessionStore();
+
 const file = ref<File | null>(null);
 const objectUrl = ref<string | null>(null);
 const name = ref('');
@@ -29,47 +30,65 @@ const busy = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const dragging = ref(false);
 const sourceResourceId = ref<number | null>(null);
-const canSubmit = computed(() => !!file.value && !!name.value.trim() && !busy.value);
-const cost = computed(
-  () =>
-    Math.ceil((file.value?.size || 0) / 1024) *
-    Number(
-      site.get(visibility.value === 'public' ? 'score_per_kb_public' : 'score_per_kb_private') || 0,
-    ),
-);
+
+const canSubmit = computed(() => Boolean(file.value && name.value.trim() && !busy.value));
+const cost = computed(() => {
+  const sizeKb = Math.ceil((file.value?.size || 0) / 1024);
+  const rateKey = visibility.value === 'public' ? 'score_per_kb_public' : 'score_per_kb_private';
+  return sizeKb * (Number(site.get(rateKey)) || 0);
+});
+
 async function acceptFile(selected: File) {
   if (busy.value) return;
   error.value = '';
   duplicateTextureId.value = null;
-  const max = Number(site.get('max_upload_size_kb')) || 1024;
-  if (selected.size > max * 1024) {
+
+  const maxKb = Number(site.get('max_upload_size_kb')) || 1024;
+  if (selected.size > maxKb * 1024) {
     error.value = i18n.t('texture.file_too_large');
     return;
   }
+
   const bytes = new Uint8Array(await selected.slice(0, 8).arrayBuffer());
-  if ([137, 80, 78, 71, 13, 10, 26, 10].some((v, i) => bytes[i] !== v)) {
+  const isPng = [137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => bytes[i] === v);
+  if (!isPng) {
     error.value = i18n.t('texture.not_png');
     return;
   }
+
   if (objectUrl.value) URL.revokeObjectURL(objectUrl.value);
   file.value = selected;
   objectUrl.value = URL.createObjectURL(selected);
-  if (!name.value) name.value = selected.name.replace(/\.png$/i, '');
+  if (!name.value.trim()) {
+    name.value = selected.name.replace(/\.png$/i, '');
+  }
 }
-function pickFile(event: Event) {
+
+function handleFileInputChange(event: Event) {
   const selected = (event.target as HTMLInputElement).files?.[0];
   if (selected) void acceptFile(selected);
 }
-function drop(event: DragEvent) {
+
+function handleDrop(event: DragEvent) {
   dragging.value = false;
   const selected = event.dataTransfer?.files[0];
   if (selected) void acceptFile(selected);
 }
+
+function handleClearFile() {
+  if (objectUrl.value) URL.revokeObjectURL(objectUrl.value);
+  file.value = null;
+  objectUrl.value = null;
+  error.value = '';
+  duplicateTextureId.value = null;
+}
+
 async function submit() {
-  if (!file.value || !canSubmit.value) return;
+  if (!file.value || !canSubmit.value || busy.value) return;
   busy.value = true;
   error.value = '';
   duplicateTextureId.value = null;
+
   try {
     const result = await textureApi.upload({
       file: file.value,
@@ -87,7 +106,10 @@ async function submit() {
     error.value = apiErrorMessage(e);
     if (e instanceof ApiError) {
       const existingId = Number(e.fields.existingId);
-      duplicateTextureId.value = e.code === 'texture.duplicate' && Number.isSafeInteger(existingId) && existingId > 0 ? existingId : null;
+      duplicateTextureId.value =
+        e.code === 'texture.duplicate' && Number.isSafeInteger(existingId) && existingId > 0
+          ? existingId
+          : null;
     } else {
       duplicateTextureId.value = null;
     }
@@ -95,11 +117,13 @@ async function submit() {
     busy.value = false;
   }
 }
+
 async function openEditor() {
   if (!file.value || busy.value) return;
   busy.value = true;
   error.value = '';
   duplicateTextureId.value = null;
+
   try {
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -107,7 +131,20 @@ async function openEditor() {
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(file.value!);
     });
-    sessionStorage.setItem('editor-draft', JSON.stringify({ dataUrl, kind: kind.value, model: model.value, name: name.value, description: description.value, visibility: visibility.value, origin: origin.value, sourceResourceId: sourceResourceId.value }));
+
+    sessionStorage.setItem(
+      'editor-draft',
+      JSON.stringify({
+        dataUrl,
+        kind: kind.value,
+        model: model.value,
+        name: name.value,
+        description: description.value,
+        visibility: visibility.value,
+        origin: origin.value,
+        sourceResourceId: sourceResourceId.value,
+      }),
+    );
     await router.push(`/editor/${kind.value}?draft=1&model=${model.value}`);
   } catch {
     error.value = i18n.t('common.internal_error');
@@ -115,7 +152,17 @@ async function openEditor() {
     busy.value = false;
   }
 }
-function restoreDraft(result: { dataUrl?: string; kind?: 'skin' | 'cape'; model?: 'default' | 'slim'; name?: string; description?: string; visibility?: 'public' | 'private'; origin?: 'original' | 'repost'; sourceResourceId?: number | null }) {
+
+function restoreDraft(result: {
+  dataUrl?: string;
+  kind?: 'skin' | 'cape';
+  model?: 'default' | 'slim';
+  name?: string;
+  description?: string;
+  visibility?: 'public' | 'private';
+  origin?: 'original' | 'repost';
+  sourceResourceId?: number | null;
+}) {
   if (!result.dataUrl) return;
   kind.value = result.kind === 'cape' ? 'cape' : 'skin';
   model.value = result.model === 'slim' ? 'slim' : 'default';
@@ -124,147 +171,341 @@ function restoreDraft(result: { dataUrl?: string; kind?: 'skin' | 'cape'; model?
   visibility.value = result.visibility === 'private' ? 'private' : 'public';
   origin.value = result.origin === 'repost' ? 'repost' : 'original';
   sourceResourceId.value = result.sourceResourceId ?? null;
+
   const [meta, encoded] = result.dataUrl.split(',');
-  const bytes = Uint8Array.from(atob(encoded || ''), char => char.charCodeAt(0));
-  void acceptFile(new File([bytes], `${name.value || kind.value}.png`, { type: meta?.match(/:(.*?);/)?.[1] || 'image/png' })).then(() => { name.value = result.name || name.value; });
+  const bytes = Uint8Array.from(atob(encoded || ''), (char) => char.charCodeAt(0));
+  void acceptFile(
+    new File([bytes], `${name.value || kind.value}.png`, {
+      type: meta?.match(/:(.*?);/)?.[1] || 'image/png',
+    }),
+  ).then(() => {
+    name.value = result.name || name.value;
+  });
 }
+
 onMounted(() => {
   void site.fetch();
   if (route.query.editor === '1' || route.query.restore === '1') {
     try {
       const storageKey = route.query.editor === '1' ? 'editor-result' : 'editor-draft';
-      let result = JSON.parse(sessionStorage.getItem(storageKey) || 'null') as ({ dataUrl?: string; kind?: 'skin' | 'cape'; model?: 'default' | 'slim'; name?: string; description?: string; visibility?: 'public' | 'private'; origin?: 'original' | 'repost'; sourceResourceId?: number | null; form?: { description?: string; visibility?: 'public' | 'private'; origin?: 'original' | 'repost'; sourceResourceId?: number | null } } | null);
+      let result = JSON.parse(sessionStorage.getItem(storageKey) || 'null') as
+        | ({
+            dataUrl?: string;
+            kind?: 'skin' | 'cape';
+            model?: 'default' | 'slim';
+            name?: string;
+            description?: string;
+            visibility?: 'public' | 'private';
+            origin?: 'original' | 'repost';
+            sourceResourceId?: number | null;
+            form?: {
+              description?: string;
+              visibility?: 'public' | 'private';
+              origin?: 'original' | 'repost';
+              sourceResourceId?: number | null;
+            };
+          } | null);
+
       if (route.query.editor === '1') {
         sessionStorage.removeItem('editor-result');
         sessionStorage.removeItem('editor-draft');
       }
-      if (result?.form) result = {
-        ...result,
-        ...(result.form.description !== undefined ? { description: result.form.description } : {}),
-        ...(result.form.visibility !== undefined ? { visibility: result.form.visibility } : {}),
-        ...(result.form.origin !== undefined ? { origin: result.form.origin } : {}),
-        ...(result.form.sourceResourceId !== undefined ? { sourceResourceId: result.form.sourceResourceId } : {}),
-      };
+
+      if (result?.form) {
+        result = {
+          ...result,
+          ...(result.form.description !== undefined ? { description: result.form.description } : {}),
+          ...(result.form.visibility !== undefined ? { visibility: result.form.visibility } : {}),
+          ...(result.form.origin !== undefined ? { origin: result.form.origin } : {}),
+          ...(result.form.sourceResourceId !== undefined
+            ? { sourceResourceId: result.form.sourceResourceId }
+            : {}),
+        };
+      }
       if (result) restoreDraft(result);
-    } catch { sessionStorage.removeItem('editor-result'); }
+    } catch {
+      sessionStorage.removeItem('editor-result');
+    }
   }
 });
+
 onBeforeUnmount(() => {
   if (objectUrl.value) URL.revokeObjectURL(objectUrl.value);
 });
 </script>
 
 <template>
-  <PageHeader :title="i18n.t('skinlib.upload.title')">
-    <router-link to="/skinlib" class="btn">
-      <AppIcon name="arrow_back" />
-      {{ i18n.t('general.back') }}
-    </router-link>
-  </PageHeader>
-  <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,420px)]">
-    <section class="space-y-5">
-      <div class="panel !p-0 overflow-hidden">
-        <div class="bg-surface-2 p-4">
-          <TexturePreviewer
-            v-if="objectUrl"
-            :skin-url="kind === 'skin' ? objectUrl : null"
-            :cape-url="kind === 'cape' ? objectUrl : null"
-            :slim="model === 'slim'"
-            :height="380"
-            :name="name"
-          />
-          <div v-else class="h-[160px] lg:h-[260px] flex items-center justify-center text-muted">
-            <AppIcon name="texture" class="!text-6xl opacity-40" />
-          </div>
-        </div>
-        <AppButton
-          class="!w-full !rounded-none !border-0 !border-t !border-dashed !flex-col !py-8"
-          :class="dragging ? '!bg-brand-50' : ''"
-          :disabled="busy"
+  <div class="resource-page">
+    <!-- 面包屑与顶部导航 -->
+    <nav class="flex items-center gap-2 text-sm pb-4" :aria-label="i18n.t('skinlib.upload.title')">
+      <router-link
+        to="/skinlib"
+        class="flex items-center gap-1 font-medium text-muted hover:text-brand-600"
+      >
+        <AppIcon name="arrow_back" class="!text-base" />
+        <span>{{ i18n.t('general.skinlib') }}</span>
+      </router-link>
+      <span class="text-muted/60">/</span>
+      <span class="font-semibold text-ink">{{ i18n.t('skinlib.upload.title') }}</span>
+    </nav>
+
+    <!-- 主展示网格 -->
+    <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,1fr)] max-w-[1360px] mx-auto">
+      <!-- 左侧：贴图选择与实时 3D 检验 -->
+      <section class="space-y-5 min-w-0">
+        <!-- 未选择文件时的拖放选择框 -->
+        <div
+          v-if="!file"
+          class="rounded-xl border-2 border-dashed border-line bg-surface p-8 text-center transition-colors cursor-pointer hover:border-brand-500"
+          :class="dragging ? 'border-brand-500 bg-brand-500/5' : ''"
           @click="fileInput?.click()"
           @dragover.prevent="dragging = true"
           @dragleave.prevent="dragging = false"
-          @drop.prevent="drop"
+          @drop.prevent="handleDrop"
         >
-          <AppIcon name="upload_file" class="!text-3xl text-brand-600" />
-          <span>{{ file?.name || i18n.t('skinlib.upload.select-file') }}</span>
-          <span class="text-xs font-normal text-muted">
+          <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-brand-500/10 text-brand-600 mb-4">
+            <AppIcon name="cloud_upload" class="!text-3xl" />
+          </div>
+          <h2 class="text-base font-semibold text-ink">
+            {{ i18n.t('skinlib.upload.select-file') }}
+          </h2>
+          <p class="mt-1 text-xs text-muted">
             {{ i18n.t('skinlib.upload_limits', { size: i18n.n(Number(site.get('max_upload_size_kb')) || 1024), width: i18n.n(Number(site.get('max_texture_width')) || 8192) }) }}
-          </span>
-        </AppButton>
+          </p>
+          <p class="mt-3 text-xs text-muted/70">
+            {{ i18n.t('skinlib.upload.name-rule') }}
+          </p>
+        </div>
+
+        <!-- 已选择文件时的文件信息卡片 -->
+        <div
+          v-else
+          class="flex items-center justify-between rounded-xl border border-line bg-surface p-4 shadow-sm"
+        >
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600">
+              <AppIcon name="image" class="!text-xl" />
+            </div>
+            <div class="min-w-0">
+              <p class="truncate text-sm font-semibold text-ink" :title="file.name">
+                {{ file.name }}
+              </p>
+              <p class="text-xs text-muted">
+                {{ i18n.t('common.size_kb', { size: i18n.n(Math.round((file.size / 1024) * 10) / 10) }) }} · PNG
+              </p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 shrink-0">
+            <AppButton class="btn-sm" :disabled="busy" @click="fileInput?.click()">
+              <AppIcon name="cached" class="!text-xs" />
+              <span>{{ i18n.t('common.retry') }}</span>
+            </AppButton>
+            <AppButton class="btn-icon !h-8 !w-8 text-muted hover:text-danger" :disabled="busy" @click="handleClearFile">
+              <AppIcon name="close" class="!text-sm" />
+            </AppButton>
+          </div>
+        </div>
+
+        <!-- 隐藏的真实文件输入框 -->
         <input
           ref="fileInput"
           type="file"
           accept="image/png"
           class="hidden"
           :disabled="busy"
-          @change="pickFile"
+          @change="handleFileInputChange"
         />
-        <AppButton v-if="file" class="w-full" :disabled="busy" @click="openEditor">
-          <AppIcon name="brush" />
-          {{ i18n.t('skinlib.upload.edit-in-editor') }}
-        </AppButton>
-      </div>
-      <section v-if="site.get('content_policy')" class="panel">
-        <h2 class="font-semibold mb-3">{{ i18n.t('skinlib.content_policy') }}</h2>
-        <MarkdownContent :content="site.get('content_policy')" />
+
+        <!-- 材质 3D / 2D 预览与校验卡片 -->
+        <div class="panel !p-0 overflow-hidden shadow-sm">
+          <div class="bg-surface-2">
+            <TexturePreviewer
+              v-if="objectUrl"
+              :skin-url="kind === 'skin' ? objectUrl : null"
+              :cape-url="kind === 'cape' ? objectUrl : null"
+              :slim="model === 'slim'"
+              :height="440"
+              :name="name"
+            />
+            <div
+              v-else
+              class="h-[360px] flex flex-col items-center justify-center text-muted"
+            >
+              <AppIcon name="texture" class="!text-6xl opacity-30 mb-2" />
+              <p class="text-xs text-muted">{{ i18n.t('skinlib.upload.select-file') }}</p>
+            </div>
+          </div>
+
+          <!-- 贴图就绪时的快捷辅助工具栏 -->
+          <div
+            v-if="file"
+            class="flex items-center justify-between border-t border-line/60 bg-surface px-4 py-3"
+          >
+            <span class="text-xs text-muted">{{ i18n.t('general.previews') }}</span>
+            <AppButton class="btn-sm" :disabled="busy" @click="openEditor">
+              <AppIcon name="brush" class="!text-sm text-brand-600" />
+              <span>{{ i18n.t('skinlib.upload.edit-in-editor') }}</span>
+            </AppButton>
+          </div>
+        </div>
+
+        <!-- 站点内容规范 -->
+        <section v-if="site.get('content_policy')" class="rounded-xl border border-line bg-surface p-5 shadow-sm">
+          <div class="flex items-center gap-2 mb-3 pb-2 border-b border-line/60">
+            <AppIcon name="policy" class="text-brand-600" />
+            <h2 class="font-semibold text-sm">{{ i18n.t('skinlib.content_policy') }}</h2>
+          </div>
+          <MarkdownContent :content="site.get('content_policy')" class="prose max-w-none text-xs" />
+        </section>
       </section>
-    </section>
-    <AppForm class="panel self-start" @submit.prevent="submit">
-      <fieldset :disabled="busy" class="min-w-0 space-y-5">
-        <div>
-          <label class="block mb-2 font-medium" for="upload-name">
-            {{ i18n.t('skinlib.upload.texture-name') }}
-          </label>
-          <AppInput id="upload-name" v-model="name" required maxlength="50" />
-        </div>
-        <div>
-          <label class="block mb-2 font-medium" for="upload-kind">
-            {{ i18n.t('skinlib.texture_type') }}
-          </label>
-          <AppSelect id="upload-kind" v-model="kind" :options="[{ value: 'skin', label: i18n.t('general.skin') }, { value: 'cape', label: i18n.t('general.cape') }]" />
-        </div>
-        <div v-if="kind === 'skin'">
-          <label class="block mb-2 font-medium" for="upload-model">
-            {{ i18n.t('skinlib.show.model') }}
-          </label>
-          <AppSelect id="upload-model" v-model="model" :options="[{ value: 'default', label: i18n.t('skinlib.model_classic') }, { value: 'slim', label: i18n.t('skinlib.model_slim') }]" />
-        </div>
-        <div>
-          <label class="block mb-2 font-medium" for="upload-visibility">
-            {{ i18n.t('common.visibility') }}
-          </label>
-          <AppSelect id="upload-visibility" v-model="visibility" :options="[{ value: 'public', label: i18n.t('general.public') }, { value: 'private', label: i18n.t('general.private') }]" />
-          <p v-if="visibility === 'private'" class="mt-2 text-xs text-muted">
-            {{ i18n.t('skinlib.private_hint') }}
-          </p>
-        </div>
-        <div>
-          <label class="block mb-2 font-medium" for="upload-origin">{{ i18n.t('skinlib.origin') }}</label>
-          <AppSelect id="upload-origin" v-model="origin" :options="[{ value: 'original', label: i18n.t('skinlib.origin_original') }, { value: 'repost', label: i18n.t('skinlib.origin_repost') }]" />
-        </div>
-        <MarkdownEditor
-          v-model="description"
-          :label="i18n.t('skinlib.description')"
-          :limit="descriptionLimit"
-          :disabled="busy"
-        />
-        <p class="text-sm text-muted border-t border-line pt-4">
-          {{ i18n.t('skinlib.upload_cost', { score: i18n.n(cost) }) }}
-        </p>
-        <p v-if="error" class="alert alert-danger" role="alert">
-          {{ error }}
-          <router-link
-            v-if="duplicateTextureId"
-            :to="`/skinlib/${duplicateTextureId}`"
-            class="ml-1 font-medium underline underline-offset-2"
-          >{{ i18n.t('user.viewInSkinlib') }}</router-link>
-        </p>
-        <AppButton class="btn-primary w-full" type="submit" :disabled="!canSubmit" :loading="busy">
-          <AppIcon name="cloud_upload" />
-          {{ i18n.t('skinlib.upload.button') }}
-        </AppButton>
-      </fieldset>
-    </AppForm>
+
+      <!-- 右侧：材质发布表单 -->
+      <AppForm class="rounded-xl border border-line bg-surface p-6 shadow-sm self-start" @submit.prevent="submit">
+        <fieldset :disabled="busy" class="min-w-0 space-y-4">
+          <!-- 材质名称 -->
+          <div>
+            <label class="mb-1.5 block text-xs font-semibold text-ink" for="upload-name">
+              {{ i18n.t('skinlib.upload.texture-name') }}
+              <span class="text-danger">*</span>
+            </label>
+            <AppInput
+              id="upload-name"
+              v-model="name"
+              required
+              maxlength="50"
+              :placeholder="i18n.t('skinlib.upload.texture-name')"
+              class="w-full"
+            />
+          </div>
+
+          <!-- 材质类型 -->
+          <div>
+            <label class="mb-1.5 block text-xs font-semibold text-ink">
+              {{ i18n.t('skinlib.texture_type') }}
+            </label>
+            <div class="grid grid-cols-2 gap-2">
+              <AppButton
+                type="button"
+                class="btn justify-center !py-2.5 !text-xs font-medium"
+                :class="kind === 'skin' ? '!border-brand-500 !bg-brand-500/10 !text-brand-600' : ''"
+                @click="kind = 'skin'"
+              >
+                <AppIcon name="accessibility_new" class="!text-base" />
+                <span>{{ i18n.t('general.skin') }}</span>
+              </AppButton>
+              <AppButton
+                type="button"
+                class="btn justify-center !py-2.5 !text-xs font-medium"
+                :class="kind === 'cape' ? '!border-brand-500 !bg-brand-500/10 !text-brand-600' : ''"
+                @click="kind = 'cape'"
+              >
+                <AppIcon name="dry_cleaning" class="!text-base" />
+                <span>{{ i18n.t('general.cape') }}</span>
+              </AppButton>
+            </div>
+          </div>
+
+          <!-- 适用模型（仅皮肤时露出） -->
+          <div v-if="kind === 'skin'">
+            <label class="mb-1.5 block text-xs font-semibold text-ink">
+              {{ i18n.t('skinlib.show.model') }}
+            </label>
+            <div class="grid grid-cols-2 gap-2">
+              <AppButton
+                type="button"
+                class="btn justify-center !py-2.5 !text-xs font-medium"
+                :class="model === 'default' ? '!border-brand-500 !bg-brand-500/10 !text-brand-600' : ''"
+                @click="model = 'default'"
+              >
+                <span>{{ i18n.t('skinlib.model_classic') }} (4px)</span>
+              </AppButton>
+              <AppButton
+                type="button"
+                class="btn justify-center !py-2.5 !text-xs font-medium"
+                :class="model === 'slim' ? '!border-brand-500 !bg-brand-500/10 !text-brand-600' : ''"
+                @click="model = 'slim'"
+              >
+                <span>{{ i18n.t('skinlib.model_slim') }} (3px)</span>
+              </AppButton>
+            </div>
+          </div>
+
+          <!-- 公开范围与私密说明 -->
+          <div>
+            <label class="mb-1.5 block text-xs font-semibold text-ink" for="upload-visibility">
+              {{ i18n.t('common.visibility') }}
+            </label>
+            <AppSelect
+              id="upload-visibility"
+              v-model="visibility"
+              :options="[
+                { value: 'public', label: i18n.t('general.public') },
+                { value: 'private', label: i18n.t('general.private') },
+              ]"
+            />
+            <p v-if="visibility === 'private'" class="mt-1.5 text-xs text-muted">
+              {{ i18n.t('skinlib.upload.privacy-notice') }}
+            </p>
+          </div>
+
+          <!-- 材质来源 -->
+          <div>
+            <label class="mb-1.5 block text-xs font-semibold text-ink" for="upload-origin">
+              {{ i18n.t('skinlib.origin') }}
+            </label>
+            <AppSelect
+              id="upload-origin"
+              v-model="origin"
+              :options="[
+                { value: 'original', label: i18n.t('skinlib.origin_original') },
+                { value: 'repost', label: i18n.t('skinlib.origin_repost') },
+              ]"
+            />
+          </div>
+
+          <!-- 材质描述 -->
+          <div>
+            <label class="mb-1.5 block text-xs font-semibold text-ink">
+              {{ i18n.t('skinlib.description') }}
+            </label>
+            <MarkdownEditor
+              v-model="description"
+              :label="i18n.t('skinlib.description')"
+              :limit="descriptionLimit"
+              :disabled="busy"
+            />
+          </div>
+
+          <!-- 费用预估 -->
+          <div class="border-t border-line/60 pt-3 text-xs text-muted">
+            <p>{{ i18n.t('skinlib.upload_cost', { score: i18n.n(cost) }) }}</p>
+          </div>
+
+          <!-- 错误与重复材质提醒 -->
+          <div v-if="error" class="alert alert-danger text-xs" role="alert">
+            <span>{{ error }}</span>
+            <router-link
+              v-if="duplicateTextureId"
+              :to="`/skinlib/${duplicateTextureId}`"
+              class="ml-1 font-semibold underline underline-offset-2"
+            >
+              {{ i18n.t('user.viewInSkinlib') }}
+            </router-link>
+          </div>
+
+          <!-- 提交按钮 -->
+          <AppButton
+            class="btn-primary w-full !py-2.5 !text-sm font-semibold justify-center"
+            type="submit"
+            :disabled="!canSubmit"
+            :loading="busy"
+          >
+            <AppIcon name="cloud_upload" class="!text-lg" />
+            <span>{{ i18n.t('skinlib.upload.button') }}</span>
+          </AppButton>
+        </fieldset>
+      </AppForm>
+    </div>
   </div>
 </template>
