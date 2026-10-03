@@ -382,13 +382,13 @@
     "score": "スコア",
     "players": "プレイヤー数",
     "sign": "署名",
-    "signed_reward": "Signed in, got {score} score",
+    "signed_reward": "サインイン完了！ {score} ポイントを獲得しました",
     "upload": "登録したスキン数",
     "announcement": "お知らせ",
-    "welcome": "Welcome back, {name}",
+    "welcome": "おかえりなさい、{name} さん",
     "textures": "テクスチャ",
     "signed": "今日署名しました",
-    "sign_reward_range": "Earn {min} ~ {max} score per sign-in",
+    "sign_reward_range": "1回のサインインで {min}〜{max} ポイント獲得できます",
     "browse": "ライブラリを閲覧する",
     "unverified": "あなたの電子メールは検証されていません。一部の機能は制限されています",
     "next_sign": "次のサインイン: {date}",
@@ -434,7 +434,7 @@
     "plugin-market": "プラグインマーケット",
     "plugin-configs": "プラグイン設定",
     "customize": "カスタマイズ",
-    "i18n": "I18n",
+    "i18n": "言語設定",
     "options": "オプション",
     "score-options": "スコアオプション",
     "res-options": "リソースオプション",
@@ -492,7 +492,7 @@
     "deleteNotice": "本当にこのテクスチャを削除しますか?",
     "filter": {
       "skin": "スキン",
-      "uploader": "Uploaded by user (UID = {uid})",
+      "uploader": "投稿者（UID = {uid}）",
       "allUsers": "全てのユーザ",
       "steve": "(スティーブ)",
       "alex": "(アレックス)",
@@ -513,8 +513,8 @@
       "privacy-notice": "他の人にはスキン ライブラリでこのテクスチャが表示されません",
       "set-as-private": "プライベートテクスチャとして設定",
       "button": "アップロード",
-      "cost": "This will cost about {score} score.",
-      "award": "Uploading public textures earns {score} score reward.",
+      "cost": "約 {score} ポイントを消費します。",
+      "award": "公開スキンを投稿すると {score} ポイントの報酬を獲得できます。",
       "edit-in-editor": "エディターで編集"
     },
     "show": {
@@ -601,8 +601,8 @@
     "origin_repost": "転載"
   },
   "user": {
-    "signSuccess": "Signed in successfully, got {score} score",
-    "signRemainingTime": "Available in {time} {unit}",
+    "signSuccess": "サインイン成功！ {score} ポイントを獲得しました",
+    "signRemainingTime": "あと {time} {unit} でサインイン可能",
     "renameItem": "項目名の変更",
     "removeItem": "クローゼットから取り出す",
     "setAsAvatar": "アバターとして設定",
@@ -631,11 +631,11 @@
     },
     "closet": {
       "upload": "登録したスキン数",
-      "addSuccess": "Texture {name} collected",
+      "addSuccess": "スキン {name} をワードローブに保存しました",
       "repeated": "このテクスチャはすでに収集されています",
       "notFound": "テクスチャが見つかりません",
       "lackScore": "スコアが不十分です",
-      "renameSuccess": "Closet item renamed to {name}",
+      "renameSuccess": "ワードローブのアイテム名を {name} に変更しました",
       "removeSuccess": "クローゼットから削除されたテクスチャ",
       "removeNonExistent": "クローゼットにない"
     },
@@ -757,15 +757,15 @@
       "send_verification": "確認メールを送信する",
       "verification_done": "メールを確認しました。続ける"
     },
-    "hero_2_title": "A world of blocks.\nA style of your own.",
-    "hero_3_title": "Before the adventure,\nmake an entrance.",
-    "hero_4_title": "A new look.\nA new story.",
-    "hero_5_title": "Blocks have edges.\nImagination doesn’t.",
-    "hero_6_title": "Wear your colors.\nExplore the unknown.",
-    "hero_7_title": "A familiar face,\neven from afar.",
-    "hero_8_title": "Who will you\nbe today?",
-    "hero_9_title": "Every encounter.\nUnmistakably you.",
-    "hero_10_title": "Wear your inspiration.\nBuild your story."
+    "hero_2_title": "ブロックで広がる世界、\n自分だけのスタイル。",
+    "hero_3_title": "冒険が始まる前に、\n装いから始めよう。",
+    "hero_4_title": "新しい姿で、\n新しい物語へ。",
+    "hero_5_title": "ブロックには境界があっても、\n想像力にはない。",
+    "hero_6_title": "お気に入りの色を纏って、\n未知なる彼方へ。",
+    "hero_7_title": "遠くからでも、\n一目であなたとわかる姿。",
+    "hero_8_title": "今日のあなたは、\nどんな姿で旅立つ？",
+    "hero_9_title": "すべての出会いに、\n鮮やかな個性を。",
+    "hero_10_title": "ひらめきを身に纏い、\n物語を世界に刻もう。"
   },
   "admin": {
     "owner": "オーナー",
@@ -939,7 +939,7 @@
     "role_normal": "ノーマル",
     "role_admin": "管理者",
     "unban": "禁止を解除する",
-    "adjust_score": "Adjust score (current {score}), enter delta:",
+    "adjust_score": "ポイント調整（現在 {score}）、増減値を入力：",
     "search_email": "メールアドレスまたはニックネームを検索",
     "search_name": "テクスチャの検索",
     "report_pending": "保留中",
@@ -1468,7 +1468,7 @@
     "ticket_view": "お問い合わせを見る"
   },
   "live2d": {
-    "title": "Live2D",
+    "title": "Live2D マスコット",
     "display": "サイト表示",
     "enabled": "Live2D を有効にする",
     "model": "表示モデル",
