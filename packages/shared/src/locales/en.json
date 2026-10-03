@@ -120,10 +120,6 @@
       "help": {
         "title": "Get help",
         "description": "Gather diagnostic details so administrators can help you quickly."
-      },
-      "advanced-search": {
-        "title": "Advanced search",
-        "description": "Combine fields and logic with simple expressions to narrow search results precisely."
       }
     },
     "title": "User manual",
@@ -203,87 +199,13 @@
     "enlarge_image": "Enlarge image: {caption}",
     "custom_group": "Custom documents"
   },
-  "search": {
-    "advanced": "Advanced search",
-    "help": {
-      "title": "Advanced search",
-      "syntax": "Syntax",
-      "fields": "Available fields",
-      "field_name": "Field",
-      "field_meaning": "Meaning",
-      "field_example": "Example",
-      "use_example": "Append to the search box"
-    },
-    "syntax": {
-      "term": "Matches the keyword in the default fields",
-      "phrase": "Everything inside the quotes matches as one phrase",
-      "field": "Restricts to a field; text fields match by substring, others by equality",
-      "exact": "Exact match / exclude a value",
-      "compare": "Number or date comparison",
-      "range": "Range including both ends; either end may be omitted",
-      "not": "Excludes the condition",
-      "and": "All must match (adjacent terms are AND)",
-      "or": "Any may match",
-      "group": "Groups with parentheses"
-    },
-    "field": {
-      "textureName": "Texture name",
-      "closetName": "Closet or texture name",
-      "collectedAt": "Collected at",
-      "kind": "Kind",
-      "model": "Model",
-      "visibility": "Visibility",
-      "official": "Official texture",
-      "likes": "Favorites",
-      "size": "File size",
-      "created": "Created at",
-      "updated": "Updated at",
-      "id": "ID",
-      "uploader": "Uploader",
-      "email": "Email",
-      "nickname": "Nickname",
-      "role": "Role",
-      "score": "Score",
-      "verified": "Email verified",
-      "playerName": "Player name",
-      "owner": "Owner",
-      "action": "Action",
-      "actor": "Actor",
-      "target": "Target",
-      "detail": "Detail",
-      "title": "Title",
-      "ticketNumber": "Ticket number",
-      "status": "Status",
-      "category": "Category",
-      "user": "User",
-      "startsAt": "Starts at",
-      "endsAt": "Ends at",
-      "voteTitle": "Vote title",
-      "logBody": "Request body",
-      "ip": "IP",
-      "manualTitle": "Manual title",
-      "manualBody": "Manual body",
-      "manualGroup": "Manual group",
-      "translationKey": "Message key",
-      "translationValue": "Message text",
-      "locale": "Language",
-      "modelName": "Model name",
-      "inCloset": "In closet"
-    },
-    "unit": {
-      "bytes": "bytes"
-    }
-  },
   "sidebar": {
     "operations": "Operations",
     "back_to_user": "Back to user dashboard",
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",
     "management": "Content and users",
-    "configuration": "Site and integrations",
-    "gameplay": "Game & Wardrobe",
-    "explore_community": "Explore & Community",
-    "account_support": "Account & Support"
+    "configuration": "Site and integrations"
   },
   "votes": {
     "previous": "Previous",
@@ -410,12 +332,7 @@
     "scopes": {
       "players": "Read player profiles and UUIDs",
       "users": "Read account status, points and registration dates",
-      "email": "Read account email addresses",
-      "texture_import": "Bulk-import textures (admin operation)",
-      "users_write": "Manage users",
-      "textures_write": "Manage textures",
-      "stats_read": "Read statistics and system status",
-      "settings_write": "Modify site settings"
+      "email": "Read account email addresses"
     }
   },
   "connect": {
@@ -483,20 +400,7 @@
     "refund_enabled": "Texture deletion refunds storage points. Previously awarded points may be reclaimed according to site settings.",
     "refund_disabled": "Storage points are not refunded when deleting a texture.",
     "no_announcement": "No announcements",
-    "verification_reward": "Earn {score} points for your first Minecraft verification.",
-    "unverified_badge": "Unverified",
-    "verified_badge": "Verified",
-    "verified_status": "Minecraft account linked; official textures in sync",
-    "general_rules": "General Rules",
-    "rate_rules": "Score Consumption Rates",
-    "score_intro_text": "Points are used to allocate storage and resources fairly. Adding players, uploading textures, and collecting items consume points according to rates.",
-    "community_votes": "Vote on community proposals and events",
-    "support_tickets": "Submit a ticket for administrator help",
-    "upload_texture": "Upload your skins or capes",
-    "explore_skinlib": "Browse and discover community textures",
-    "manage_closet": "Organize collected skins and capes",
-    "manage_players": "Manage in-game characters and skins",
-    "quick_actions": "Quick Shortcuts"
+    "verification_reward": "Earn {score} points for your first Minecraft verification."
   },
   "notif": {
     "empty": "No unread notifications",
@@ -694,12 +598,7 @@
     },
     "origin": "Source type",
     "origin_original": "Original",
-    "origin_repost": "Reposted",
-    "description_original": "Show original",
-    "challenge_title": "Verify you are human",
-    "challenge_continue": "Continue",
-    "challenge_description": "To continue browsing, complete the verification below.",
-    "challenge_required": "Verification required"
+    "origin_repost": "Reposted"
   },
   "user": {
     "signSuccess": "Signed in successfully, got {score} score",
@@ -775,12 +674,7 @@
     "invalid_current_password": "Incorrect current password",
     "email_unchanged": "Email unchanged",
     "nickname_invalid": "Invalid nickname",
-    "locale_unsupported": "Unsupported language",
-    "profile_empty": "No public textures yet",
-    "profile_capes": "{count} capes",
-    "profile_skins": "{count} skins",
-    "profile_joined": "Joined",
-    "profile_title": "Creator profile"
+    "locale_unsupported": "Unsupported language"
   },
   "auth": {
     "login": "Login",
@@ -871,14 +765,9 @@
     "hero_7_title": "A familiar face,\neven from afar.",
     "hero_8_title": "Who will you\nbe today?",
     "hero_9_title": "Every encounter.\nUnmistakably you.",
-"hero_10_title": "Wear your inspiration.\nBuild your story.",
-"hero_10_title": "Wear your inspiration.\nBuild your story.",
-    "logout_confirm": "Sign out of your account?",
-    "captcha_protected": "Protected by reCAPTCHA",
-    "captcha_image_placeholder": "Type the characters from the image",
-    "captcha_image_refresh": "New image",
-    "captcha_verified": "Verified",
-    "captcha_verify_button": "Verify"  },
+    "hero_10_title": "Wear your inspiration.\nBuild your story.",
+    "logout_confirm": "Sign out of your account?"
+  },
   "admin": {
     "owner": "Owner",
     "role_banned": "Banned",
@@ -927,13 +816,10 @@
       "pigeon_api_request_limit": "Requests per window",
       "mail_from": "Sender address",
       "resend_api_key": "Resend API key",
-      "captcha_driver": "Captcha driver",
-      "captcha_site_key": "Captcha site key",
-      "captcha_secret": "Captcha secret key",
-      "aliyun_captcha_access_key_id": "Aliyun Captcha AccessKey ID",
-      "recaptcha_v3_threshold": "reCAPTCHA v3 score threshold",
+      "turnstile_enabled": "Enable Turnstile",
+      "turnstile_site_key": "Turnstile site key",
+      "turnstile_secret": "Turnstile secret key",
       "rate_limit_enabled": "Enable request rate limiting",
-      "skinlib_guard_enabled": "Enable skin library anti-scraping guard",
       "github_client_id": "GitHub client ID",
       "github_client_secret": "GitHub client secret",
       "littleskin_client_id": "LittleSkin client ID",
@@ -972,7 +858,6 @@
       "max_upload_size_kb": "Maximum upload size (KB)",
       "max_texture_width": "Maximum texture width (pixels)",
       "allow_texture_download": "Allow texture downloads",
-      "allow_anonymous_download": "Allow downloads without signing in",
       "private_texture_status": "Private texture response status",
       "texture_name_regexp": "Texture name pattern",
       "comments_enabled": "Enable comments",
@@ -1005,6 +890,7 @@
       "ygg_connect_enabled": "Enable Yggdrasil Connect",
       "ygg_disable_authserver": "Disable traditional password login",
       "ygg_private_key": "Signing private key",
+      "sitemap_enabled": "Generate sitemap",
       "sitemap_max_urls": "Sitemap URL limit",
       "theme_color": "Accent color",
       "ygg_rate_limit": "Minimum authentication interval (ms)",
@@ -1016,32 +902,7 @@
       "home_background_mobile_url": "Home background URL (mobile)",
       "login_background_url": "Login background URL",
       "login_background_tablet_url": "Login background URL (tablet)",
-      "login_background_mobile_url": "Login background URL (mobile)",
-      "ai_comments_moderation_prompt": "Comment moderation prompt (empty = default)",
-      "ai_comments_moderation_model": "Comment moderation model (empty = default)",
-      "ai_texture_moderate_prompt": "Texture moderation prompt (empty = default)",
-      "ai_texture_moderate_model": "Texture moderation model (empty = default)",
-      "ai_texture_translate_prompt": "Translation prompt (empty = default)",
-      "ai_texture_translate_model": "Translation model (empty = default)",
-      "ai_max_concurrency": "AI concurrency limit",
-      "ai_timeout_seconds": "AI request timeout (seconds)",
-      "ai_reasoning": "AI reasoning effort",
-      "ai_driver": "AI driver",
-      "ai_api_key": "AI API key",
-      "openai_base_url": "OpenAI-compatible base URL",
-      "texture_ai_moderation": "AI moderation for texture names/descriptions",
-      "texture_ai_translation": "Automatic texture name/description translation",
-      "home_style": "Homepage style",
-      "smtp_password": "SMTP password",
-      "smtp_username": "SMTP username",
-      "smtp_encryption": "SMTP encryption",
-      "smtp_port": "SMTP port (0 = automatic)",
-      "smtp_host": "SMTP host",
-      "mail_driver": "Mail driver"
-    },
-    "setting_hint": {
-      "mail_from": "Sender name shown on outgoing mail. With SMTP the address comes from the mail account automatically; Resend requires the full name-plus-address form",
-      "smtp_username": "The full mailbox address used to log in to the SMTP server"
+      "login_background_mobile_url": "Login background URL (mobile)"
     },
     "action": {
       "user_reset_password": "Reset password",
@@ -1073,13 +934,7 @@
       "vote_archive": "Archive or restore vote",
       "vote_export": "Export vote results",
       "live2d_upload": "Upload Live2D model",
-      "live2d_update": "Update Live2D configuration",
-      "search_submissions_retry": "Retry search submissions",
-      "texture_flags_clear": "Clear moderation flag",
-      "ai_jobs_cancel": "Cancel AI job",
-      "ai_jobs_retry": "Retry AI job",
-      "ai_jobs_backfill": "Backfill existing textures",
-      "texture_import": "Bulk-import textures"
+      "live2d_update": "Update Live2D configuration"
     },
     "anonymous": "Anonymous",
     "role_normal": "Normal",
@@ -1188,9 +1043,6 @@
     "option": {
       "403": "403 · Forbidden",
       "404": "404 · Not found",
-      "default": "Default (follow model)",
-      "disabled": "Thinking off",
-      "enabled": "Thinking on",
       "official": "Official format",
       "cjk": "CJK characters",
       "utf8": "UTF-8 characters",
@@ -1200,23 +1052,7 @@
       "v3": "UUID v3",
       "v4": "UUID v4",
       "mojang": "Mojang first",
-      "self": "This site first",
-      "none": "None (plaintext)",
-      "ssl": "SSL/TLS (465)",
-      "starttls": "STARTTLS (587)",
-      "smtp": "Direct SMTP",
-      "resend": "Resend API",
-      "classic": "Classic",
-      "modern": "Modern",
-      "turnstile": "Cloudflare Turnstile",
-      "recaptcha_v2": "Google reCAPTCHA v2",
-      "recaptcha_v3": "Google reCAPTCHA v3",
-      "tencent": "Tencent Cloud Captcha",
-      "aliyun": "Aliyun Captcha 2.0",
-      "image": "Built-in Image Captcha",
-      "captcha_driver_none": "Disabled (None)",
-      "openai": "OpenAI Compatible",
-      "anthropic": "Anthropic Claude"
+      "self": "This site first"
     },
     "delete_user_confirm": "Delete user {name}?",
     "chart_point": "{date} · Users {users} · Uploads {textures}",
@@ -1230,69 +1066,7 @@
     "notification_email_preview": "Email preview",
     "notification_email_queued": "Email notifications added to the sending queue",
     "notification_email_queue_failed": "The site message was sent, but email could not be queued",
-    "domains_placeholder": "example.com\nexample.org",
-    "task_status_col": "Status",
-    "task_all_statuses": "All statuses",
-    "task_all_types": "All types",
-    "status_submitted": "Submitted",
-    "status_cancelled": "Cancelled",
-    "status_failed": "Failed",
-    "status_done": "Done",
-    "status_processing": "Processing",
-    "status_pending": "Pending",
-    "job_moderate_texture_description": "Moderate texture description",
-    "job_moderate_texture_name": "Moderate texture name",
-    "job_translate_texture": "Translate texture",
-    "task_attempts": "Attempts",
-    "task_last_error": "Last error",
-    "task_flagged_content": "AI moderation flags",
-    "task_clear_flag": "Clear flag",
-    "task_cancel": "Cancel",
-    "task_backfill": "Backfill existing textures",
-    "task_backfill_empty": "No tasks needed backfilling",
-    "task_backfill_confirm": "Create translation and moderation tasks for all textures that do not have one yet? Existing tasks will not be reset.",
-    "task_backfill_done": "Tasks created: {detail}",
-    "task_retry": "Retry",
-    "task_runs": "Scheduled tasks",
-    "tasks_search_submissions": "Search engine submissions",
-    "tasks_ai_jobs": "AI jobs",
-    "tasks_title": "Background tasks",
-    "group_ai": "AI services",
-    "mail_test_unsaved": "Save your changes before sending a test email",
-    "mail_test_failed": "Sending failed; check the mail settings",
-    "mail_test_not_configured": "Outgoing mail is not fully configured",
-    "mail_test_sent": "Test email sent",
-    "mail_test_send": "Send",
-    "mail_test_to": "Recipient (leave empty to send to yourself)",
-    "mail_test": "Send test email",
-    "mail_test_detail": " ({phase}, response code {code})",
-    "mail_phase_connect": "connection failed",
-    "mail_phase_greeting": "waiting for greeting",
-    "mail_phase_ehlo": "EHLO handshake",
-    "mail_phase_starttls": "STARTTLS upgrade",
-    "mail_phase_auth": "authentication",
-    "mail_phase_mail-from": "sender check",
-    "mail_phase_rcpt-to": "recipient check",
-    "mail_phase_data": "message delivery",
-    "mail_phase_reply": "reply parsing",
-    "mail_phase_read": "reading reply",
-    "mail_phase_write": "sending command",
-    "mail_phase_config": "invalid settings",
-    "mail_phase_close": "closing connection",
-    "ai_test_ok": "✓ Connection OK ({model})",
-    "reporting_disabled_state": "Reporting disabled",
-    "comments_disabled_state": "Commenting disabled",
-    "ai_fetch_models": "Fetch models",
-    "ai_model_clear": "Clear",
-    "ai_model_custom": "Manual",
-    "ai_models_empty": "The driver returned an empty model list",
-    "ai_models_fetch_failed": "Failed to fetch model list",
-    "ai_models_unavailable": "The current AI driver does not support listing models (enter the model name manually for Workers AI)",
-    "ai_test": "Test",
-    "ai_test_fail": "✗ Connection failed ({model})",
-    "comments_disabled": "Disable commenting",
-    "option_default": "Follow deployment (default Workers AI)",
-    "reporting_disabled": "Disable reporting"
+    "domains_placeholder": "example.com\nexample.org"
   },
   "settings": {
     "title": "Profile",
@@ -1346,38 +1120,7 @@
     "texture_not_owned": "You cannot use this texture",
     "texture_wrong_kind": "Texture type does not match",
     "current_skin": "Current player skin",
-    "select": "Select player",
-    "source_official": "Official Textures",
-    "source_closet": "My Closet",
-    "source_all": "All Textures",
-    "name_copied": "Player name copied",
-    "copy_name": "Copy Player Name",
-    "wearing": "Equipped",
-    "previewing": "Previewing",
-    "reset_preview": "Reset Preview",
-    "save_textures": "Save Outfit",
-    "previewing_unsaved": "Previewing unsaved outfit"
-  },
-  "devices": {
-    "unknown_device": "Unknown device",
-    "browser_section": "Browsers",
-    "current": "Current",
-    "empty_browser": "No browser sessions",
-    "empty_launcher": "No launcher sessions",
-    "expires": "Expires",
-    "intro": "Review the devices and sessions currently signed in to your account.",
-    "kick": "Sign out",
-    "last_active": "Last active",
-    "launcher_of": "{player}",
-    "launcher_section": "Launchers",
-    "logged_in_at": "Signed in at",
-    "revoke_confirm": "Sign out this browser?",
-    "revoke_current_confirm": "This is your current session. Signing out will log you out of this browser.",
-    "revoke_launcher_confirm": "Sign out {player} from the launcher?",
-    "sign_out": "Sign out",
-    "title": "Devices & sessions",
-    "unknown_browser": "Unknown browser",
-    "unknown_ip": "Unknown IP"
+    "select": "Select player"
   },
   "common": {
     "delete": "Delete",
@@ -1472,10 +1215,7 @@
     "not_found": "Report not found",
     "already_reviewed": "Report already reviewed",
     "reason_required": "Enter a report reason",
-    "self": "You cannot report your own texture",
-    "official_disabled": "Official textures do not accept reports",
-    "rate_limited": "You have submitted too many reports recently. Please try again later.",
-    "disabled": "Reporting is disabled for your account"
+    "self": "You cannot report your own texture"
   },
   "texture": {
     "not_found": "Texture not found",
@@ -1727,9 +1467,7 @@
     "ticket_reply_body": "Ticket {number} \"{title}\" has a new reply: {summary}",
     "ticket_status_title": "Ticket status updated",
     "ticket_status_body": "Ticket {number} \"{title}\" is now {status}.",
-    "ticket_view": "View ticket",
-    "test_body": "This is a test email from the site mail settings. Receiving it means outgoing mail works.",
-    "test_title": "Test email"
+    "ticket_view": "View ticket"
   },
   "live2d": {
     "title": "Live2D",
@@ -1811,29 +1549,7 @@
     "hero_title_2": "Skins and capes.\nYour style.",
     "hero_title_3": "Save a favorite.\nSwitch it up.",
     "hero_title_4": "My character.\nMy style.",
-    "hero_title_5": "Pick your look.\nEnter the world.",
-    "classic": {
-      "features_title": "Features",
-      "introduction": "{sitename} provides the service of uploading and hosting Minecraft skins. By coordinating with skin mods (e.g. CustomSkinLoader), you can choose skin and cape for your game character, and make it visible to other players in Minecraft.",
-      "start": "Join Us",
-      "features": {
-        "first": {
-          "icon": "groups",
-          "name": "Multi Player",
-          "desc": "You can add multiple players within one registered account."
-        },
-        "second": {
-          "icon": "share",
-          "name": "Sharing",
-          "desc": "Explore the skin library, send a \"like\" and share them with your friends."
-        },
-        "third": {
-          "icon": "cloud",
-          "name": "Free",
-          "desc": "It is free forever. No ads. No subscription fees."
-        }
-      }
-    }
+    "hero_title_5": "Pick your look.\nEnter the world."
   },
   "admin-panel": {
     "manage": "Manage texture"
@@ -1847,9 +1563,7 @@
     "too_long": "Comment is too long",
     "rejected": "Comment rejected by moderation",
     "disabled": "Comments are disabled",
-    "rate_limited": "You are commenting too often",
-    "official_disabled": "Official textures do not accept comments",
-    "user_disabled": "Your permission to comment has been disabled by an administrator"
+    "rate_limited": "You are commenting too often"
   },
   "email": {
     "domain_denied": "Email domain is not allowed",
@@ -1963,24 +1677,8 @@
     "category_visible": "Visible",
     "category_hidden": "Hidden",
     "category_hide": "Hide",
-    "category_restore": "Restore",
-    "select_category": "Select a category",
-    "move_down": "Move down",
-    "move_up": "Move up",
-    "category_sort": "Sort Order",
-    "back_to_list": "Back to tickets",
-    "event_status_changed": "Status changed to {status}",
-    "event_created": "Ticket created",
-    "timeline": "Activity Timeline",
-    "internal_hint": "Internal notes are only visible to administrators",
-    "file_limit_hint": "Images, PDF, text and ZIP supported, up to 5MB each",
-    "attach_files": "Attach files",
-    "attachments": "Attachments",
-    "closed_notice": "This ticket is closed",
-    "close_ticket": "Close Ticket"
+    "category_restore": "Restore"
   },
-  "title": "Notifications",
-  "empty": "No unread notifications",
   "welcome": "Welcome back, {name}",
   "score": "Score",
   "players": "Players",
@@ -1992,17 +1690,10 @@
   "upload": "Upload texture",
   "browse": "Browse the library",
   "unverified": "Your email is not verified; some features are limited",
+  "title": "Notifications",
+  "empty": "No unread notifications",
   "read_all": "Mark all read",
   "upheld_deleted": "The texture you reported was removed",
   "upheld_banned": "The uploader you reported was banned",
-  "rejected": "Your report was not upheld",
-  "report_reviewed": {
-    "rejected": "Your report has been rejected",
-    "upheld_banned": "Your report has been accepted and the violator has been banned",
-    "upheld_deleted": "Your report has been accepted and the reported texture has been removed"
-  },
-  "mojang_takeover": {
-    "title": "Player Owner Changed",
-    "content": "Your player {player} has been claimed by a verified Mojang user, and compensation score has been credited to your account."
-  }
+  "rejected": "Your report was not upheld"
 }

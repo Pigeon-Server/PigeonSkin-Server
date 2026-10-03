@@ -55,6 +55,8 @@ const hashCopied = ref(false);
 let copyTimer = 0;
 
 const commentsEnabled = computed(() => site.get('comments_enabled') !== 'false');
+// 评论区只存在于公开材质：私密材质不设评论区
+const canComment = computed(() => commentsEnabled.value && texture.value?.visibility === 'public');
 const isOwner = computed(
   () =>
     texture.value !== null &&
@@ -366,7 +368,7 @@ async function removeTexture() {
 
         <div class="flex items-center gap-2">
           <AppButton
-            v-if="commentsEnabled"
+            v-if="canComment"
             class="btn-sm"
             @click="jumpToComments"
           >
@@ -460,7 +462,7 @@ async function removeTexture() {
           <!-- 社区评论区 -->
           <div id="texture-comments">
             <TextureComments
-              v-if="commentsEnabled"
+              v-if="canComment"
               :texture-id="tid"
               @count="commentsTotal = $event"
             />

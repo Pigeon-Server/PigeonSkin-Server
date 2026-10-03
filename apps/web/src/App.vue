@@ -209,17 +209,19 @@ watch(
   <main v-else-if="route.meta.layout === 'manual'" id="main-content" tabindex="-1"><router-view /></main>
   <div v-else-if="route.path === '/'" class="public-shell">
     <header class="public-topbar">
-      <router-link to="/" class="brand brand-minecraft">
-        {{ siteName }}
-      </router-link>
-      <div class="topbar-actions">
-        <LocaleSelect />
-        <AppButton class="btn-icon" :aria-label="i18n.t('common.theme')" :disabled="preferences.busy.value" @click="preferences.toggleTheme">
-          <AppIcon :name="theme.isDark.value ? 'light_mode' : 'dark_mode'" />
-        </AppButton>
-        <router-link class="btn" :to="session.user.value ? '/user' : '/login'">
-          {{ i18n.t(session.user.value ? 'general.user-center' : 'general.login') }}
+      <div class="public-container flex items-center justify-between w-full min-w-0">
+        <router-link to="/" class="brand brand-minecraft">
+          {{ siteName }}
         </router-link>
+        <div class="topbar-actions">
+          <LocaleSelect />
+          <AppButton class="btn-icon" :aria-label="i18n.t('common.theme')" :disabled="preferences.busy.value" @click="preferences.toggleTheme">
+            <AppIcon :name="theme.isDark.value ? 'light_mode' : 'dark_mode'" />
+          </AppButton>
+          <router-link class="btn" :to="session.user.value ? '/user' : '/login'">
+            {{ i18n.t(session.user.value ? 'general.user-center' : 'general.login') }}
+          </router-link>
+        </div>
       </div>
     </header>
     <main id="main-content" tabindex="-1"><router-view /></main>
@@ -306,7 +308,7 @@ watch(
     </aside>
     <div class="app-body">
       <header class="app-topbar" :class="{ 'guest-topbar': !session.user.value }">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 min-w-0">
           <AppButton
             class="mobile-menu btn-icon"
             :aria-label="i18n.t('common.menu')"
@@ -325,7 +327,7 @@ watch(
             <span class="text-current">{{ i18n.t(activeTitle) }}</span>
           </span>
         </div>
-        <div class="topbar-actions">
+        <div class="topbar-actions shrink-0">
           <NotificationBell v-if="session.user.value" />
           <AppButton
             class="btn-icon"

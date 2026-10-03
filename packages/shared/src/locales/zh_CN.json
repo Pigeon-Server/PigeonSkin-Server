@@ -120,10 +120,6 @@
       "help": {
         "title": "寻求帮助",
         "description": "整理关键排障信息，让管理员更快协助你解决问题。"
-      },
-      "advanced-search": {
-        "title": "高级搜索",
-        "description": "用简单的表达式组合字段与逻辑条件，精确筛选搜索结果。"
       }
     },
     "title": "用户手册",
@@ -203,87 +199,13 @@
     "enlarge_image": "放大图片：{caption}",
     "custom_group": "自定义文档"
   },
-  "search": {
-    "advanced": "高级搜索",
-    "help": {
-      "title": "高级搜索",
-      "syntax": "语法",
-      "fields": "可用字段",
-      "field_name": "字段",
-      "field_meaning": "含义",
-      "field_example": "示例",
-      "use_example": "追加到搜索框"
-    },
-    "syntax": {
-      "term": "匹配默认字段中的关键词",
-      "phrase": "引号内的整段作为一个词匹配",
-      "field": "限定字段；文本字段为包含，其余为相等",
-      "exact": "精确相等 / 排除该值",
-      "compare": "数值或日期的大小比较",
-      "range": "区间，含两端，任一端可省略",
-      "not": "排除该条件",
-      "and": "同时满足（相邻即 AND）",
-      "or": "任一满足",
-      "group": "用括号分组"
-    },
-    "field": {
-      "textureName": "材质名",
-      "closetName": "收藏名或材质名",
-      "collectedAt": "收藏时间",
-      "kind": "类型",
-      "model": "模型",
-      "visibility": "可见性",
-      "official": "官方材质",
-      "likes": "收藏数",
-      "size": "文件大小",
-      "created": "创建时间",
-      "updated": "更新时间",
-      "id": "ID",
-      "uploader": "上传者",
-      "email": "邮箱",
-      "nickname": "昵称",
-      "role": "角色",
-      "score": "积分",
-      "verified": "邮箱已验证",
-      "playerName": "角色名",
-      "owner": "拥有者",
-      "action": "动作",
-      "actor": "操作者",
-      "target": "目标",
-      "detail": "详情",
-      "title": "标题",
-      "ticketNumber": "工单编号",
-      "status": "状态",
-      "category": "分类",
-      "user": "用户",
-      "startsAt": "开始时间",
-      "endsAt": "结束时间",
-      "voteTitle": "投票标题",
-      "logBody": "请求内容",
-      "ip": "IP",
-      "manualTitle": "手册标题",
-      "manualBody": "手册正文",
-      "manualGroup": "手册分组",
-      "translationKey": "文案键",
-      "translationValue": "文案内容",
-      "locale": "语言",
-      "modelName": "模型名称",
-      "inCloset": "已收藏"
-    },
-    "unit": {
-      "bytes": "字节"
-    }
-  },
   "sidebar": {
     "operations": "运行与维护",
     "back_to_user": "返回用户中心",
     "collapse": "收起侧边栏",
     "expand": "展开侧边栏",
     "management": "内容与用户",
-    "configuration": "站点与集成",
-    "gameplay": "游戏与换装",
-    "explore_community": "探索与社区",
-    "account_support": "账号与支持"
+    "configuration": "站点与集成"
   },
   "votes": {
     "previous": "上一页",
@@ -410,12 +332,7 @@
     "scopes": {
       "players": "读取角色与 UUID",
       "users": "读取账户状态、积分和注册时间",
-      "email": "读取账户邮箱",
-      "texture_import": "批量导入纹理（管理操作）",
-      "users_write": "管理用户数据",
-      "textures_write": "管理材质数据",
-      "stats_read": "读取统计与运行状态",
-      "settings_write": "修改站点设置"
+      "email": "读取账户邮箱"
     }
   },
   "connect": {
@@ -483,20 +400,7 @@
     "refund_enabled": "删除材质时返还存储积分，已发放的奖励可能按站点设置收回。",
     "refund_disabled": "删除材质时不返还存储积分。",
     "no_announcement": "暂无公告",
-    "verification_reward": "首次完成正版验证可获得 {score} 积分。",
-    "unverified_badge": "未验证",
-    "verified_badge": "已验证",
-    "verified_status": "正版角色已绑定，官方材质已互通",
-    "general_rules": "基础规则",
-    "rate_rules": "积分消耗明细",
-    "score_intro_text": "本站启用积分系统以合理分配存储与计算资源。创建角色、上传材质及收藏物品等操作均按规则消耗对应积分。",
-    "community_votes": "参与社区活动与提案表决",
-    "support_tickets": "提交工单获取管理员协助",
-    "upload_texture": "上传你的专属皮肤或披风",
-    "explore_skinlib": "浏览与发现社区公开材质",
-    "manage_closet": "整理收藏的皮肤与披风",
-    "manage_players": "管理游戏角色与材质绑定",
-    "quick_actions": "快捷入口"
+    "verification_reward": "首次完成正版验证可获得 {score} 积分。"
   },
   "notif": {
     "empty": "无未读通知",
@@ -561,8 +465,8 @@
     "noResult": "没有匹配结果",
     "plugin-manage": "插件管理",
     "skin": "皮肤",
-    "yes": "是",
-    "no": "否",
+    "yes": "true",
+    "no": "false",
     "email": "邮箱"
   },
   "skinlib": {
@@ -694,12 +598,7 @@
     },
     "origin": "来源标记",
     "origin_original": "原创",
-    "origin_repost": "转载",
-    "description_original": "查看原文",
-    "challenge_title": "验证你是人类",
-    "challenge_continue": "继续",
-    "challenge_description": "继续浏览前，请完成下方验证。",
-    "challenge_required": "需要验证"
+    "origin_repost": "转载"
   },
   "user": {
     "signSuccess": "签到成功，获得了 {score} 积分",
@@ -775,12 +674,7 @@
     "invalid_current_password": "当前密码错误",
     "email_unchanged": "邮箱未变更",
     "nickname_invalid": "昵称格式无效",
-    "locale_unsupported": "不支持此语言",
-    "profile_empty": "暂无公开材质",
-    "profile_capes": "{count} 个披风",
-    "profile_skins": "{count} 个皮肤",
-    "profile_joined": "加入于",
-    "profile_title": "创作者主页"
+    "locale_unsupported": "不支持此语言"
   },
   "auth": {
     "login": "登录",
@@ -871,14 +765,9 @@
     "hero_7_title": "让朋友一眼，\n就认出你。",
     "hero_8_title": "今天的你，\n想是什么模样？",
     "hero_9_title": "每一次相遇，\n都有鲜明的你。",
-"hero_10_title": "把灵感穿在身上，\n把故事留在世界。",
-"hero_10_title": "把灵感穿在身上，\n把故事留在世界。",
-    "logout_confirm": "确定要退出登录吗？",
-    "captcha_protected": "受 reCAPTCHA 保护",
-    "captcha_image_placeholder": "输入图片中的字符",
-    "captcha_image_refresh": "换一张",
-    "captcha_verified": "已验证",
-    "captcha_verify_button": "验证"  },
+    "hero_10_title": "把灵感穿在身上，\n把故事留在世界。",
+    "logout_confirm": "确定要退出登录吗？"
+  },
   "admin": {
     "owner": "拥有者",
     "role_banned": "已封禁",
@@ -927,13 +816,10 @@
       "pigeon_api_request_limit": "窗口内调用上限",
       "mail_from": "发件人地址",
       "resend_api_key": "Resend API 密钥",
-      "captcha_driver": "人机验证驱动",
-      "captcha_site_key": "人机验证 Site Key",
-      "captcha_secret": "人机验证密钥",
-      "aliyun_captcha_access_key_id": "阿里云验证码 AccessKey ID",
-      "recaptcha_v3_threshold": "reCAPTCHA v3 分数阈值",
+      "turnstile_enabled": "启用 Turnstile",
+      "turnstile_site_key": "Turnstile 站点密钥",
+      "turnstile_secret": "Turnstile 服务端密钥",
       "rate_limit_enabled": "启用请求限流",
-      "skinlib_guard_enabled": "启用皮肤库反爬守卫",
       "github_client_id": "GitHub 客户端 ID",
       "github_client_secret": "GitHub 客户端密钥",
       "littleskin_client_id": "LittleSkin 客户端 ID",
@@ -972,7 +858,6 @@
       "max_upload_size_kb": "上传大小上限（KB）",
       "max_texture_width": "材质宽度上限（像素）",
       "allow_texture_download": "允许下载材质",
-      "allow_anonymous_download": "允许未登录下载",
       "private_texture_status": "私密材质响应状态",
       "texture_name_regexp": "材质名称正则",
       "comments_enabled": "开放评论",
@@ -1005,6 +890,7 @@
       "ygg_connect_enabled": "启用 Yggdrasil Connect",
       "ygg_disable_authserver": "关闭传统密码登录",
       "ygg_private_key": "签名私钥",
+      "sitemap_enabled": "生成站点地图",
       "sitemap_max_urls": "站点地图网址上限",
       "theme_color": "主题色",
       "ygg_rate_limit": "认证请求最短间隔（毫秒）",
@@ -1016,32 +902,7 @@
       "home_background_mobile_url": "首页背景图片（手机）",
       "login_background_url": "登录背景图片",
       "login_background_tablet_url": "登录背景图片（平板）",
-      "login_background_mobile_url": "登录背景图片（手机）",
-      "ai_comments_moderation_prompt": "评论审核提示词（空 = 默认）",
-      "ai_comments_moderation_model": "评论审核模型（空 = 默认）",
-      "ai_texture_moderate_prompt": "材质审核提示词（空 = 默认）",
-      "ai_texture_moderate_model": "材质审核模型（空 = 默认）",
-      "ai_texture_translate_prompt": "翻译提示词（空 = 默认）",
-      "ai_texture_translate_model": "翻译模型（空 = 默认）",
-      "ai_max_concurrency": "AI 并发上限",
-      "ai_timeout_seconds": "AI 请求超时（秒）",
-      "ai_reasoning": "AI 推理强度",
-      "ai_driver": "AI 驱动",
-      "ai_api_key": "AI API 密钥",
-      "openai_base_url": "OpenAI 兼容 Base URL",
-      "texture_ai_moderation": "材质名/简介 AI 审核",
-      "texture_ai_translation": "材质名/简介自动翻译",
-      "home_style": "首页风格",
-      "smtp_password": "SMTP 密码",
-      "smtp_username": "SMTP 用户名",
-      "smtp_encryption": "SMTP 加密",
-      "smtp_port": "SMTP 端口（0 = 自动）",
-      "smtp_host": "SMTP 主机",
-      "mail_driver": "发信方式"
-    },
-    "setting_hint": {
-      "mail_from": "发信时显示的发件人名称。SMTP 直连下邮箱自动取自发信账户；用 Resend 时需写完整「名称〈邮箱〉」形式",
-      "smtp_username": "发信邮箱的完整地址，即登录 SMTP 服务器用的账号"
+      "login_background_mobile_url": "登录背景图片（手机）"
     },
     "action": {
       "user_reset_password": "重置密码",
@@ -1073,13 +934,7 @@
       "vote_archive": "归档或恢复投票",
       "vote_export": "导出投票结果",
       "live2d_upload": "上传 Live2D 模型",
-      "live2d_update": "更新 Live2D 配置",
-      "search_submissions_retry": "重试搜索提交",
-      "texture_flags_clear": "清除审核标记",
-      "ai_jobs_cancel": "取消 AI 任务",
-      "ai_jobs_retry": "重试 AI 任务",
-      "ai_jobs_backfill": "补跑存量材质",
-      "texture_import": "批量导入纹理"
+      "live2d_update": "更新 Live2D 配置"
     },
     "anonymous": "已注销",
     "role_normal": "普通",
@@ -1188,9 +1043,6 @@
     "option": {
       "403": "403 · 无权访问",
       "404": "404 · 不存在",
-      "default": "默认（跟随模型）",
-      "disabled": "关闭思考",
-      "enabled": "开启思考",
       "official": "官方格式",
       "cjk": "中日韩字符",
       "utf8": "UTF-8 字符",
@@ -1200,23 +1052,7 @@
       "v3": "UUID v3",
       "v4": "UUID v4",
       "mojang": "Mojang 正版皮肤优先",
-      "self": "本站皮肤优先",
-      "none": "无（明文）",
-      "ssl": "SSL/TLS（465）",
-      "starttls": "STARTTLS（587）",
-      "smtp": "SMTP 直连",
-      "resend": "Resend API",
-      "classic": "经典版",
-      "modern": "新版",
-      "turnstile": "Cloudflare Turnstile",
-      "recaptcha_v2": "Google reCAPTCHA v2",
-      "recaptcha_v3": "Google reCAPTCHA v3",
-      "tencent": "腾讯云验证码",
-      "aliyun": "阿里云验证码 2.0",
-      "image": "自绘图案验证码",
-      "captcha_driver_none": "关闭（不启用）",
-      "openai": "OpenAI 兼容端点",
-      "anthropic": "Anthropic Claude"
+      "self": "本站皮肤优先"
     },
     "delete_user_confirm": "确认删除用户 {name}？",
     "chart_point": "{date} · 注册 {users} · 上传 {textures}",
@@ -1230,69 +1066,7 @@
     "notification_email_preview": "邮件预览",
     "notification_email_queued": "邮件通知已加入发送队列",
     "notification_email_queue_failed": "站内信已发送，但邮件未能加入发送队列",
-    "domains_placeholder": "example.com\nexample.org",
-    "task_status_col": "状态",
-    "task_all_statuses": "全部状态",
-    "task_all_types": "全部类型",
-    "status_submitted": "已提交",
-    "status_cancelled": "已取消",
-    "status_failed": "失败",
-    "status_done": "已完成",
-    "status_processing": "执行中",
-    "status_pending": "等待中",
-    "job_moderate_texture_description": "审核材质简介",
-    "job_moderate_texture_name": "审核材质名",
-    "job_translate_texture": "翻译材质",
-    "task_attempts": "尝试次数",
-    "task_last_error": "最近错误",
-    "task_flagged_content": "AI 审核标记",
-    "task_clear_flag": "清除标记",
-    "task_cancel": "取消",
-    "task_backfill": "补跑存量材质",
-    "task_backfill_empty": "没有需要补建的任务",
-    "task_backfill_confirm": "为所有还没有 AI 任务的材质补建翻译与审核任务？已有任务不会被重置。",
-    "task_backfill_done": "已补建任务：{detail}",
-    "task_retry": "重试",
-    "task_runs": "定时任务",
-    "tasks_search_submissions": "搜索引擎提交",
-    "tasks_ai_jobs": "AI 任务",
-    "tasks_title": "后台任务",
-    "group_ai": "AI 服务",
-    "mail_test_unsaved": "有未保存的修改，请先保存再发送测试邮件",
-    "mail_test_failed": "发送失败，请检查发信配置",
-    "mail_test_not_configured": "发信配置尚未填写完整",
-    "mail_test_sent": "测试邮件已发送",
-    "mail_test_send": "发送",
-    "mail_test_to": "收件地址，留空发给自己",
-    "mail_test": "发送测试邮件",
-    "mail_test_detail": "（{phase}，响应码 {code}）",
-    "mail_phase_connect": "连接失败",
-    "mail_phase_greeting": "等待服务器问候",
-    "mail_phase_ehlo": "EHLO 握手",
-    "mail_phase_starttls": "STARTTLS 升级",
-    "mail_phase_auth": "认证",
-    "mail_phase_mail-from": "发件人校验",
-    "mail_phase_rcpt-to": "收件人校验",
-    "mail_phase_data": "正文投递",
-    "mail_phase_reply": "响应解析",
-    "mail_phase_read": "读取响应",
-    "mail_phase_write": "发送指令",
-    "mail_phase_config": "配置无效",
-    "mail_phase_close": "关闭连接",
-    "ai_test_ok": "✓ 连接正常（{model}）",
-    "reporting_disabled_state": "举报已禁用",
-    "comments_disabled_state": "评论已禁用",
-    "ai_fetch_models": "获取模型列表",
-    "ai_model_clear": "清除",
-    "ai_model_custom": "手动填写",
-    "ai_models_empty": "驱动返回了空模型列表",
-    "ai_models_fetch_failed": "获取模型列表失败",
-    "ai_models_unavailable": "当前 AI 驱动不支持列出模型（Workers AI 请直接填写模型名）",
-    "ai_test": "测试",
-    "ai_test_fail": "✗ 连接失败（{model}）",
-    "comments_disabled": "禁用评论",
-    "option_default": "跟随部署环境（默认 Workers AI）",
-    "reporting_disabled": "禁用举报"
+    "domains_placeholder": "example.com\nexample.org"
   },
   "settings": {
     "title": "个人资料",
@@ -1346,38 +1120,7 @@
     "texture_not_owned": "无权使用此材质",
     "texture_wrong_kind": "材质类型不匹配",
     "current_skin": "当前角色皮肤",
-    "select": "选择角色",
-    "source_official": "官方材质",
-    "source_closet": "我的衣柜",
-    "source_all": "全部材质",
-    "name_copied": "角色名已复制",
-    "copy_name": "复制角色名",
-    "wearing": "已穿戴",
-    "previewing": "预览中",
-    "reset_preview": "还原外观",
-    "save_textures": "保存装扮",
-    "previewing_unsaved": "正在预览未保存的外观"
-  },
-  "devices": {
-    "unknown_device": "未知设备",
-    "browser_section": "浏览器",
-    "current": "当前",
-    "empty_browser": "暂无浏览器会话",
-    "empty_launcher": "暂无启动器会话",
-    "expires": "过期时间",
-    "intro": "查看当前登录你账号的设备与会话。",
-    "kick": "下线",
-    "last_active": "最近活跃",
-    "launcher_of": "{player}",
-    "launcher_section": "启动器",
-    "logged_in_at": "登录时间",
-    "revoke_confirm": "要登出此浏览器吗？",
-    "revoke_current_confirm": "这是你当前的会话，登出将使你退出此浏览器。",
-    "revoke_launcher_confirm": "要将 {player} 从启动器登出吗？",
-    "sign_out": "登出",
-    "title": "设备与会话",
-    "unknown_browser": "未知浏览器",
-    "unknown_ip": "未知 IP"
+    "select": "选择角色"
   },
   "common": {
     "delete": "删除",
@@ -1472,10 +1215,7 @@
     "not_found": "举报不存在",
     "already_reviewed": "举报已处理",
     "reason_required": "请填写举报理由",
-    "self": "不能举报自己的材质",
-    "official_disabled": "官方材质不提供举报",
-    "rate_limited": "你近期提交的举报过多，请稍后再试。",
-    "disabled": "你的账号已被禁用举报功能"
+    "self": "不能举报自己的材质"
   },
   "texture": {
     "not_found": "材质不存在",
@@ -1727,9 +1467,7 @@
     "ticket_reply_body": "工单 {number}“{title}”有新的回复：{summary}",
     "ticket_status_title": "工单状态已更新",
     "ticket_status_body": "工单 {number}“{title}”的状态已更新为：{status}。",
-    "ticket_view": "查看工单",
-    "test_body": "这是一封来自站点邮件设置的测试邮件。收到它即代表发信正常。",
-    "test_title": "测试邮件"
+    "ticket_view": "查看工单"
   },
   "live2d": {
     "title": "Live2D 看板娘",
@@ -1811,29 +1549,7 @@
     "hero_title_2": "皮肤与披风，\n配出你的风格。",
     "hero_title_3": "收藏心仪皮肤，\n随时切换。",
     "hero_title_4": "我的角色，\n我的风格。",
-    "hero_title_5": "挑好今日造型，\n再去冒险。",
-    "classic": {
-      "features_title": "优势",
-      "introduction": "{sitename} 提供 Minecraft 角色皮肤的上传以及托管服务。配合 CustomSkinLoader 等换肤 Mod，你可以为你的游戏角色设置皮肤与披风，并让其他玩家在游戏中看到。",
-      "start": "开始使用",
-      "features": {
-        "first": {
-          "icon": "groups",
-          "name": "多角色",
-          "desc": "一个账户可绑定多个游戏角色"
-        },
-        "second": {
-          "icon": "share",
-          "name": "分享",
-          "desc": "浏览皮肤库，添加喜爱的皮肤并与好友分享"
-        },
-        "third": {
-          "icon": "cloud",
-          "name": "永久免费",
-          "desc": "我们承诺永不收取任何费用"
-        }
-      }
-    }
+    "hero_title_5": "挑好今日造型，\n再去冒险。"
   },
   "admin-panel": {
     "manage": "材质管理"
@@ -1847,9 +1563,7 @@
     "too_long": "评论超过长度限制",
     "rejected": "评论未通过审核",
     "disabled": "评论已关闭",
-    "rate_limited": "评论过于频繁",
-    "official_disabled": "官方材质不提供评论",
-    "user_disabled": "你的评论权限已被管理员禁用"
+    "rate_limited": "评论过于频繁"
   },
   "email": {
     "domain_denied": "此邮箱域名不允许注册",
@@ -1963,24 +1677,8 @@
     "category_visible": "显示中",
     "category_hidden": "已隐藏",
     "category_hide": "隐藏",
-    "category_restore": "恢复显示",
-    "select_category": "请选择工单分类",
-    "move_down": "下移",
-    "move_up": "上移",
-    "category_sort": "排序",
-    "back_to_list": "返回工单列表",
-    "event_status_changed": "工单状态变更为 {status}",
-    "event_created": "提交了工单",
-    "timeline": "流转记录",
-    "internal_hint": "内部备注仅管理员可见，不会通知用户",
-    "file_limit_hint": "支持图片、PDF、文本及 ZIP，单个不超过 5MB",
-    "attach_files": "添加附件",
-    "attachments": "附件",
-    "closed_notice": "此工单已关闭",
-    "close_ticket": "关闭工单"
+    "category_restore": "恢复显示"
   },
-  "title": "通知",
-  "empty": "无未读通知",
   "welcome": "欢迎回来，{name}",
   "score": "积分",
   "players": "我的玩家",
@@ -1992,17 +1690,10 @@
   "upload": "上传纹理",
   "browse": "逛逛皮肤库",
   "unverified": "你的邮箱尚未验证，部分功能受限",
+  "title": "通知",
+  "empty": "无未读通知",
   "read_all": "全部已读",
   "upheld_deleted": "你举报的纹理已被删除",
   "upheld_banned": "你举报的纹理上传者已被封禁",
-  "rejected": "你的举报经审核未成立",
-  "report_reviewed": {
-    "rejected": "你的举报已被驳回",
-    "upheld_banned": "你的举报已受理，违规用户已被封禁",
-    "upheld_deleted": "你的举报已受理，违规材质已被删除"
-  },
-  "mojang_takeover": {
-    "title": "角色属主更改通知",
-    "content": "你的角色 {player} 已被正版用户接管，系统已为你发放补偿积分。"
-  }
+  "rejected": "你的举报经审核未成立"
 }
