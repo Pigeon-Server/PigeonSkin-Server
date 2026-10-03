@@ -1,0 +1,31 @@
+import { afterEach, expect, it } from 'vitest';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import sharp from 'sharp';
+import { backfill } from '../src/commands/backfill.ts';
+import { renderPreview } from '@pigeon-skin/minecraft';
+const folders: string[] = [];
+afterEach(() => { for (const folder of folders.splice(0)) rmSync(folder,{recursive:true,force:true}); });
+it('按迁移后的材质类型生成当前版本的预览与立体头像', async () => {
+  const folder=mkdtempSync(join(tmpdir(),'pigeon-backfill-')); folders.push(folder);
+  const textures=join(folder,'textures'),out=join(folder,'out'); mkdirSync(textures);
+  const skin='a'.repeat(64),cape='b'.repeat(64),orphan='c'.repeat(64);
+  const rgba=Buffer.alloc(64*64*4); for(let i=0;i<rgba.length;i+=4){rgba[i]=(i/4)%256;rgba[i+1]=150;rgba[i+2]=50;rgba[i+3]=255;}
+  const png=await sharp(rgba,{raw:{width:64,height:64,channels:4}}).png().toBuffer();
+  for(const hash of [skin,cape,orphan])writeFileSync(join(textures,hash),png);
+  const database=new (process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite')).DatabaseSync(join(folder,'metadata.sqlite'));
+  database.exec('CREATE TABLE textures(hash TEXT,kind TEXT,model TEXT)');
+  database.prepare('INSERT INTO textures VALUES (?,?,?),(?,?,?),(?,?,?)').run(skin,'skin','slim',cape,'cape',null,skin,'skin','default');database.close();
+  const result=await backfill({texturesDir:textures,outDir:out,metadataDbPath:join(folder,'metadata.sqlite'),sizes:[64]});
+  expect(result.failed).toEqual([]);
+  expect(result.preview).toBe(2);expect(result.avatar2d).toBe(1);expect(result.avatar3d).toBe(1);
+  expect(existsSync(join(out,'previews','v3',orphan+'.png'))).toBe(false);
+  expect((await sharp(readFileSync(join(out,'previews','v3',skin+'.png'))).metadata()).width).toBe(128);
+  const preview=await sharp(readFileSync(join(out,'previews','v3',skin+'.png'))).ensureAlpha().raw().toBuffer();
+  expect(preview.equals(Buffer.from(renderPreview({width:64,height:64,rgba:new Uint8Array(rgba)},128,false,true).rgba))).toBe(true);
+  expect((await sharp(readFileSync(join(out,'previews','v3',cape+'.png'))).metadata()).width).toBe(125);
+  const flat=await sharp(readFileSync(join(out,'avatars','v3',skin,'2d-64.png'))).raw().toBuffer();
+  const volume=await sharp(readFileSync(join(out,'avatars','v3',skin,'3d','64.png'))).raw().toBuffer();
+  expect(volume.equals(flat)).toBe(false);
+});

@@ -1,0 +1,23 @@
+{
+  "name": "@pigeon-skin/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "密码哈希（PBKDF2 原生）与九种旧 Blessing Skin 密码校验器",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.4.0",
+    "bcryptjs": "^2.4.3"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
+  }
+}

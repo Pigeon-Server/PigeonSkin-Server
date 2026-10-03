@@ -1,0 +1,35 @@
+{
+  "name": "@pigeon-skin/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker：REST API + Minecraft 协议 + 纹理下发",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail --format json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pigeon-skin/auth": "*",
+    "@pigeon-skin/db": "*",
+    "@pigeon-skin/minecraft": "*",
+    "@pigeon-skin/shared": "*",
+    "@simplewebauthn/server": "^13.2.2",
+    "drizzle-orm": "^0.38.3",
+    "fflate": "0.8.2",
+    "hono": "^4.6.14",
+    "jose": "^6.2.12",
+    "marked": "^18.0.14",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.12.21",
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9",
+    "wrangler": "4.143.0"
+  }
+}

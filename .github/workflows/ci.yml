@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 设置 npm
+        run: npm install --global npm@11.11.0
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 缓存 Blockbench 构建依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/web/.cache/blockbench
+            apps/web/.cache/blockbench-dependencies.sha256
+          key: blockbench-${{ runner.os }}-${{ hashFiles('vendor/blockbench/package-lock.json', 'apps/web/scripts/build-blockbench.mjs') }}
+
+      - name: 公开发布检查
+        run: npm run check:public -- --content-only
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Web build
+        run: npm run build
+
+      - name: 本地化资源检查
+        run: |
+          python3 tools/localization/translate.py --phase validate
+          python3 -m unittest discover -s tools/localization -p 'test_*.py'

@@ -1,0 +1,139 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pigeon-skin-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "queues": {
+    "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-dev" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-dev" }],
+    "consumers": [{ "queue": "pigeon-search-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1 }, { "queue": "pigeon-email-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-dev" }]
+  },
+
+  // ── 静态资源（前端 SPA）──────────────────────────────────────────────────
+  // 前端构建产物直接挂在 Worker 上：API 与 SPA 同源，Cookie/协议路径零 CORS。
+  // not_found_handling = single-page-application：非资产路径回 index.html，
+  // 而 run_worker_first 保证 /api 与协议路径始终进 Worker 代码。
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application"
+  },
+
+  // ── 衍生图生成（SQLite DO，免费层可用）────────────────────────────────────
+  // 按 hash 命名实例化：同名请求被 input gates 串行化，
+  // 充当"每个衍生图只生成一次"的分布式锁。见 src/do/derivatives.ts。
+  "durable_objects": {
+    "bindings": [
+      { "name": "DERIVATIVES", "class_name": "DerivativeGenerator" },
+      { "name": "OFFICIAL_RESOURCES", "class_name": "OfficialResourceUpdater" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["DerivativeGenerator"] },
+    { "tag": "v2", "new_sqlite_classes": ["OfficialResourceUpdater"] }
+  ],
+
+  // ── 本地开发 ────────────────────────────────────────────────────────────────
+  // 本地 D1 与本地 R2 都是文件型的，不需要网络、不需要 Docker、不需要账号。
+  // npm run dev 同时启动前端、后端与本地存储。
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bs-dev",
+      "database_id": "local-dev-placeholder",
+      "migrations_dir": "../../packages/db/migrations"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "BUCKET", "bucket_name": "bs-dev-textures" }
+  ],
+  // 原生 Rate Limiting binding：边缘限流，无存储、无成本。
+  // RL_GLOBAL 防扫描（200 req/10s/IP），RL_AUTH 管认证端点（30 req/min/IP）。
+  // 中间件在 binding 缺失或 RATE_LIMIT_ENABLED 关闭时 fail-open。
+  "ratelimits": [
+    { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 200, "period": 10 } },
+    { "name": "RL_AUTH", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }
+  ],
+  "vars": {
+    "ENVIRONMENT": "development",
+    "DERIVATIVES_ENABLED": "true"
+  },
+
+  // ── 预览环境 ────────────────────────────────────────────────────────────────
+  // 硬规则：预览环境绝不绑定生产的 D1 或 R2（见 docs/rewrite/02-architecture.md §7）。
+  "env": {
+    "preview": {
+      "name": "pigeon-skin-api-preview",
+      "queues": {
+        "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-preview" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-preview" }],
+        "consumers": [{ "queue": "pigeon-search-preview", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1 }, { "queue": "pigeon-email-preview", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-preview" }]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "bs-preview",
+          "database_id": "REPLACE_WITH_PREVIEW_D1_ID",
+          "migrations_dir": "../../packages/db/migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "BUCKET", "bucket_name": "bs-preview-textures" }
+      ],
+      // durable_objects binding 不被 wrangler 环境继承，必须每个 env 显式声明
+      "durable_objects": {
+        "bindings": [
+          { "name": "DERIVATIVES", "class_name": "DerivativeGenerator" },
+          { "name": "OFFICIAL_RESOURCES", "class_name": "OfficialResourceUpdater" }
+        ]
+      },
+      "ratelimits": [
+        { "name": "RL_GLOBAL", "namespace_id": "1101", "simple": { "limit": 200, "period": 10 } },
+        { "name": "RL_AUTH", "namespace_id": "1102", "simple": { "limit": 30, "period": 60 } }
+      ],
+      "vars": {
+        "ENVIRONMENT": "preview",
+        "DERIVATIVES_ENABLED": "true"
+      }
+    },
+
+    // ── 生产环境 ──────────────────────────────────────────────────────────────
+    "production": {
+      "name": "pigeon-skin-api",
+      "queues": {
+        "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-prod" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-prod" }],
+        "consumers": [{ "queue": "pigeon-search-prod", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1 }, { "queue": "pigeon-email-prod", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-prod" }]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "bs-prod",
+          "database_id": "REPLACE_WITH_PRODUCTION_D1_ID",
+          "migrations_dir": "../../packages/db/migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "BUCKET", "bucket_name": "bs-prod-textures" }
+      ],
+      // durable_objects binding 不被 wrangler 环境继承，必须每个 env 显式声明
+      "durable_objects": {
+        "bindings": [
+          { "name": "DERIVATIVES", "class_name": "DerivativeGenerator" },
+          { "name": "OFFICIAL_RESOURCES", "class_name": "OfficialResourceUpdater" }
+        ]
+      },
+      "ratelimits": [
+        { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 200, "period": 10 } },
+        { "name": "RL_AUTH", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }
+      ],
+      "vars": {
+        "ENVIRONMENT": "production",
+        "DERIVATIVES_ENABLED": "true"
+      },
+      // 过期会话/令牌/登录尝试的定时清理。小时级足够 —— 免费额度下
+      // 每次 Cron 触发就是一小批 D1 写，没必要更频繁。
+      "triggers": { "crons": ["0 * * * *"] }
+    }
+  }
+}

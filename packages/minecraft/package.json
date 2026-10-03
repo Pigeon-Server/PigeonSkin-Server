@@ -1,0 +1,21 @@
+{
+  "name": "@pigeon-skin/minecraft",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minecraft 纹理：PNG 结构校验（不解码）、内容哈希、尺寸规则、CSL 协议响应",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pigeon-skin/shared": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "//": "根 tsconfig 只用于让编辑器在根目录工作；真正的编译配置在各 workspace 包内。",
+  "extends": "./tsconfig.base.json",
+  "include": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/auth" },
+    { "path": "./packages/minecraft" },
+    { "path": "./packages/db" },
+    { "path": "./apps/api" },
+    { "path": "./apps/web" },
+    { "path": "./tools/migrate" }
+  ]
+}

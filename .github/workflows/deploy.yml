@@ -1,0 +1,73 @@
+name: Deploy
+
+# 手动触发部署 API + 前端（前端构建产物挂在同一个 Worker 的 assets 上，
+# 见 apps/api/wrangler.jsonc 的 assets 配置 —— 单 Origin，没有独立 Pages）。
+#
+# 需要仓库 Secrets：
+#   CLOUDFLARE_API_TOKEN  —— Workers/D1/R2 编辑权限
+#   CLOUDFLARE_ACCOUNT_ID
+#
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '部署目标'
+        required: true
+        default: preview
+        type: choice
+        options: [preview, production]
+
+concurrency:
+  group: deploy-${{ inputs.environment || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    env:
+      PREVIEW_D1_DATABASE_ID: ${{ secrets.PREVIEW_D1_DATABASE_ID }}
+      PRODUCTION_D1_DATABASE_ID: ${{ secrets.PRODUCTION_D1_DATABASE_ID }}
+      PREVIEW_APP_URL: ${{ secrets.PREVIEW_APP_URL }}
+      PRODUCTION_APP_URL: ${{ secrets.PRODUCTION_APP_URL }}
+      PREVIEW_R2_BUCKET_NAME: ${{ secrets.PREVIEW_R2_BUCKET_NAME }}
+      PRODUCTION_R2_BUCKET_NAME: ${{ secrets.PRODUCTION_R2_BUCKET_NAME }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+
+      - name: 设置 npm
+        run: npm install --global npm@11.11.0
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 公开发布检查
+        run: npm run check:public
+
+      - name: 构建前端（产物进 Worker assets）
+        run: npm run build
+
+      - name: 应用 D1 迁移
+        run: |
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            npm run db:migrate:prod
+          else
+            npm run db:migrate:preview
+          fi
+
+      - name: 部署 Worker（API + SPA 资产）
+        run: |
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            npm run deploy:prod
+          else
+            npm run deploy:preview
+          fi

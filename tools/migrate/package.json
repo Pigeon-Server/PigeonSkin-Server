@@ -1,0 +1,26 @@
+{
+  "name": "@pigeon-skin/migrate",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pigeon Skin Server 旧库迁移 CLI —— analyze / migrate / verify / resume",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "migrate": "node src/index.ts",
+    "fixture": "node test/fixtures/build-legacy.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "sharp": "^0.34.0",
+    "@pigeon-skin/minecraft": "*"
+  }
+}

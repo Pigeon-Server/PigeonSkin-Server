@@ -1,0 +1,43 @@
+{
+  "name": "pigeon-skin-server",
+  "version": "0.1.0",
+  "description": "Cloudflare 原生的 Minecraft 皮肤站 —— Workers + D1 + R2 + Pages 完全重写版",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "https://github.com/Pigeon-Server/PigeonSkin-Server.git" },
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.11.0",
+  "workspaces": ["apps/*", "packages/*", "tools/migrate"],
+  "engines": {
+    "node": ">=22.18",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail \"npm run dev --workspace @pigeon-skin/api\" \"npm run dev --workspace @pigeon-skin/web\"",
+    "setup:local": "node tools/setup-local.mjs",
+    "build": "npm run build --workspace @pigeon-skin/web",
+    "test": "npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "eslint .",
+    "db:check": "npm run test --workspace @pigeon-skin/db",
+    "db:migrate:local": "npm exec --offline --workspace @pigeon-skin/api -- wrangler d1 migrations apply bs-dev --local",
+    "db:migrate:preview": "node tools/cloudflare.mjs preview migrate",
+    "db:migrate:prod": "node tools/cloudflare.mjs production migrate",
+    "deploy:preview": "node tools/cloudflare.mjs preview deploy",
+    "deploy:prod": "node tools/cloudflare.mjs production deploy",
+    "migrate:legacy": "npm run migrate --workspace @pigeon-skin/migrate --",
+    "db:seed:local": "node tools/seed-local.mjs",
+    "check:public": "node tools/release/check-public.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@vitest/runner": "2.1.9",
+    "@vitest/snapshot": "2.1.9",
+    "concurrently": "^9.2.1",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "2.1.9"
+  }
+}

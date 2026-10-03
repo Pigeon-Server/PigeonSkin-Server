@@ -1,0 +1,36 @@
+{
+  "name": "@pigeon-skin/shared",
+  "version": "0.0.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "description": "跨前后端共享的契约：错误码、角色、限制常量、Zod schema",
+  "exports": {
+    "./locales": "./src/locale.ts",
+    "./locales/*.json": "./src/locales/*.json",
+    "./messages": "./src/messages.ts",
+    "./security": "./src/security.ts",
+    "./locale": "./src/locale.ts",
+    "./manual": "./src/manual.ts",
+    "./seo": "./src/seo.ts",
+    "./live2d": "./src/live2d.ts",
+    ".": "./src/index.ts",
+    "./schemas": "./src/schemas.ts",
+    "./skin-config": "./src/skin-config.ts",
+    "./default-skins": "./src/default-skins.ts",
+    "./official-textures": "./src/official-textures.ts",
+    "./i18n": "./src/i18n.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@intlify/core-base": "^11.4.12",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
+  }
+}

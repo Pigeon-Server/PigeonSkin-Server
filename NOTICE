@@ -1,0 +1,23 @@
+Pigeon Skin Server
+Copyright 2026 Pigeon Skin Server contributors
+
+Project-owned code is licensed under the Apache License, Version 2.0.
+Third-party code and assets retain their own licenses and copyrights.
+
+This project is based on Blessing Skin Server by The Blessing Skin Team.
+Copyright (c) 2016-present The Blessing Skin Team.
+The inherited MIT notice is reproduced in licenses/BlessingSkin-MIT.txt.
+The texture renderer is based on bs-community/texture-renderer (MIT).
+Copyright (c) 2020-present The Blessing Skin Team.
+Its license is reproduced in licenses/TextureRenderer-MIT.txt.
+
+The optional Blockbench web editor is GPL-3.0-or-later, by JannisX11
+and contributors. It is not relicensed under Apache-2.0.
+Its upstream source is referenced by the vendor/blockbench Git submodule.
+See docs/BLOCKBENCH.md and
+docs/THIRD_PARTY.md for source, build and distribution requirements.
+
+Live2D runtimes, models, voices, Minecraft assets and fonts are not covered
+by this project's Apache-2.0 grant. Project-made manual screenshots are
+distributed under Apache-2.0 with the project documentation.
+See docs/THIRD_PARTY.md before publishing.

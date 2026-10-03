@@ -1,0 +1,32 @@
+# 本地开发密钥样例。复制为 .dev.vars（已被 git 忽略）后按需填写。
+# 生产环境用 `wrangler secret put <NAME>` 设置，绝不提交进仓库。
+
+# 会话、安装和 MFA 密钥应分别随机生成，不能使用公开固定值。
+SESSION_SECRET=
+SETUP_TOKEN=
+MFA_ENCRYPTION_KEY=
+
+# Turnstile 服务端密钥。本地 TURNSTILE_ENABLED=false 时不用填。
+TURNSTILE_SECRET=
+
+# Resend API key。未填写时邮件接口返回 not-configured，注册/找回流程照常走通。
+RESEND_API_KEY=
+
+# 旧站 SALT，仅迁移期验证 SALTED2* 家族历史哈希需要；迁移完成后删除。
+LEGACY_SALT=
+
+APP_URL=http://localhost:8787
+MAIL_FROM=
+TURNSTILE_ENABLED=false
+TURNSTILE_SITE_KEY=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+LITTLESKIN_CLIENT_ID=
+LITTLESKIN_CLIENT_SECRET=
+LITTLESKIN_API_ROOT=
+MICROSOFT_CLIENT_ID=
+MICROSOFT_CLIENT_SECRET=
+MOJANG_CLIENT_ID=
+MOJANG_CLIENT_SECRET=
+UPDATE_MANIFEST_URL=
+DEPLOY_HOOK_URL=

@@ -1,0 +1,43 @@
+{
+  "name": "@pigeon-skin/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "前端 SPA：Vue 3 + Vite + Pinia + Vue Router，部署到 Cloudflare Pages",
+  "scripts": {
+    "predev": "node scripts/build-blockbench.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/build-blockbench.mjs && node ../../tools/release/third-party.mjs",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "^13.2.2",
+    "qrcode": "^1.5.4",
+    "@pigeon-skin/minecraft": "*",
+    "@pigeon-skin/shared": "*",
+    "@floating-ui/dom": "^1.8.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@vuetify/v0": "^1.2.3",
+    "dompurify": "^3.4.16",
+    "marked": "^18.0.14",
+    "material-design-icons-iconfont": "^6.7.0",
+    "pixi-live2d-display": "0.4.0",
+    "pixi.js": "6.5.10",
+    "skinview3d": "^3.4.1",
+    "tailwindcss": "^4.3.3",
+    "vue": "^3.5.13",
+    "vue-i18n": "^11.4.12",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.5",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.9",
+    "vue-tsc": "^2.1.10"
+  }
+}
