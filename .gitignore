@@ -23,7 +23,6 @@ wrangler.deploy.jsonc
 work/
 old/
 /AGENTS.local.md
-/AGENTS.md
 /docs/rewrite/
 /tools/cpu-probe/
 .ssh/
