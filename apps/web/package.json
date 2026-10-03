@@ -14,11 +14,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@simplewebauthn/browser": "^13.2.2",
-    "qrcode": "^1.5.4",
+    "@floating-ui/dom": "^1.8.0",
     "@pigeon-skin/minecraft": "*",
     "@pigeon-skin/shared": "*",
-    "@floating-ui/dom": "^1.8.0",
+    "@simplewebauthn/browser": "^13.2.2",
     "@tailwindcss/vite": "^4.3.3",
     "@vuetify/v0": "^1.2.3",
     "dompurify": "^3.4.16",
@@ -26,6 +25,7 @@
     "material-design-icons-iconfont": "^6.7.0",
     "pixi-live2d-display": "0.4.0",
     "pixi.js": "6.5.10",
+    "qrcode": "^1.5.4",
     "skinview3d": "^3.4.1",
     "tailwindcss": "^4.3.3",
     "vue": "^3.5.13",
@@ -35,6 +35,8 @@
   "devDependencies": {
     "@types/qrcode": "^1.5.5",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.5.1",
+    "jsdom": "^29.1.1",
     "typescript": "^5.6.3",
     "vite": "^6.0.7",
     "vitest": "^2.1.9",
