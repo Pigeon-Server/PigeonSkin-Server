@@ -1,0 +1,48 @@
+# 注意：根 .git 不排除——apps/web/scripts/build-blockbench.mjs 需要读取
+# gitlink 记录与 vendor/blockbench 子模块的 HEAD 做固定版本校验。.git 只
+# 进入 build 阶段，不会复制进运行镜像。
+.gitmodules
+
+# 构建产物（容器内重新构建）
+dist-node/
+**/dist-node/
+apps/web/dist/
+apps/web/public/blockbench/
+apps/web/public/third-party/
+apps/web/.cache/
+**/dist/
+
+# 本地数据与状态（绝不打进镜像）
+data/
+data-docker/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+# Wrangler / Cloudflare 本地状态与机密
+.wrangler/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+wrangler.deploy.jsonc
+
+# 本地工具状态与历史
+work/
+old/
+docs/rewrite/
+.mimosa/
+.v2c/
+.cache/
+coverage/
+test-results/
+playwright-report/
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db

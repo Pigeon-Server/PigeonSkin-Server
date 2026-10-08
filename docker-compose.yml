@@ -1,0 +1,79 @@
+# Pigeon Skin Server 自托管部署（Node 入口）
+#
+# 默认组合：sqlite + 本地文件存储，零外部依赖即可运行，数据全部落在 ./data。
+#
+# 要切换数据库或启用 Redis 时：取消对应服务块的注释，并给 app 服务加上
+# 相应环境变量（见 docs/node-deployment.md「环境变量参考」）：
+#   - PostgreSQL：DB_DRIVER=postgres + DATABASE_URL
+#   - MySQL：DB_DRIVER=mysql + DATABASE_URL
+#   - Redis：REDIS_URL（缓存/限流/队列切到 Redis；单实例不配也完全可用）
+#
+# 机密建议用 env_file 而不是写死在本文件：复制 .env.example（如有）或自建
+# 一个 .env，在 app 服务上加 env_file: [.env]。至少应设置 SESSION_SECRET。
+
+services:
+  app:
+    build: .
+    image: pigeon-server
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./data:/app/data
+    # environment:
+    #   SESSION_SECRET: change-me-to-a-long-random-string
+    #   APP_URL: https://skin.example.com   # 生产必须为 https URL
+    #   DB_DRIVER: postgres
+    #   DATABASE_URL: postgresql://pigeon:pigeon@postgres:5432/pigeon
+    #   DB_DRIVER: mysql
+    #   DATABASE_URL: mysql://pigeon:pigeon@mysql:3306/pigeon
+    #   REDIS_URL: redis://redis:6379
+
+  # PostgreSQL 17：取消本块注释，并把 app 的 environment 改为
+  #   DB_DRIVER=postgres / DATABASE_URL=postgresql://pigeon:pigeon@postgres:5432/pigeon
+  # postgres:
+  #   image: postgres:17-alpine
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: pigeon
+  #     POSTGRES_PASSWORD: pigeon
+  #     POSTGRES_DB: pigeon
+  #   volumes:
+  #     - ./data/postgres:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U pigeon -d pigeon"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # MySQL 8.4：取消本块注释，并把 app 的 environment 改为
+  #   DB_DRIVER=mysql / DATABASE_URL=mysql://pigeon:pigeon@mysql:3306/pigeon
+  # mysql:
+  #   image: mysql:8.4
+  #   restart: unless-stopped
+  #   command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+  #   environment:
+  #     MYSQL_USER: pigeon
+  #     MYSQL_PASSWORD: pigeon
+  #     MYSQL_DATABASE: pigeon
+  #     MYSQL_ROOT_PASSWORD: change-me
+  #   volumes:
+  #     - ./data/mysql:/var/lib/mysql
+  #   healthcheck:
+  #     test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pchange-me"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # Redis 7（可选）：缓存 / 限流 / 队列的共享驱动层。单实例部署不需要；
+  # 多实例部署必须配，同时所有实例指向同一个数据库。
+  # redis:
+  #   image: redis:7-alpine
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./data/redis:/data
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
