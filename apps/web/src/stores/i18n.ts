@@ -1,8 +1,8 @@
 import { reactive, watch } from 'vue';
 import { createI18n } from 'vue-i18n';
 import { LOCALES, FALLBACK_LOCALE, localeTag, normalizeLocale, russianPluralRule, type Locale } from '@pigeon-skin/shared/locales';
-import { getMessage, parseTranslationOverrides, withTranslations, type LocaleMessages } from '@pigeon-skin/shared/messages';
-import { en, messages, loadLocaleMessages } from '@/locales';
+import { parseTranslationOverrides, withTranslations, type LocaleMessages } from '@pigeon-skin/shared/messages';
+import { messages, loadLocaleMessages } from '@/locales';
 
 export const baseMessages = reactive<Partial<Record<Locale, LocaleMessages>>>({ ...messages });
 const installed = new Set<Locale>(['zh_CN', 'en']);
@@ -66,10 +66,10 @@ export function useI18n() {
   return {
     locale: composer.locale,
     t: (key: string, vars: Record<string, string | number> = {}, plural?: number) => {
-      const locale = normalizeLocale(composer.locale.value);
-      const known = (baseMessages[locale] && getMessage(baseMessages[locale]!, key)) ?? getMessage(en, key);
-      return composer.t(known === undefined ? 'common.internal_error' : key, vars, plural === undefined ? {} : { plural });
+      // 缺键直接输出键名：暴露漏译比把它伪装成"服务器出错"更能定位问题
+      return composer.t(key, vars, plural === undefined ? {} : { plural });
     },
+    te: (key: string) => composer.te(key),
     n: (value: number) => composer.n(value, { key: 'decimal', locale: localeTag(normalizeLocale(composer.locale.value)) }),
     d: (value: number | Date, format = 'long') => composer.d(value, { key: format, locale: localeTag(normalizeLocale(composer.locale.value)) }),
     setLocale,

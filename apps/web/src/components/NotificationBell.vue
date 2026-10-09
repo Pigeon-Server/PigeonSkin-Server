@@ -15,11 +15,15 @@ const busy = ref(false);
 const loading = ref(true);
 let timer: number | undefined;
 const title = (item: NotificationItem) =>
-  item.type === 'report_reviewed' ? i18n.t(item.title) : item.title;
+  item.type === 'report_reviewed' || item.type === 'mojang_takeover' || i18n.te(item.title)
+    ? i18n.t(item.title)
+    : item.title;
 const body = (item: NotificationItem) =>
   item.type === 'report_reviewed'
     ? i18n.t('notif.report_texture', { id: Number(item.body?.replace('texture:', '')) || 0 })
-    : item.body || '';
+    : item.type === 'mojang_takeover'
+      ? i18n.t('mojang_takeover.content', { player: item.body || '' })
+      : item.body || '';
 async function refresh() {
   try {
     const data = await notificationApi.list();
@@ -72,7 +76,7 @@ onUnmounted(() => window.clearInterval(timer));
       <AppIcon name="notifications_none" />
       <span
         v-if="unread"
-        class="absolute top-0 right-0 bg-red-500 text-white text-[9px] rounded px-1"
+        class="absolute top-0 right-0 bg-danger text-white text-[9px] rounded px-1"
       >
         {{ unread > 99 ? i18n.t('notif.many') : i18n.n(unread) }}
       </span>
@@ -117,7 +121,7 @@ onUnmounted(() => window.clearInterval(timer));
   background: var(--v0-surface);
   color: var(--ink);
   padding: 0;
-  box-shadow: 0 8px 30px #10241920;
+  box-shadow: 0 8px 30px #26313f26;
   margin: 8px 0 0;
 }
 </style>

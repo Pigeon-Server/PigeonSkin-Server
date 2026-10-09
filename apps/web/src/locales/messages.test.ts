@@ -68,12 +68,20 @@ describe('translations', () => {
     for (const key of ['default_skin_name', 'default_cape_name', 'copy_name', 'unsaved', 'saving', 'frame_title', 'wrong_kind']) keys.add('editor.' + key);
     for (const language of Object.values(dictionaries)) for (const key of keys) expect(language[key], key).toBeDefined();
   });
-  it('translates every setting label and route title', () => {
+  it('translates every setting label, enum option, and route title', () => {
     const registry = readFileSync(fileURLToPath(new URL('../../../api/src/services/settings.ts', import.meta.url)), 'utf8');
     const settingKeys = [...registry.matchAll(/\n {2}([\w]+): \{ kind:/g)].map(match => `admin.setting.${match[1]}`);
+    const enumOptions = [...registry.matchAll(/kind: 'enum',\s*values:\s*\[([^\]]+)\]/g)]
+      .flatMap(match => match[1]!.split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '')))
+      .filter(Boolean)
+      .map(v => `admin.option.${v}`);
     const router = readFileSync(fileURLToPath(new URL('../router/index.ts', import.meta.url)), 'utf8');
     const routeKeys = [...router.matchAll(/title: ['"]([\w.-]+)['"]/g)].map(match => match[1]!);
-    for (const language of Object.values(dictionaries)) for (const key of [...settingKeys, ...routeKeys]) expect(language[key], key).toBeDefined();
+    for (const language of Object.values(dictionaries)) {
+      for (const key of [...settingKeys, ...enumOptions, ...routeKeys]) {
+        expect(language[key], key).toBeDefined();
+      }
+    }
   });
   it('routes whose view manages its own SEO metadata are marked seoSelf', () => {
     // 自管 SEO 的视图（自己调用 applyPageMetadata）必须带 seoSelf（或 manual 布局），
