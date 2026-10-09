@@ -86,3 +86,4 @@ docs/rewrite/validation-*.md
 
 # 迁移工具的本地检查点与 fixture
 tools/migrate/.tmp/
+.zcode/

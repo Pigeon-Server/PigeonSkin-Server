@@ -17,7 +17,8 @@ describe('shared locale messages', () => {
     const english = flattenMessages(UI_MESSAGES.en);
     for (const locale of LOCALES) {
       const dictionary = flattenMessages(UI_MESSAGES[locale]);
-      expect(Object.keys(dictionary)).toHaveLength(1522);
+      // 只做规模下界断言：精确数字会被每次文案新增推翻，完整性由下面的键集比对保证。
+      expect(Object.keys(dictionary).length, locale).toBeGreaterThan(1500);
       expect(Object.keys(dictionary).sort(), locale).toEqual(Object.keys(english).sort());
       expect(Object.keys(UI_MESSAGES[locale]).every(key => !key.includes('.'))).toBe(true);
       if (locale === 'zh_CN' || locale === 'zh_TW') {
