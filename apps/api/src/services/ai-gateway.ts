@@ -770,7 +770,8 @@ async function systemonePing(
     category: { type: 'choice', instructions: 'Unused.', criteria: { other: 'Other' } },
   };
   const isClef = model.startsWith(CLEF_MODEL_PREFIX);
-  let answers: Record<string, unknown> | null = null;
+  // 三个分支都会赋值;声明时不初始化,避免 no-useless-assignment
+  let answers: Record<string, unknown> | null;
   if (isClef && env.AI) {
     const result = await withTimeout(
       env.AI.run(model, { model: model.slice(CLEF_MODEL_PREFIX.length), state: 'ping', questions }) as Promise<SystemOneAnswers>,

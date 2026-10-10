@@ -92,7 +92,7 @@ export const SETTING_REGISTRY: Readonly<Record<SettingKey, SettingSpec>> = {
   ygg_disable_authserver: { kind: 'boolean' },
   ygg_uuid_algorithm: { kind: 'enum', values: ['v3', 'v4'] },
   ygg_token_expire_1: { kind: 'integer', min: 60, max: 2_592_000 },
-  ygg_token_expire_2: { kind: 'integer', min: 60, max: 5_184_000 },
+  ygg_token_expire_2: { kind: 'integer', min: 60, max: 7_776_000 },
   ygg_tokens_limit: { kind: 'integer', min: 1, max: 100 },
   ygg_rate_limit: { kind: 'integer', min: 0, max: 60000 },
   ygg_skin_domain: { kind: 'string', max: 500 },

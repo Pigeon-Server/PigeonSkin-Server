@@ -55,7 +55,11 @@ for (const [name, component] of Object.entries({
 }))
   app.component(name, component);
 startGlobalInjection();
-void prepareLocale(normalizeLocale(i18nPlugin.global.locale.value)).catch(() => {}).then(() => app.mount('#app'));
+void prepareLocale(normalizeLocale(i18nPlugin.global.locale.value)).catch(() => {}).then(() => {
+  app.mount('#app');
+  // 解除 Worker 注入的 SEO 回退隐藏（见 services/seo.ts 的 data-seo-fallback）
+  document.documentElement.removeAttribute('data-seo-fallback');
+});
 watch(() => router.currentRoute.value.query.lang, async value => {
   if (typeof value !== 'string') return;
   const locale = normalizeLocale(value);

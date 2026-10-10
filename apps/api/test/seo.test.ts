@@ -58,6 +58,16 @@ describe('公开 HTML 与搜索元数据', () => {
     expect(html).toContain('Minecraft 皮肤与披风');
     expect(html).toContain('/manual/quick-start');
   });
+  it('注入的 SEO 回退内容带 JS 隐藏标记，仅在脚本可用时生效', async () => {
+    const response = await request('/');
+    const html = await response.text();
+    // 同步隐藏脚本与样式必须都存在，且脚本先于 #app 内容出现，避免首屏裸文本闪现
+    expect(html).toContain('<style>html[data-seo-fallback] #app{visibility:hidden}</style>');
+    expect(html).toContain('document.documentElement.setAttribute(\'data-seo-fallback\'');
+    expect(html.indexOf('data-seo-fallback')).toBeLessThan(html.indexOf('<main>'));
+    // 隐藏选择器以 html 属性为前提，禁用 JS 时属性不存在、内容保持可读
+    expect(html).toContain('html[data-seo-fallback] #app');
+  });
   it('公开详情具有独立标题和真实结构化数据，私有详情不泄露正文', async () => {
     const publicId = await texture('public', '创作 <测试>');
     const privateId = await texture('private', '私有内容不得泄露');
