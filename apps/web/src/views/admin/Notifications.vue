@@ -81,7 +81,7 @@ watch([title, content, sendEmail, i18n.locale], () => { void refreshEmailPreview
         <p class="mt-2 text-xs text-muted">{{ i18n.t('admin.notification_variables_hint') }}</p>
         <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
           <template v-for="variable in NOTIFICATION_VARIABLES" :key="variable">
-            <dt class="font-mono">{{ `{{${variable}}}` }}</dt>
+            <dt class="font-mono" v-text="`{{${variable}}}`" />
             <dd class="text-muted">{{ i18n.t(`admin.var_${variable}`) }}</dd>
           </template>
         </dl>
