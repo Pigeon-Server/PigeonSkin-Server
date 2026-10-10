@@ -47,6 +47,8 @@ export const ERROR_CODES = [
   'comment.too_long',
   'comment.rejected',
   'comment.disabled',
+  'comment.user_disabled',
+  'comment.official_disabled',
   'auth.mojang_not_owned',
   'auth.mojang_already_verified',
   'auth.mojang_uuid_taken',
@@ -98,6 +100,9 @@ export const ERROR_CODES = [
   'report.not_found',
   'report.already_reviewed',
   'report.reason_required',
+  'report.disabled',
+  'report.rate_limited',
+  'report.official_disabled',
   // 通知
   'notification.not_found',
   'notification.already_read',
@@ -107,6 +112,7 @@ export const ERROR_CODES = [
   'admin.cannot_modify_self',
   'admin.cannot_grant_role',
   'admin.invalid_role',
+  'admin.ai_models_fetch_failed',
   // 通用
   'common.not_found',
   'common.forbidden',
@@ -114,6 +120,8 @@ export const ERROR_CODES = [
   'common.rate_limited',
   'common.invalid_request',
   'common.internal_error',
+  // 皮肤库反爬：匿名超频需要人机验证
+  'skinlib.challenge_required',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

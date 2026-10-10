@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue';
+import { searchManualPages } from '@/content/manual';
 import { manualPages, localizedManualPages, manualSiteUrl, renderManualContent, resolveManualDocuments, type ManualDocument } from '@pigeon-skin/shared/manual';
 import { normalizeLocale, type Locale } from '@pigeon-skin/shared/locales';
 import { i18nPlugin } from '@/stores/i18n';
@@ -48,10 +49,9 @@ export function useManualStore() {
   function rawContent(slug: string, locale = currentLocale.value) { return documentsFor(locale).find(item => item.slug === slug)?.content ?? manualContent(slug, locale); }
   function contentLocale(slug: string) { return documents.value.find(item => item.slug === slug)?.locale || currentLocale.value; }
   function content(slug: string) { return renderManualContent(rawContent(slug), siteUrl.value, site.get('site_name')); }
+  /** 手册搜索：与站内其他搜索共用同一套表达式语法（标题、正文、分组）。 */
   function search(query: string) {
-    const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-    if (!terms.length) return [];
-    return pages.value.filter(page => terms.every(term => `${page.title} ${page.description} ${content(page.slug)}`.toLocaleLowerCase().includes(term)));
+    return searchManualPages(query, pages.value, slug => content(slug));
   }
   async function fetch(force = false, locale = currentLocale.value) {
     if (pending.has(locale)) return pending.get(locale);

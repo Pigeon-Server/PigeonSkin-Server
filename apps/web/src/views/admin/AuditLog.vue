@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { adminApi, ApiError, type AuditLogItem } from '@/api';
 import { useI18n } from '@/stores/i18n';
+import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
 
 const i18n = useI18n();
 
@@ -16,6 +17,7 @@ const ACTIONS = [
   'admin.player.delete',
   'admin.texture.delete',
   'admin.texture.update',
+  'admin.texture.import',
   'admin.closet.delete',
   'admin.report.resolve',
   'admin.comment.delete',
@@ -36,6 +38,11 @@ const ACTIONS = [
   'admin.vote.export',
   'admin.live2d.upload',
   'admin.live2d.update',
+  'admin.ai_jobs.retry',
+  'admin.ai_jobs.cancel',
+  'admin.ai_jobs.backfill',
+  'admin.texture_flags.clear',
+  'admin.search_submissions.retry',
 ] as const;
 
 const items = ref<AuditLogItem[]>([]);
@@ -43,6 +50,7 @@ const total = ref(0);
 const totalPages = ref(1);
 const page = ref(1);
 const action = ref('');
+const search = ref('');
 const errMsg = ref('');
 const loading = ref(true);
 let generation = 0;
@@ -54,6 +62,7 @@ async function load() {
   try {
     const data = await adminApi.auditLog({
       action: action.value || undefined,
+      q: search.value.trim() || undefined,
       page: page.value,
     });
     if (id !== generation) return;
@@ -84,9 +93,17 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="space-y-3"><PageHeader :title="i18n.t('admin.audit_log')" />
+  <div class="page page--dense"><PageHeader :title="i18n.t('admin.audit_log')" />
     <div class="flex flex-wrap items-center gap-2">
       <AppSelect v-model="action" class="max-w-64" :options="[{ value: '', label: i18n.t('admin.audit_all_actions') }, ...ACTIONS.map(a => ({ value: a, label: actionLabel(a) }))]" @change="changeAction" />
+      <SearchExpressionField
+        v-model="search"
+        schema-key="auditLog"
+        class="max-w-sm"
+        :aria-label="i18n.t('general.search')"
+        :placeholder="i18n.t('general.search')"
+        @submit="page = 1; load()"
+      />
       <span class="text-sm text-muted">{{ i18n.t('common.count', { count: i18n.n(total) }) }}</span>
     </div>
     <p v-if="errMsg" class="alert alert-danger" role="alert">{{ errMsg }}<AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>

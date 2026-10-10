@@ -30,6 +30,7 @@ export type AuditAction =
   | 'admin.player.delete'
   | 'admin.texture.delete'
   | 'admin.texture.update'
+  | 'admin.texture.import'
   | 'admin.closet.delete'
   | 'admin.report.resolve'
   | 'admin.comment.delete'
@@ -40,7 +41,12 @@ export type AuditAction =
   | 'admin.translation.delete'
   | 'admin.update.deploy'
   | 'admin.closet.add'
-  | 'admin.broadcast';
+  | 'admin.broadcast'
+  | 'admin.ai_jobs.retry'
+  | 'admin.ai_jobs.cancel'
+  | 'admin.ai_jobs.backfill'
+  | 'admin.texture_flags.clear'
+  | 'admin.search_submissions.retry';
 
 /**
  * 写一条审计记录。

@@ -4,6 +4,22 @@
   "private": true,
   "type": "module",
   "description": "Pigeon Skin Server 旧库迁移 CLI —— analyze / migrate / verify / resume",
+  "exports": {
+    "./src/schema/mapper": "./src/schema/mapper.ts",
+    "./src/schema/legacy": "./src/schema/legacy.ts",
+    "./src/schema/statements": "./src/schema/statements.ts",
+    "./src/lib/date": "./src/lib/date.ts",
+    "./src/lib/report": "./src/lib/report.ts",
+    "./src/sources/sqlite": "./src/sources/sqlite.ts",
+    "./src/sources/types": "./src/sources/types.ts",
+    "./src/targets/types": "./src/targets/types.ts",
+    "./src/commands/analyze": "./src/commands/analyze.ts",
+    "./src/commands/stages": "./src/commands/stages.ts",
+    "./src/commands/stages-core": "./src/commands/stages-core.ts",
+    "./src/commands/stages-social": "./src/commands/stages-social.ts",
+    "./src/commands/page-loop": "./src/commands/page-loop.ts",
+    "./src/lib/textures": "./src/lib/textures.ts"
+  },
   "engines": {
     "node": ">=22.6"
   },

@@ -3,10 +3,15 @@
 ## 项目事实与行为依据
 
 - 本项目是 Blessing Skin Server PHP 版的 Cloudflare Workers/Pages 重写，前端主要使用 Vue、Vue I18n、Tailwind CSS 和 Material Design Icons；数据层使用 D1、R2 等 Cloudflare 服务。
+- 项目支持双运行时：Cloudflare Workers 与 Node 自托管（见 `docs/node-deployment.md`），数据库可在 SQLite/PostgreSQL/MySQL 间切换（D1 形状适配器 + `packages/db/src/dialect.ts` 方言片段）。跨数据库约定：
+  - 新代码的查询优先用 Drizzle 查询构建器（`createDb`），只有构建器表达不了的语句才写裸 SQL；裸 SQL 里不得引入新的 SQLite 方言特性（`json_each`、`changes()`、`strftime`、`COLLATE NOCASE`、`randomblob` 等），这类语义一律经 `@pigeon-skin/db` 的方言 helper 表达。
+  - 存储约定跨库一致：布尔 0/1 整数、JSON 存 TEXT、时间戳 epoch 毫秒 BIGINT；迁移以 `packages/db/migrations`（SQLite）为事实来源，PG/MySQL 版在 `migrations-pg`/`migrations-mysql`，改表结构时三份同步更新。
+  - 不引入 Prisma 等自带迁移体系的 ORM；Drizzle 的 sqlite-core schema 全局唯一，不要为其它方言另建 schema。
 - 需要还原旧站业务时，以仓库 `old/` 中的 PHP 实现、当前 API/数据模型和用户明确确认的语义为依据。必要时参考 `/Volumes/Projects/bs-dev` 中的旧站数据及插件源码；不要用常见产品惯例臆造旧站行为。
 - 重写必须保留完整业务流程和权限边界，不能只做页面、占位 API 或前端隐藏按钮。涉及功能时核对前端、API、数据库迁移、权限和实际运行路径。
 - Workers 环境不能直接运行 Laravel/PHP 插件。用户曾决定不做原 PHP 插件系统；若任务需要扩展能力，应先评估独立 JS 生态、Worker CPU 限制和隔离方式，不要偷偷加入通用脚本执行器。
 - Web 源码使用 `@/` 别名，不新增相对路径导入风格；图标使用 Material Design Icons，不用 Emoji 代替功能图标。
+- 用户未明确要求禁止使用git reset、git checkout等回溯性操作，特别是文件没跟踪、没提交时
 
 ## 已确认的产品行为
 

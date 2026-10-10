@@ -18,7 +18,7 @@ onMounted(load);
 </script>
 <template>
   <PageHeader :title="i18n.t('votes.title')"><AppButton @click="load">{{ i18n.t('common.refresh') }}</AppButton></PageHeader>
-  <div class="mb-5"><AppSelect id="vote-filter" v-model="status" class="!w-auto" :aria-label="i18n.t('votes.status_filter')" :options="[{ value: '', label: i18n.t('votes.all') }, ...['active', 'scheduled', 'ended', 'closed', 'cancelled'].map(state => ({ value: state, label: i18n.t(`votes.states.${state}`) }))]" @change="filter" /></div>
+  <div><AppSelect id="vote-filter" v-model="status" class="!w-auto" :aria-label="i18n.t('votes.status_filter')" :options="[{ value: '', label: i18n.t('votes.all') }, ...['active', 'scheduled', 'ended', 'closed', 'cancelled'].map(state => ({ value: state, label: i18n.t(`votes.states.${state}`) }))]" @change="filter" /></div>
   <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
   <AppSkeleton v-if="loading" :count="3" />
   <p v-else-if="!items.length" class="panel text-muted">{{ i18n.t('votes.empty') }}</p>
@@ -31,5 +31,5 @@ onMounted(load);
       <router-link :to="`/votes/${vote.id}`" class="btn">{{ i18n.t(vote.status === 'active' && !vote.voted ? 'votes.participate' : 'votes.view') }}</router-link>
     </article>
   </div>
-  <div v-if="totalPages > 1" class="mt-6 flex items-center justify-center gap-4"><AppButton :disabled="page <= 1 || loading" @click="move(-1)">{{ i18n.t('votes.previous') }}</AppButton><span>{{ page }} / {{ totalPages }}</span><AppButton :disabled="page >= totalPages || loading" @click="move(1)">{{ i18n.t('votes.next') }}</AppButton></div>
+  <div v-if="totalPages > 1" class="flex items-center justify-center gap-4"><AppButton :disabled="page <= 1 || loading" @click="move(-1)">{{ i18n.t('votes.previous') }}</AppButton><span>{{ page }} / {{ totalPages }}</span><AppButton :disabled="page >= totalPages || loading" @click="move(1)">{{ i18n.t('votes.next') }}</AppButton></div>
 </template>

@@ -10,6 +10,8 @@ import { confirmAction } from '@/stores/dialog';
 import { securityError, passkeysSupported } from '@/lib/security';
 import SecondFactorForm from './SecondFactorForm.vue';
 
+// heading 为 false 时只保留状态徽标：作为独立页面内容时，标题由页面页头承担。
+const props = withDefaults(defineProps<{ heading?: boolean }>(), { heading: true });
 const emit = defineEmits<{ status: [enabled: boolean] }>();
 const i18n = useI18n(), session = useSessionStore();
 const data = ref<SecurityStatus | null>(null);
@@ -105,8 +107,8 @@ function downloadCodes() {
 
 <template>
   <section class="panel space-y-4">
-    <div class="flex items-center justify-between gap-3">
-      <h2 class="font-semibold">{{ i18n.t('security.title') }}</h2>
+    <div class="flex items-center gap-3" :class="props.heading ? 'justify-between' : 'justify-end'">
+      <h2 v-if="props.heading" class="font-semibold">{{ i18n.t('security.title') }}</h2>
       <span v-if="data" class="badge" :class="data.enabled ? 'badge-success' : 'badge-default'">{{ i18n.t(data.enabled ? 'security.enabled' : 'security.disabled') }}</span>
     </div>
     <p class="text-sm text-muted">{{ i18n.t('security.launcher_notice') }}</p>

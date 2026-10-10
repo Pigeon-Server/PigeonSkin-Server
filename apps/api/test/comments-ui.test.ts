@@ -113,11 +113,12 @@ describe('user comment workflow', () => {
       {
         ...env,
         AI: {
-          run: async (model: string, input: unknown) => {
+          run: async (model: string, input: { messages: Array<{ role: string; content: string }> }) => {
             expect(model).toBe('@cf/meta/llama-guard-3-8b');
-            expect(input).toMatchObject({
-              messages: [{ role: 'user', content: 'Rejected comment' }],
-            });
+            // llama-guard 走网关的原生格式：单条 user 消息、裸内容（无 system、无界定符）
+            expect(input.messages.length).toBe(1);
+            expect(input.messages[0]!.role).toBe('user');
+            expect(input.messages[0]!.content).toContain('Rejected comment');
             return { response: 'unsafe\nS1' };
           },
         },

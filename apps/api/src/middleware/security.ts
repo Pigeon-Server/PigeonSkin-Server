@@ -14,7 +14,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { flag } from '../env.ts';
 import type { AppEnv } from '../lib.ts';
-import { CSRF_EXEMPT_PREFIXES, isAuthRateLimitedPath, isOAuthProtocolPath, isProtocolPath } from '../route-metadata.ts';
+import { CSRF_EXEMPT_PREFIXES, isAuthRateLimitedPath, isBlockedCrawler, isOAuthProtocolPath, isProtocolPath } from '../route-metadata.ts';
 
 /** 哪些请求方法会改状态、需要校验来源 */
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -56,6 +56,28 @@ export function csrfProtection(): MiddlewareHandler<AppEnv> {
   };
 }
 
+// ── 抓取代理拦截 ─────────────────────────────────────────────────────────────
+//
+// robots.txt 声明了禁止范围（见 routes/sitemap.ts），但 robots 只是约定，
+// 抓取方可以无视；这里按同一清单在请求层返回 403 兜底。清单与匹配规则集中在
+// route-metadata.ts，保证声明与拦截不会各说各话。
+//
+// /robots.txt 自身放行：合规爬虫要先读到规则才知道自己被禁止；对 robots.txt
+// 返回 403/404 在 RFC 9309 下等于"无限制"，反而会把禁止声明一起挡掉。
+
+export function blockedCrawlerGuard(): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    if (c.req.path === '/robots.txt') return next();
+    if (isBlockedCrawler(c.req.header('user-agent'))) {
+      c.header('Cache-Control', 'no-store');
+      // 短路 403 不经过 secureHeaders，安全头自己补齐
+      c.header('X-Content-Type-Options', 'nosniff');
+      return c.text('Forbidden', 403);
+    }
+    return next();
+  };
+}
+
 // ── 限流 ─────────────────────────────────────────────────────────────────────
 //
 // 用 Workers 原生 Rate Limiting binding（`[[ratelimits]]`）：它跑在
@@ -75,7 +97,7 @@ export function rateLimiter(): MiddlewareHandler<AppEnv> {
     const env = c.env;
     if (!flag(env.RATE_LIMIT_ENABLED)) return next();
 
-    const ip = c.req.header('cf-connecting-ip') ?? 'unknown';
+    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('cf-connecting-ip') || 'unknown';
     const path = new URL(c.req.url).pathname;
 
     // 认证端点用更紧的桶；协议路由不占 API 桶（它们有自己的边缘缓存）

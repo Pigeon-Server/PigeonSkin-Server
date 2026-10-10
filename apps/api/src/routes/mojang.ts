@@ -13,9 +13,16 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import {
-  createDb, mojangVerifications, notifications, players, userIdentities, uuidMap, users,
+  createDb, mojangVerifications, noCaseEq, notifications, players, userIdentities, uuidMap, users,
 } from '@pigeon-skin/db';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, sql, type SQL } from 'drizzle-orm';
+
+/** 把 helper 产出的含 {COL} 列占位与单个 ? 值占位的 SQL 片段嵌入 drizzle 模板。 */
+function embedFrag(frag: string, column: SQL, value: unknown) {
+  const [lhs = '', rhs = ''] = frag.split('{COL}');
+  const q = rhs.indexOf('?');
+  return sql`${sql.raw(lhs)}${column}${sql.raw(rhs.slice(0, q))}${value}${sql.raw(rhs.slice(q + 1))}`;
+}
 import { AppError, currentUser, toErrorResponse } from '../framework.ts';
 import { getSettingInt, type AppEnv } from '../lib.ts';
 
@@ -196,7 +203,7 @@ export function registerMojangRoutes(app: Hono<AppEnv>): void {
       .values({ provider: 'mojang', providerUserId: profile.uuid, userId: user.id, createdAt: now })
       .onConflictDoNothing();
     const ownedPlayer = await db.select({ id: players.id, name: players.name }).from(players)
-      .where(and(eq(players.userId, user.id), sql`${players.name} = ${profile.name} COLLATE NOCASE`)).limit(1).then(rows => rows[0]);
+      .where(and(eq(players.userId, user.id), embedFrag(noCaseEq('{COL}', '?'), sql`${players.name}`, profile.name))).limit(1).then(rows => rows[0]);
     if (ownedPlayer) await db.insert(uuidMap).values({ playerId: ownedPlayer.id, name: ownedPlayer.name, uuid: profile.uuid }).onConflictDoNothing({ target: uuidMap.playerId });
 
     // 验证奖励分
@@ -247,7 +254,7 @@ export function registerMojangRoutes(app: Hono<AppEnv>): void {
       // 名字有变化才写；无 MC token 可用时 current 就是旧名，写库无意义
       if (existing === undefined || existing.name !== current) {
         const ownedPlayer = await db.select({ id: players.id, name: players.name }).from(players)
-          .where(and(eq(players.userId, user.id), sql`${players.name} = ${current} COLLATE NOCASE`)).limit(1).then(rows => rows[0]);
+          .where(and(eq(players.userId, user.id), embedFrag(noCaseEq('{COL}', '?'), sql`${players.name}`, current))).limit(1).then(rows => rows[0]);
         if (ownedPlayer) await db.insert(uuidMap).values({ playerId: ownedPlayer.id, name: ownedPlayer.name, uuid: v.uuid }).onConflictDoNothing({ target: uuidMap.playerId });
       }
     }

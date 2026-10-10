@@ -3,7 +3,7 @@
 // 这一层不碰 HTTP：输入是类型化的值，失败用抛 AppError 表达。
 // 好处是它可以被路由、脚本、定时任务以同样的方式调用，
 // 也不需要为了测试它而去构造一个 Request。
-import { createDb } from '@pigeon-skin/db';
+import { createDb, scalarMax } from '@pigeon-skin/db';
 import { canModifyUser, type Role, type TextureKind, type TextureModel, type TextureVisibility } from '@pigeon-skin/shared';
 import { isAdmin, type AuthedUser } from '../lib.ts';
 import {
@@ -14,6 +14,7 @@ import { AppError, fail, type Pagination } from '../framework.ts';
 import { audit } from './audit.ts';
 import { queueTextureSubmission } from './search-submissions.ts';
 import * as repo from '../repositories/textures.ts';
+import type { SqlFragment } from '../search/compile.ts';
 import type { Bindings } from '../env.ts';
 
 export interface TextureEnv {
@@ -31,10 +32,13 @@ export interface ListTexturesInput {
   kind?: TextureKind | undefined;
   model?: 'default' | 'slim' | undefined;
   uploader?: number | undefined;
-  keyword?: string | undefined;
+  /** 已编译的搜索表达式（routes/textures.ts 负责编译） */
+  search?: SqlFragment | null | undefined;
   sort: 'created' | 'likes';
   official?: boolean | undefined;
   mine: boolean;
+  /** 请求语言：传入时名称按译文覆盖 */
+  locale?: string | undefined;
 }
 
 export async function listTextures(
@@ -49,7 +53,7 @@ export async function listTextures(
       kind: input.kind,
       model: input.model,
       uploader: input.uploader,
-      keyword: input.keyword,
+      search: input.search,
       sort: input.sort,
       official: input.official,
       mine: input.mine && viewer ? viewer.id : undefined,
@@ -57,6 +61,7 @@ export async function listTextures(
       isAdmin: isAdmin(viewer),
     },
     page,
+    input.locale,
   );
   return { items, total };
 }
@@ -72,8 +77,9 @@ export async function getTexture(
   viewer: AuthedUser | null,
   id: number,
   privateStatus: number,
+  locale?: string,
 ) {
-  const texture = await repo.findTextureById(db(env), id);
+  const texture = await repo.findTextureById(db(env), id, locale);
   if (!texture) throw fail.notFound('texture.not_found');
 
   const allowed = texture.visibility === 'public'
@@ -245,11 +251,11 @@ export async function patchTexture(
   const texture = await repo.findTextureById(db(env), id);
   if (!texture) throw fail.notFound('texture.not_found');
   await assertCanEdit(env, texture.uploaderId, actor);
-  const name = input.name ?? texture.name;
+  const name = typeof input.name === 'string' ? input.name : texture.name;
   const visibility = input.visibility ?? texture.visibility;
   const kind = input.kind ?? texture.kind as TextureKind;
   const model = kind === 'cape' ? null : input.model ?? (texture.model as TextureModel | null) ?? 'default';
-  if (input.name !== undefined) assertNameMatches(name, nameRegexp);
+  assertNameMatches(name, nameRegexp);
   const typeChanged = kind !== texture.kind || model !== texture.model;
   const wasPubliclyReachable = texture.visibility === 'public' || await repo.countPublicReferencesToHash(db(env), texture.hash) > 0;
   if (typeChanged) {
@@ -277,7 +283,7 @@ export async function patchTexture(
   const statements = [
     env.DB.prepare('UPDATE users SET score = score - ?, updated_at = ? WHERE id = ? AND (? <= 0 OR score >= ?) AND EXISTS (SELECT 1 FROM textures WHERE id = ? AND name = ? AND visibility = ? AND kind = ? AND model IS ? AND updated_at = ?)')
       .bind(scoreDelta, now, actor.id, scoreDelta, scoreDelta, id, texture.name, texture.visibility, texture.kind, texture.model, texture.updatedAt),
-    env.DB.prepare("UPDATE textures SET name=?,visibility=?,kind=?,model=?,score_refund_basis=MAX(0,score_refund_basis+?),score_award=CASE WHEN ?='private' AND ?=1 THEN 0 ELSE score_award END,updated_at=? WHERE id=? AND changes()>0")
+    env.DB.prepare(`UPDATE textures SET name=?,visibility=?,kind=?,model=?,score_refund_basis=${scalarMax('0', 'score_refund_basis+?')},score_award=CASE WHEN ?='private' AND ?=1 THEN 0 ELSE score_award END,updated_at=? WHERE id=? AND changes()>0`)
       .bind(name, visibility, kind, model, governance ? 0 : refundBasisDelta, visibility, Number(rates.clawbackAward), now, id),
   ];
   if (typeChanged) {
@@ -339,7 +345,7 @@ export async function replaceTextureContent(
   ] : [
     env.DB.prepare('UPDATE users SET score=score-?,updated_at=? WHERE id=? AND (?<=0 OR score>=?) AND EXISTS(SELECT 1 FROM textures WHERE id=? AND hash=? AND updated_at=?)')
       .bind(scoreDelta, now, texture.uploaderId, scoreDelta, scoreDelta, id, texture.hash, texture.updatedAt),
-    env.DB.prepare('UPDATE textures SET hash=?,width=?,height=?,size_bytes=?,score_refund_basis=MAX(0,score_refund_basis+?),updated_at=? WHERE id=? AND changes()>0')
+    env.DB.prepare(`UPDATE textures SET hash=?,width=?,height=?,size_bytes=?,score_refund_basis=${scalarMax('0', 'score_refund_basis+?')},updated_at=? WHERE id=? AND changes()>0`)
       .bind(hash, info.width, info.height, byteLength, scoreDelta, now, id),
   ];
   const changed = await env.DB.batch(statements);
@@ -374,7 +380,10 @@ export async function deleteTexture(
   const refundAmount = shouldRefund ? texture.scoreRefundBasis : 0;
   const statements = [env.DB.prepare('DELETE FROM textures WHERE id=? AND hash=? AND updated_at=? RETURNING id')
     .bind(id, texture.hash, texture.updatedAt)];
+  // 退款守卫依赖上一条语句（DELETE textures）的 changes()，中间不能插其他语句
   if (shouldRefund) statements.push(env.DB.prepare('UPDATE users SET score=score+? WHERE id=? AND changes()>0').bind(refundAmount, texture.uploaderId));
+  // ai_jobs 无外键：任务行随材质一起清，避免队列残留永远失败的僵尸任务
+  statements.push(env.DB.prepare('DELETE FROM ai_jobs WHERE tid=?').bind(id));
   const deleted = await env.DB.batch(statements);
   if (!deleted[0]?.meta.changes) throw fail.conflict('texture.changed');
   await bumpSitemap();

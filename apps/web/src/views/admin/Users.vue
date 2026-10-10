@@ -11,6 +11,7 @@ import { useI18n } from '@/stores/i18n';
 import { useSessionStore } from '@/stores/session';
 import { confirmAction } from '@/stores/dialog';
 import { apiErrorMessage } from '@/lib/api-error';
+import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
 
 const i18n = useI18n();
 const session = useSessionStore();
@@ -31,6 +32,8 @@ const form = reactive({
   score: 0,
   role: 'normal' as 'normal' | 'admin' | 'banned',
   emailVerified: false,
+  reportingDisabled: false,
+  commentsDisabled: false,
 });
 const sessions = ref<AdminSessionRow[]>([]);
 const sessionsFor = ref<AdminUserRow | null>(null);
@@ -70,6 +73,8 @@ function edit(user: AdminUserRow | null) {
     score: user?.score || 0,
     role: user?.role || 'normal',
     emailVerified: !!user?.emailVerifiedAt,
+    reportingDisabled: !!user?.reportingDisabled,
+    commentsDisabled: !!user?.commentsDisabled,
   });
   error.value = '';
   open.value = true;
@@ -97,6 +102,8 @@ async function save() {
         score: form.score,
         role: form.role,
         emailVerified: form.emailVerified,
+        reportingDisabled: form.reportingDisabled,
+        commentsDisabled: form.commentsDisabled,
       });
     else
       await adminApi.createUser({
@@ -176,8 +183,9 @@ onMounted(load);
     </AppButton>
   </PageHeader>
   <AppForm class="filter-bar" @submit.prevent="page === 1 ? load() : page = 1">
-    <AppInput
+    <SearchExpressionField
       v-model="keyword"
+      schema-key="adminUsers"
       class="max-w-sm"
       :aria-label="i18n.t('general.search')"
       :placeholder="i18n.t('admin.search_email')"
@@ -219,6 +227,12 @@ onMounted(load);
             <span class="badge" :class="user.role === 'banned' ? 'badge-danger' : ''">
               {{ i18n.t(`admin.role_${user.role === 'super_admin' ? 'super' : user.role}`) }}
             </span>
+            <span v-if="user.reportingDisabled" class="badge badge-warning ml-1">
+              {{ i18n.t('admin.reporting_disabled_state') }}
+            </span>
+            <span v-if="user.commentsDisabled" class="badge badge-warning ml-1">
+              {{ i18n.t('admin.comments_disabled_state') }}
+            </span>
           </td>
           <td>{{ i18n.n(user.score) }}</td>
           <td>{{ i18n.n(user.playerCount) }}</td>
@@ -229,14 +243,14 @@ onMounted(load);
               </AppButton>
               <AppButton
                 v-if="canEdit(user)"
-                class="btn-icon !h-7 !w-7"
+                class="btn-icon btn-sm"
                 :aria-label="i18n.t('admin.sessions')"
                 @click="showSessions(user)"
               >
                 <AppIcon name="devices" />
               </AppButton>
               <AppButton
-                class="btn-icon !h-7 !w-7"
+                class="btn-icon btn-sm"
                 :aria-label="i18n.t('admin.closet_manage')"
                 @click="showCloset(user)"
               >
@@ -244,7 +258,7 @@ onMounted(load);
               </AppButton>
               <AppButton
                 v-if="canEdit(user)"
-                class="btn-icon !h-7 !w-7"
+                class="btn-icon btn-sm"
                 :aria-label="i18n.t('admin.password_reset')"
                 @click="resetPassword(user)"
               >
@@ -252,7 +266,7 @@ onMounted(load);
               </AppButton>
               <AppButton
                 v-if="canEdit(user)"
-                class="btn-icon !h-7 !w-7 text-danger"
+                class="btn-icon btn-sm text-danger"
                 :aria-label="i18n.t('admin.delete_user')"
                 @click="remove(user)"
               >
@@ -312,6 +326,8 @@ onMounted(load);
         <AppSelect id="admin-role" v-model="form.role" :options="[{ value: 'normal', label: i18n.t('admin.role_normal') }, { value: 'banned', label: i18n.t('admin.role_banned') }, ...(session.user.value?.role === 'super_admin' ? [{ value: 'admin', label: i18n.t('admin.role_admin') }] : [])]" />
       </div>
       <div v-if="editing" class="flex items-center gap-2"><AppCheckbox v-model="form.emailVerified" :label="i18n.t('admin.verified')" /><span>{{ i18n.t('admin.verified') }}</span></div>
+      <div v-if="editing" class="flex items-center gap-2"><AppCheckbox v-model="form.reportingDisabled" :label="i18n.t('admin.reporting_disabled')" /><span>{{ i18n.t('admin.reporting_disabled') }}</span></div>
+      <div v-if="editing" class="flex items-center gap-2"><AppCheckbox v-model="form.commentsDisabled" :label="i18n.t('admin.comments_disabled')" /><span>{{ i18n.t('admin.comments_disabled') }}</span></div>
       <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
       <div class="flex justify-end">
         <AppButton type="submit" class="btn-primary" :loading="busy">

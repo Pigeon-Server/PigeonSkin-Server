@@ -39,6 +39,7 @@ export default defineWorkersConfig({
   ],
   test: {
     include: ['test/**/*.test.ts'],
+    exclude: ['**/node_modules/**', 'test/node/**'],
     setupFiles: ['./test/setup.ts'],
     poolOptions: {
       workers: {

@@ -4,6 +4,9 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { adminApi } from '@/api';
 import { baseMessages, reloadTranslations, prepareLocale, useI18n } from '@/stores/i18n';
 import { confirmAction } from '@/stores/dialog';
+import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
+import { useSearchExpression } from '@/lib/search-expression';
+import { matchSearch, searchSchema } from '@pigeon-skin/shared/search';
 import { apiErrorMessage } from '@/lib/api-error';
 const i18n = useI18n();
 const locale = ref<Locale>('zh_CN');
@@ -28,13 +31,17 @@ function flatten(
   );
 }
 const source = computed(() => flatten(baseMessages[locale.value] || {}));
-const visible = computed(() =>
-  source.value.filter(
-    (row) =>
-      row.key.toLowerCase().includes(search.value.toLowerCase()) ||
-      row.value.toLowerCase().includes(search.value.toLowerCase()),
-  ),
-);
+const searchState = useSearchExpression(search, 'translations');
+const translationSchema = searchSchema('translations');
+// 解析不了的输入按普通关键词过滤，空输入不过滤
+const visible = computed(() => {
+  const ast = searchState.value;
+  return source.value.filter(row => matchSearch(ast, translationSchema, {
+    key: row.key,
+    value: row.value,
+    locale: locale.value,
+  }));
+});
 const override = (key: string) =>
   items.value.find((row) => row.key === key && row.locale === locale.value);
 async function load() {
@@ -87,8 +94,9 @@ onMounted(load);
   <PageHeader :title="i18n.t('admin.translations')" />
   <div class="filter-bar">
     <AppSelect v-model="locale" class="!w-auto" :options="LOCALE_OPTIONS.map(option => ({ value: option.value, label: option.name }))" :aria-label="i18n.t('common.language')" />
-    <AppInput
+    <SearchExpressionField
       v-model="search"
+      schema-key="translations"
       class="max-w-md"
       :aria-label="i18n.t('general.search')"
       :placeholder="i18n.t('general.search')"

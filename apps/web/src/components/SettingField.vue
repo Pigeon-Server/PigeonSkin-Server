@@ -20,7 +20,7 @@ const props = defineProps<{
   /** 拉取模型列表中的状态 */
   modelsLoading?: boolean | undefined;
   /** 当前生效驱动：workers 下无模型列表 API，隐藏获取/测试按钮 */
-  effectiveDriver?: 'workers' | 'openai' | 'anthropic' | '' | undefined;
+  effectiveDriver?: 'workers' | 'openai' | 'anthropic' | 'systemone' | '' | undefined;
   /** 连通性测试结果文案 */
   testResult?: string | undefined;
   testLoading?: boolean | undefined;
@@ -64,7 +64,8 @@ const multiline = computed(
 const isAiModelField = computed(() => props.name.startsWith('ai_') && props.name.endsWith('_model'));
 // 拉到列表走下拉选择，未拉取（含 Workers 驱动）时退回纯文本框
 const hasModelOptions = computed(() => isAiModelField.value && (props.modelOptions?.length ?? 0) > 0);
-// Workers AI 没有模型列表 API，隐藏获取按钮；测试按钮保留（workers 可连通性测试）
+// Workers AI 没有模型列表 API，隐藏获取按钮；测试按钮保留（workers 可连通性测试）。
+// 判别模型（systemone 驱动 + Clef 模型名）同样无列表 API，但 REST 侧 Jev 有。
 const showFetchModels = computed(() => isAiModelField.value && props.effectiveDriver !== 'workers');
 const showTest = computed(() => isAiModelField.value);
 </script>

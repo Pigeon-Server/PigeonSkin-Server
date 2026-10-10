@@ -18,13 +18,22 @@ import { initializationSchema, initializationStatus, initializeAccount } from '.
 import { isEmailConfigured, sendEmail } from '../services/email.ts';
 import * as security from '../services/security.ts';
 import * as securityRepo from '../repositories/security.ts';
-import { turnstileAllows, verifyTurnstile, isTurnstileEnabled } from '../services/turnstile.ts';
+import { captchaAllows, verifyCaptcha, isCaptchaEnabled, captchaDriver } from '../services/captcha.ts';
+import { issueImageCaptcha } from '../services/image-captcha.ts';
 import {
   clearSessionCookie, clientIp, createSession, getSetting, getSettingBool, getSettingInt,
   revokeAllSessions, revokeSession, setSessionCookie, type AppEnv, type AuthedUser,
 } from '../lib.ts';
 
 export const authRoutes = new Hono<AppEnv>();
+
+// 自绘图案验证码出题：driver 为 image 时前端拉取新题。
+// 未登录可访问（登录/注册页都要用）；driver 不是 image 时返回空题面，
+// 前端凭 captcha_site_key 为空同样不会渲染组件，这里只为显式一致。
+authRoutes.get('/captcha/challenge', async (c) => {
+  if (captchaDriver(c.env) !== 'image') return c.json({ challengeId: '', svg: '', ttlSeconds: 0 });
+  return c.json(await issueImageCaptcha(c.env));
+});
 
 /** 注册相关的设置项。集中一处读，避免路由里散落一堆 getSetting。 */
 async function readRegistrationSettings(env: AppEnv['Bindings']): Promise<auth.RegistrationSettings> {
@@ -53,6 +62,8 @@ function toPublicUser(user: AuthedUser): Record<string, unknown> {
     isDarkMode: user.isDarkMode,
     avatarTextureId: user.avatarTextureId,
     needsInitialization: user.needsInitialization,
+    reportingDisabled: user.reportingDisabled,
+    commentsDisabled: user.commentsDisabled,
   };
 }
 
@@ -63,8 +74,8 @@ authRoutes.post('/register', async (c) => {
   const ip = clientIp(c);
 
   // 注册易被滥用，验证码不可用或校验失败时**关闭**
-  const verdict = await verifyTurnstile(c.env, body.turnstileToken, ip);
-  if (!turnstileAllows(verdict, false)) throw fail.forbidden('auth.captcha_failed');
+  const verdict = await verifyCaptcha(c.env, { token: body.captchaToken, randstr: body.captchaRandstr }, ip);
+  if (!captchaAllows(verdict, false)) throw fail.forbidden('auth.captcha_failed');
 
   const { userId } = await auth.register(c.env, body, await readRegistrationSettings(c.env), ip);
 
@@ -108,16 +119,13 @@ authRoutes.post('/login', async (c) => {
     c.env.DB, body.identifier, LIMITS.loginFailureWindowSeconds * 1000,
   );
   const captchaRequired = failures >= LIMITS.captchaAfterFailures;
-  if (captchaRequired && isTurnstileEnabled(c.env)) {
-    const verdict = await verifyTurnstile(c.env, body.turnstileToken, ip);
-    if (!turnstileAllows(verdict, true)) throw fail.forbidden('auth.captcha_failed');
+  if (captchaRequired && isCaptchaEnabled(c.env)) {
+    const verdict = await verifyCaptcha(c.env, { token: body.captchaToken, randstr: body.captchaRandstr }, ip);
+    if (!captchaAllows(verdict, true)) throw fail.forbidden('auth.captcha_failed');
   }
 
   try {
-    const user = await auth.login(c.env, body, {
-      ip,
-      requireEmailVerification: await getSettingBool(c.env, 'require_email_verification'),
-    });
+    const user = await auth.login(c.env, body, { ip });
 
     c.header('Cache-Control', 'no-store');
     const payload = { remember: body.keep === true, destination: security.destination(body.destination) };
@@ -269,8 +277,8 @@ authRoutes.post('/forgot-password', async (c) => {
   const ip = clientIp(c);
 
   // 找回密码易被滥用，验证码失败时**关闭**（正常用户几秒后重试即可）
-  const verdict = await verifyTurnstile(c.env, body.turnstileToken, ip);
-  if (!turnstileAllows(verdict, false)) throw fail.forbidden('auth.captcha_failed');
+  const verdict = await verifyCaptcha(c.env, { token: body.captchaToken, randstr: body.captchaRandstr }, ip);
+  if (!captchaAllows(verdict, false)) throw fail.forbidden('auth.captcha_failed');
 
   if (!isEmailConfigured(c.env)) throw new AppError('auth.mail_unavailable', 503);
 

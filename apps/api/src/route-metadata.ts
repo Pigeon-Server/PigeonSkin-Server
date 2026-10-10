@@ -62,6 +62,34 @@ export const ROBOTS_API_RULES = [
 
 export const ROBOTS_PROTOCOL_DISALLOW = ['Disallow: /raw/', 'Disallow: /textures/'] as const;
 
+// ── 抓取代理拦截 ─────────────────────────────────────────────────────────────
+//
+// 产品决策：全站禁止 Anthropic / Claude 的抓取代理抓取本站内容。
+// robots.txt 为每个 UA 单独输出独立分组（独立分组优先于下面的 `*`，
+// 因此 /api/v1/textures 等 Allow 例外对这组 UA 不生效），请求层再按
+// 同一清单返回 403 —— robots.txt 只是约定，不遵守的抓取方需要兜底拦截。
+//
+// ClaudeBot / Claude-SearchBot 是 Anthropic 官方公开的自动抓取标识
+// （训练、搜索），Claude-Web 与 anthropic-ai 是更早的标识，一并保留。
+// Claude-User 是用户主动让 Claude 读取某个页面的代理，不是爬虫，
+// 不在此列 —— 放行它，用户点名访问的页面仍然可读。
+export const BLOCKED_CRAWLER_AGENTS = [
+  'ClaudeBot',
+  'Claude-SearchBot',
+  'Claude-Web',
+  'anthropic-ai',
+] as const;
+
+/** User-Agent 子串匹配（大小写不敏感）。缺失 UA 不视为爬虫。 */
+export function isBlockedCrawler(userAgent: string | null | undefined): boolean {
+  if (!userAgent) return false;
+  const ua = userAgent.toLowerCase();
+  return BLOCKED_CRAWLER_AGENTS.some((agent) => ua.includes(agent.toLowerCase()));
+}
+
+/** robots.txt 规则修订号：规则变化时递增，让 Cache API 里缓存的旧 robots.txt 立即失效。 */
+export const ROBOTS_RULES_REVISION = 3;
+
 // ── 会话中间件的路径白名单（app.ts 消费）──────────────────────────────────────
 // 这些清单表达"哪些路由对受限会话可用"的产品决策，与路由定义集中放在一起，
 // 避免散落在装配层成为影子副本。
@@ -88,5 +116,6 @@ export const INITIALIZATION_PUBLIC_READ_PREFIXES = [
   '/api/v1/live2d',
   '/api/v1/oauth/providers',
   '/api/v1/textures',
+  '/api/v1/users',
   '/api/v1/health',
 ] as const;

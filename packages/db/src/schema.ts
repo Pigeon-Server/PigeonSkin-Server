@@ -24,6 +24,10 @@ export const users = sqliteTable('users', {
   passwordRehashRequired: integer('password_rehash_required', { mode: 'boolean' })
     .notNull().default(false),
   role: text('role').notNull().default('normal'),
+  /** 管理员禁用其提交举报（社区监督滥用风控） */
+  reportingDisabled: integer('reporting_disabled', { mode: 'boolean' }).notNull().default(false),
+  /** 管理员禁用其发表评论 */
+  commentsDisabled: integer('comments_disabled', { mode: 'boolean' }).notNull().default(false),
   /** 个人签名（用户资料页） */
   signature: text('signature').notNull().default(''),
   registrationIp: text('registration_ip'),
@@ -113,6 +117,11 @@ export const textures = sqliteTable('textures', {
   height: integer('height').notNull(),
   /** 反范式化的收藏计数；皮库按它排序，用 COUNT(*) 会是表扫描 */
   likes: integer('likes').notNull().default(0),
+  /** AI 审核标记：违规内容照常展示，进管理员处置队列 */
+  nameFlagged: integer('name_flagged').notNull().default(0),
+  nameFlagReason: text('name_flag_reason').notNull().default(''),
+  descriptionFlagged: integer('description_flagged').notNull().default(0),
+  descriptionFlagReason: text('description_flag_reason').notNull().default(''),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });
@@ -147,6 +156,8 @@ export const notifications = sqliteTable('notifications', {
   body: text('body'),
   readAt: integer('read_at'),
   createdAt: integer('created_at').notNull(),
+  /** 参与翻译的公告存其模板骨架哈希（变量未渲染）；普通通知为空串 */
+  templateHash: text('template_hash').notNull().default(''),
 });
 
 export const settings = sqliteTable('settings', {
@@ -341,6 +352,51 @@ export const texturesDescription = sqliteTable('textures_description', {
   updatedAt: integer('updated_at').notNull(),
 });
 
+/** 材质名/简介的 AI 译文，(tid, locale) 唯一；展示时覆盖原文，无则回退 */
+export const textureTranslations = sqliteTable('texture_translations', {
+  tid: integer('tid').notNull(),
+  locale: text('locale').notNull(),
+  name: text('name').notNull().default(''),
+  description: text('description').notNull().default(''),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (t) => [primaryKey({ columns: [t.tid, t.locale] })]);
+
+/** 站点公告的 AI 译文骨架：按 (content_hash, locale) 寻址（与具体通知行无关）；
+ *  source_* 保存模板骨架原文，title/body 是对应语言的译文骨架（含 {{变量}}） */
+export const notificationTranslations = sqliteTable('notification_translations', {
+  contentHash: text('content_hash').notNull(),
+  locale: text('locale').notNull(),
+  sourceTitle: text('source_title').notNull().default(''),
+  sourceBody: text('source_body').notNull().default(''),
+  title: text('title').notNull().default(''),
+  body: text('body').notNull().default(''),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (t) => [primaryKey({ columns: [t.contentHash, t.locale] })]);
+
+/** AI 任务队列：cron 派发认领，(kind, tid) 唯一，重复入队=重置重跑 */
+export const aiJobs = sqliteTable('ai_jobs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  kind: text('kind').notNull(),
+  tid: integer('tid').notNull(),
+  status: text('status').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  nextRunAt: integer('next_run_at').notNull(),
+  lastError: text('last_error').notNull().default(''),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** 定时任务运行记录（cleanup/官方资源同步/sitemap 重建），供后台任务页展示 */
+export const taskRuns = sqliteTable('task_runs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  ok: integer('ok', { mode: 'boolean' }).notNull(),
+  detail: text('detail').notNull().default(''),
+  ranAt: integer('ran_at').notNull(),
+});
+
 export const comments = sqliteTable('comments', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   textureId: integer('texture_id').notNull(),
@@ -468,5 +524,9 @@ export type SessionRow = typeof sessions.$inferSelect;
 export type ClosetRow = typeof closet.$inferSelect;
 export type ReportRow = typeof reports.$inferSelect;
 export type NotificationRow = typeof notifications.$inferSelect;
+export type NotificationTranslationRow = typeof notificationTranslations.$inferSelect;
 export type SettingRow = typeof settings.$inferSelect;
+export type TextureTranslationRow = typeof textureTranslations.$inferSelect;
+export type AiJobRow = typeof aiJobs.$inferSelect;
+export type TaskRunRow = typeof taskRuns.$inferSelect;
 export type TicketRow = typeof tickets.$inferSelect;

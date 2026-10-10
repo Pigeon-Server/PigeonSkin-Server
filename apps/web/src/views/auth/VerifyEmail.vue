@@ -28,12 +28,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="auth-fields text-center">
+  <div class="text-center">
     <span
       class="material-icons mx-auto" style="font-size:48px"
-      :class="state === 'ok' ? 'text-green-500' : state === 'error' ? 'text-red-500' : 'animate-spin'"
+      :class="state === 'ok' ? 'text-success' : state === 'error' ? 'text-danger' : 'animate-spin'"
     >{{ state === 'ok' ? 'check_circle' : state === 'error' ? 'error' : 'sync' }}</span>
-    <h1 class="mt-4 text-xl font-bold">
+    <h1 class="mt-4">
       {{ state === 'ok' ? i18n.t('user.verification.verified') : state === 'error' ? message : i18n.t('common.loading') }}
     </h1>
     <router-link to="/user" class="btn btn-primary mt-6 inline-block">{{ i18n.t('general.user-center') }}</router-link>

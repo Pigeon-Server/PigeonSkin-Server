@@ -34,8 +34,8 @@ async function submit() {
 </script>
 
 <template>
-  <div class="auth-fields">
-    <h1 class="text-2xl font-bold">{{ i18n.t('auth.reset_title') }}</h1>
+  <div>
+    <h1>{{ i18n.t('auth.reset_title') }}</h1>
     <p v-if="!token" class="alert alert-danger mt-6">{{ i18n.t('auth.token_invalid') }}</p>
     <AppForm v-else class="mt-6 space-y-4" @submit.prevent="submit">
       <div>

@@ -33,8 +33,7 @@ export function oauthAuthentication(): MiddlewareHandler<AppEnv> {
     if (!allowed || !allowed.some(s => scopes.includes(s))) throw new OAuthError('insufficient_scope', 'Insufficient scope.', 403);
     const [user] = await createDb(c.env.DB).select().from(users).where(eq(users.id, grant.user_id)).limit(1);
     if (!user || user.role === 'banned') throw new OAuthError('invalid_token', 'Account unavailable.', 401);
-    c.set('user', { ...user, needsInitialization: false } as AuthedUser);
-    c.set('sessionId', null);
+    c.set('user', { ...user, needsInitialization: false } as AuthedUser);    c.set('sessionId', null);
     c.header('Cache-Control', 'no-store');
     await next();
   };

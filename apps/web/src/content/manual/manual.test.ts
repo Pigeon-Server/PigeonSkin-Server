@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { manualPages, manualContent, manualSections, searchManual } from './index';
+import { manualPages, manualContent, manualSections, searchManualPages } from './index';
 import { manualSiteUrl, renderManualContent, manualAssetMarkdown } from '@pigeon-skin/shared/manual';
 
 describe('用户手册', () => {
@@ -40,10 +40,18 @@ describe('用户手册', () => {
     }
   });
 
-  it('可按正文关键词搜索，并同时匹配多个关键词', () => {
-    expect(searchManual('  extralist  ').map(page => page.slug)).toContain('customskinloader');
-    expect(searchManual('Steve Alex').map(page => page.slug)).toContain('textures');
-    expect(searchManual('不存在的检索词')).toEqual([]);
-    expect(searchManual('   ')).toEqual([]);
+  it('可按正文关键词搜索，并支持字段限定与逻辑条件', () => {
+    const search = (query: string) => searchManualPages(query, manualPages, slug => manualContent(slug));
+    expect(search('  extralist  ').map(page => page.slug)).toContain('customskinloader');
+    expect(search('Steve Alex').map(page => page.slug)).toContain('textures');
+    // title: 只看标题，因此命中标题里带 Skin 的那页，而不是正文提到皮肤的页面
+    expect(search('title:skin').map(page => page.slug)).toEqual(['customskinloader']);
+    expect(search('title:skin extralist').map(page => page.slug)).toEqual(['customskinloader']);
+    expect(search('title:skin 不存在的检索词')).toEqual([]);
+    expect(search('不存在的检索词')).toEqual([]);
+    // 空输入不过滤（调用方展示"未过滤"状态）；解析不了的输入按字面量搜，自然命中不到
+    expect(search('   ').length).toBe(manualPages.length);
+    expect(search('title:')).toEqual([]);
+    expect(search('((')).toEqual([]);
   });
 });

@@ -1,8 +1,28 @@
 // 后台仓储 —— 只负责查询。
 import type { D1PreparedStatement } from '@cloudflare/workers-types';
 import { and, eq, sql } from 'drizzle-orm';
-import { players, reports, textures, users, closet } from '@pigeon-skin/db';
+import { scalarMax, players, reports, textures, users, closet, noCaseEq } from '@pigeon-skin/db';
 import type { Db } from './textures.ts';
+import type { SQL } from 'drizzle-orm';
+import { fragmentToSql, type SqlFragment } from '../search/compile.ts';
+
+/**
+ * 搜索条件由 apps/api/src/search 编译成语义片段后传入，仓储只负责嵌入。
+ * 空片段（无搜索）返回恒真条件，便于 and() 组装。
+ */
+function searchFilter(search: SqlFragment | null | undefined): SQL {
+  return search ? fragmentToSql(search) : sql`1=1`;
+}
+
+/**
+ * 把 helper 产出的含 {COL} 列占位与单个 ? 值占位的 SQL 片段嵌入 drizzle 模板：
+ * {COL} 换成列引用块，? 处保持值为绑定参数。
+ */
+function embedFrag(frag: string, column: SQL, value: unknown) {
+  const [lhs = '', rhs = ''] = frag.split('{COL}');
+  const q = rhs.indexOf('?');
+  return sql`${sql.raw(lhs)}${column}${sql.raw(rhs.slice(0, q))}${value}${sql.raw(rhs.slice(q + 1))}`;
+}
 
 // ── 统计 ─────────────────────────────────────────────────────────────────────
 
@@ -90,19 +110,18 @@ const USER_COLUMNS = {
   role: users.role,
   score: users.score,
   emailVerifiedAt: users.emailVerifiedAt,
+  reportingDisabled: users.reportingDisabled,
+  commentsDisabled: users.commentsDisabled,
   createdAt: users.createdAt,
   playerCount: sql<number>`(SELECT COUNT(*) FROM players WHERE user_id = ${users.id})`,
 } as const;
 
 export async function listAdminUsers(
   db: Db,
-  filter: { keyword?: string | undefined },
+  filter: { search?: SqlFragment | null | undefined },
   page: { perPage: number; offset: number },
 ) {
-  const where = filter.keyword
-    ? sql`(${users.email} LIKE ${'%' + filter.keyword + '%'}
-           OR ${users.nickname} LIKE ${'%' + filter.keyword + '%'})`
-    : sql`1=1`;
+  const where = searchFilter(filter.search);
 
   const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(users).where(where);
   const items = await db.select(USER_COLUMNS).from(users).where(where)
@@ -160,7 +179,7 @@ export async function adminDeleteClosetEntry(db: Db, userId: number, textureId: 
     .returning({ textureId: closet.textureId });
   if (deleted.length === 0) return null;
   await db.update(textures)
-    .set({ likes: sql`MAX(0, ${textures.likes} - 1)` })
+    .set({ likes: sql.raw(scalarMax('0', '"textures"."likes" - 1')) })
     .where(eq(textures.id, textureId));
   return deleted[0]!;
 }
@@ -177,14 +196,14 @@ export async function deleteUser(db: Db, id: number) {
 
 export async function listAdminTextures(
   db: Db,
-  filter: { keyword?: string | undefined },
+  filter: { search?: SqlFragment | null | undefined },
   page: { perPage: number; offset: number },
 ) {
-  const where = filter.keyword
-    ? sql`${textures.name} LIKE ${'%' + filter.keyword + '%'}`
-    : sql`1=1`;
+  const where = searchFilter(filter.search);
 
-  const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(textures).where(where);
+  // 计数与实际查询共用同一套 join：表达式可能引用 users.nickname
+  const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(textures)
+    .leftJoin(users, eq(users.id, textures.uploaderId)).where(where);
   const items = await db
     .select({
       id: textures.id,
@@ -213,14 +232,14 @@ export async function listAdminTextures(
 
 export async function listAdminPlayers(
   db: Db,
-  filter: { keyword?: string | undefined },
+  filter: { search?: SqlFragment | null | undefined },
   page: { perPage: number; offset: number },
 ) {
-  const where = filter.keyword
-    ? sql`${players.name} LIKE ${'%' + filter.keyword + '%'}`
-    : sql`1=1`;
+  const where = searchFilter(filter.search);
 
-  const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(players).where(where);
+  // 计数与实际查询共用同一套 join：表达式可能引用 users.nickname
+  const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(players)
+    .leftJoin(users, eq(users.id, players.userId)).where(where);
   const items = await db
     .select({
       id: players.id,
@@ -265,7 +284,7 @@ export function recipientWhere(receiver: 'all' | 'normal' | number | string) {
   if (receiver === 'all') return sql`1=1`;
   if (receiver === 'normal') return sql`${users.role} = 'normal'`;
   if (typeof receiver === 'number') return eq(users.id, receiver);
-  return sql`${users.email} = ${receiver} COLLATE NOCASE`;
+  return embedFrag(noCaseEq('{COL}', '?'), sql`${users.email}`, receiver);
 }
 
 export async function countRecipients(db: Db, receiver: 'all' | 'normal' | number | string) {
@@ -275,8 +294,22 @@ export async function countRecipients(db: Db, receiver: 'all' | 'normal' | numbe
 }
 
 export async function listBroadcastRecipients(db: Db, receiver: 'all' | 'normal' | number | string) {
-  return db.select({ id: users.id, email: users.email, locale: users.locale })
+  return db.select({ id: users.id, email: users.email, locale: users.locale, score: users.score })
     .from(users).where(and(recipientWhere(receiver), sql`${users.role} != 'banned'`));
+}
+
+/** 群发收件人的最新角色名（每人取一个；没有角色的用户不出现在结果里）。
+ *  全体群发时收件人可能上万，不能用 IN 列表（SQLite 变量上限），用 join 一次取全。 */
+export async function listBroadcastPlayerNames(db: Db, receiver: 'all' | 'normal' | number | string) {
+  const rows = await db
+    .select({ userId: players.userId, name: players.name })
+    .from(players)
+    .innerJoin(users, eq(users.id, players.userId))
+    .where(and(recipientWhere(receiver), sql`${users.role} != 'banned'`))
+    .orderBy(players.id);
+  const map = new Map<number, string>();
+  for (const row of rows) if (!map.has(row.userId)) map.set(row.userId, row.name);
+  return map;
 }
 
 /**
@@ -296,7 +329,7 @@ export function broadcastStatement(
   const where = receiver === 'all' ? '1=1'
     : receiver === 'normal' ? "role = 'normal'"
     : isId ? 'id = ?'
-    : 'email = ? COLLATE NOCASE';
+    : noCaseEq('email', '?');
 
   const params: unknown[] = [row.title, row.body, row.createdAt];
   if (isId || isEmail) params.push(receiver);

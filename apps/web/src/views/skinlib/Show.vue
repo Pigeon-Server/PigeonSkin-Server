@@ -18,9 +18,11 @@ import SkinlibLoading from '@/components/SkinlibLoading.vue';
 import ApplyTextureDialog from '@/components/ApplyTextureDialog.vue';
 import MarkdownEditor from '@/components/ui/MarkdownEditor.vue';
 import TextureComments from '@/components/TextureComments.vue';
+import VerificationChallenge from '@/components/VerificationChallenge.vue';
 import { applyPageMetadata, baseMetadata } from '@/lib/seo';
 import { plainDescription } from '@pigeon-skin/shared/seo';
 import { apiErrorMessage } from '@/lib/api-error';
+import { withSkinlibChallenge } from '@/stores/skinlib-challenge';
 
 const route = useRoute();
 const router = useRouter();
@@ -41,11 +43,17 @@ const notice = ref('');
 const errMsg = ref('');
 const reportOpen = ref(false);
 const reportReason = ref('');
+// 本账号对该材质有待处理的举报时不再显示举报入口（处理完成后可再次举报）
+const reportPending = ref(false);
+const reportCaptchaToken = ref('');
+const reportCaptchaRandstr = ref('');
+const reportChallenge = ref<InstanceType<typeof VerificationChallenge> | null>(null);
 const editName = ref('');
 const editVisibility = ref<'public' | 'private'>('public');
 const editType = ref<'default' | 'slim' | 'cape'>('default');
 
 const description = ref('');
+const translatedDescription = ref('');
 const editingDescription = ref(false);
 const editDescription = ref('');
 const descErr = ref('');
@@ -55,8 +63,8 @@ const hashCopied = ref(false);
 let copyTimer = 0;
 
 const commentsEnabled = computed(() => site.get('comments_enabled') !== 'false');
-// 评论区只存在于公开材质：私密材质不设评论区
-const canComment = computed(() => commentsEnabled.value && texture.value?.visibility === 'public');
+// 评论区只存在于公开的非官方材质：私密材质不设评论区，官方材质是站点自有内容
+const canComment = computed(() => commentsEnabled.value && texture.value?.visibility === 'public' && !texture.value?.official);
 const isOwner = computed(
   () =>
     texture.value !== null &&
@@ -65,6 +73,11 @@ const isOwner = computed(
 );
 const canManage = computed(() => isOwner.value || session.isAdmin.value);
 const canEdit = computed(() => Boolean(session.user.value && texture.value));
+const canDownload = computed(
+  () =>
+    site.get('allow_texture_download') !== 'false' &&
+    (session.user.value !== null || site.get('allow_anonymous_download') !== 'false'),
+);
 
 watch(
   [texture, description, site.settings, notFound, i18n.locale],
@@ -123,7 +136,7 @@ onMounted(async () => {
   }
 
   try {
-    texture.value = await textureApi.get(tid);
+    texture.value = await withSkinlibChallenge((headers) => textureApi.get(tid, i18n.locale.value, headers));
     editName.value = texture.value.name;
     editVisibility.value = texture.value.visibility;
     editType.value =
@@ -136,6 +149,9 @@ onMounted(async () => {
     if (session.user.value) {
       const closet = await closetApi.list({ perPage: 1000 });
       collected.value = closet.items.some((e) => e.textureId === tid);
+      reportPending.value = (await reportApi.mine()).items.some(
+        (r) => r.textureId === tid && r.status === 'pending',
+      );
     }
   } catch (e) {
     if (e instanceof ApiError && (e.status === 404 || e.status === 403)) {
@@ -184,7 +200,12 @@ async function copyHash() {
 
 async function loadDescription() {
   try {
-    description.value = (await textureApi.getDescription(tid)).description;
+    const result = await withSkinlibChallenge((headers) => textureApi.getDescription(tid, i18n.locale.value, headers));
+    description.value = result.description;
+    // 当前语言的 AI 译文；与原文相同（源语言即当前语言）时不重复展示
+    translatedDescription.value = result.translatedDescription && result.translatedDescription !== result.description
+      ? result.translatedDescription
+      : '';
   } catch (e) {
     descErr.value = apiErrorMessage(e);
   }
@@ -258,11 +279,15 @@ async function submitReport() {
   busy.value = true;
   errMsg.value = '';
   try {
-    await reportApi.submit(tid, reportReason.value.trim());
+    await reportApi.submit(tid, reportReason.value.trim(), reportCaptchaToken.value, reportCaptchaRandstr.value);
     reportOpen.value = false;
     reportReason.value = '';
+    reportCaptchaToken.value = '';
+    reportCaptchaRandstr.value = '';
+    reportPending.value = true;
     notice.value = i18n.t('skinlib.report.success');
   } catch (e) {
+    reportChallenge.value?.reset();
     errMsg.value = apiErrorMessage(e);
   } finally {
     busy.value = false;
@@ -305,7 +330,7 @@ async function saveEdits() {
 
     await textureApi.patch(tid, patch);
     await session.fetchSession();
-    texture.value = await textureApi.get(tid);
+    texture.value = await withSkinlibChallenge((headers) => textureApi.get(tid, i18n.locale.value, headers));
     notice.value = i18n.t('general.op-success');
   } catch (e) {
     errMsg.value = apiErrorMessage(e);
@@ -330,7 +355,38 @@ async function removeTexture() {
 </script>
 
 <template>
-  <div class="resource-page">
+  <!-- 内容优先的详情页：返回行与卡片内标题共同构成页头，因此不使用 PageHeader。 -->
+  <div class="page page--dense">
+    <!-- 顶部返回行：加载、异常与正常状态都保留返回入口 -->
+    <nav class="page-breadcrumb" :aria-label="i18n.t('skinlib.show.title')">
+      <div class="flex items-center gap-2">
+        <router-link
+          to="/skinlib"
+          class="page-back"
+        >
+          <AppIcon name="arrow_back" class="!text-sm" />
+          <span>{{ i18n.t('general.skinlib') }}</span>
+        </router-link>
+        <template v-if="texture">
+          <span class="text-muted/60">/</span>
+          <span class="max-w-[260px] truncate font-semibold text-ink sm:max-w-md" :title="texture.name">
+            {{ texture.name }}
+          </span>
+        </template>
+      </div>
+
+      <div class="ml-auto flex items-center gap-2">
+        <AppButton
+          v-if="canComment"
+          class="btn-sm"
+          @click="jumpToComments"
+        >
+          <AppIcon name="chat_bubble_outline" class="!text-sm" />
+          <span>{{ i18n.t('comments.navigation', { count: i18n.n(commentsTotal) }) }}</span>
+        </AppButton>
+      </div>
+    </nav>
+
     <!-- 加载中状态 -->
     <SkinlibLoading v-if="loading" />
 
@@ -342,42 +398,10 @@ async function removeTexture() {
       <span class="material-icons mx-auto text-muted" style="font-size: 56px">texture</span>
       <h2 class="mt-4 text-lg font-semibold">{{ errMsg || i18n.t('skinlib.non-existent') }}</h2>
       <p class="mt-2 text-sm text-muted">{{ i18n.t('skinlib.show.manage-notice') }}</p>
-      <router-link to="/skinlib" class="btn btn-primary mt-6 inline-flex items-center gap-1.5">
-        <AppIcon name="arrow_back" />
-        <span>{{ i18n.t('general.skinlib') }}</span>
-      </router-link>
     </div>
 
     <!-- 详情主视区 -->
-    <div v-else-if="texture" class="mx-auto w-full max-w-[1400px] space-y-6">
-      <!-- 顶部面包屑与快捷导航 -->
-      <nav class="flex flex-wrap items-center justify-between gap-3 text-sm" :aria-label="i18n.t('skinlib.show.title')">
-        <div class="flex items-center gap-2">
-          <router-link
-            to="/skinlib"
-            class="flex items-center gap-1 font-medium text-muted hover:text-brand-600"
-          >
-            <AppIcon name="arrow_back" class="!text-base" />
-            <span>{{ i18n.t('general.skinlib') }}</span>
-          </router-link>
-          <span class="text-muted/60">/</span>
-          <span class="max-w-[260px] truncate font-semibold text-ink sm:max-w-md" :title="texture.name">
-            {{ texture.name }}
-          </span>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <AppButton
-            v-if="canComment"
-            class="btn-sm"
-            @click="jumpToComments"
-          >
-            <AppIcon name="chat_bubble_outline" class="!text-sm" />
-            <span>{{ i18n.t('comments.navigation', { count: i18n.n(commentsTotal) }) }}</span>
-          </AppButton>
-        </div>
-      </nav>
-
+    <div v-else-if="texture" class="w-full space-y-6">
       <!-- 反馈信息横幅 -->
       <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
       <p v-if="errMsg" class="alert alert-danger" role="alert">{{ errMsg }}</p>
@@ -441,12 +465,28 @@ async function removeTexture() {
               </div>
             </template>
 
-            <!-- 渲染模式 -->
-            <MarkdownContent
-              v-else-if="description"
-              :content="description"
-              class="mt-4 prose max-w-none"
-            />
+            <!-- 渲染模式：有译文时主显译文，可展开原文 -->
+            <template v-else-if="description">
+              <details v-if="translatedDescription" class="mt-4">
+                <summary class="cursor-pointer select-none text-xs text-muted hover:text-brand-600">
+                  {{ i18n.t('skinlib.description_original') }}
+                </summary>
+                <MarkdownContent
+                  :content="description"
+                  class="prose max-w-none mt-2 opacity-80"
+                />
+              </details>
+              <MarkdownContent
+                v-if="translatedDescription"
+                :content="translatedDescription"
+                class="prose max-w-none"
+              />
+              <MarkdownContent
+                v-else
+                :content="description"
+                class="mt-4 prose max-w-none"
+              />
+            </template>
             <p v-else class="mt-4 text-sm text-muted italic">
               {{ i18n.t('skinlib.description_empty') }}
             </p>
@@ -496,7 +536,7 @@ async function removeTexture() {
                 <!-- 官方 / 来源 -->
                 <span
                   v-if="texture.official || texture.origin === 'repost'"
-                  class="badge !bg-brand-500/15 !text-brand-600 dark:!text-brand-400 font-medium"
+                  class="badge !bg-brand-500/15 !text-brand-600 dark:!text-brand-300 font-medium"
                 >
                   {{ texture.official ? i18n.t('skinlib.official_resource') : i18n.t('skinlib.origin_repost') }}
                 </span>
@@ -544,7 +584,7 @@ async function removeTexture() {
 
                 <!-- 下载材质 -->
                 <a
-                  v-if="site.get('allow_texture_download') !== 'false'"
+                  v-if="canDownload"
                   class="btn !text-xs justify-center"
                   :href="`/raw/${tid}`"
                   :download="`${texture.name || 'texture'}.png`"
@@ -567,9 +607,9 @@ async function removeTexture() {
                   <span>{{ i18n.t('editor.edit') }}</span>
                 </router-link>
 
-                <!-- 举报违规（拥有者不显示：不能举报自己的材质） -->
+                <!-- 举报违规（官方材质不提供举报；拥有者不显示：不能举报自己的材质；被禁用举报或已有待处理举报时不显示） -->
                 <AppButton
-                  v-if="session.user.value && !isOwner"
+                  v-if="session.user.value && !isOwner && !texture.official && !session.user.value.reportingDisabled && !reportPending"
                   class="btn flex-1 !text-xs justify-center text-muted hover:text-danger"
                   :title="i18n.t('skinlib.report.title')"
                   @click="reportOpen = true"
@@ -587,7 +627,7 @@ async function removeTexture() {
                 <dd>
                   <router-link
                     v-if="!texture.official && texture.uploaderId"
-                    :to="`/skinlib?uploader=${texture.uploaderId}`"
+                    :to="`/user/${texture.uploaderId}`"
                     class="text-brand-600 hover:underline font-medium"
                   >
                     {{ texture.uploaderName || i18n.t('admin.anonymous') }}
@@ -618,8 +658,8 @@ async function removeTexture() {
                 <dd class="font-medium">{{ i18n.n(texture.likes) }}</dd>
               </div>
 
-              <!-- 哈希值与复制小工具 -->
-              <div class="pt-2 border-t border-line/40">
+              <!-- 哈希值与复制小工具（仅管理员可见） -->
+              <div v-if="session.isAdmin.value" class="pt-2 border-t border-line/40">
                 <div class="flex items-center justify-between text-xs">
                   <dt class="text-muted">{{ i18n.t('skinlib.hash') }}</dt>
                   <dd>
@@ -724,6 +764,7 @@ async function removeTexture() {
           maxlength="1000"
           required
         />
+        <VerificationChallenge ref="reportChallenge" v-model="reportCaptchaToken" v-model:randstr="reportCaptchaRandstr" />
         <div class="flex justify-end gap-2 pt-2">
           <AppButton type="button" class="btn" @click="reportOpen = false">
             {{ i18n.t('general.cancel') }}

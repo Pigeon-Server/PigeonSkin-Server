@@ -20,11 +20,15 @@ import { createApp } from '../src/app.ts';
 import {
   runMigrations, markVerified, makeAdmin, readAudit,
 } from './setup.ts';
+import { BLOCKED_CRAWLER_AGENTS } from '../src/route-metadata.ts';
 
 let seq = 0;
-/** 唯一后缀。玩家名只允许官方字符集（字母数字下划线），不能带连字符。 */
+/**
+ * 唯一后缀。玩家名只允许官方字符集（字母数字下划线）且长度上限 16，
+ * 所以时间戳取 base36 末 6 位，保证 `bare_999_xxxxxx` 这类长前缀也不超限。
+ */
 function uniq(prefix: string): string {
-  return `${prefix}_${++seq}_${Date.now().toString(36).replace(/[^a-z0-9]/g, '')}`;
+  return `${prefix}_${++seq}_${Date.now().toString(36).replace(/[^a-z0-9]/g, '').slice(-6)}`;
 }
 
 const PASSWORD = 'correct-horse-9';
@@ -254,6 +258,11 @@ describe('会话与资料', () => {
     expect(anon.status).toBe(401);
   });
 
+  it('未知会话 token 视为未登录（401），而不是 500', async () => {
+    const res = await SELF.fetch('https://x/api/v1/auth/session', { headers: { cookie: 'bs_session=bogus' } });
+    expect(res.status).toBe(401);
+  });
+
   it('登出后 Cookie 失效', async () => {
     const u = await registerUser();
     const cookie = await login(u.email);
@@ -266,7 +275,7 @@ describe('会话与资料', () => {
 // ── 邮箱验证强制 ─────────────────────────────────────────────────────────────
 
 describe('require_email_verification', () => {
-  it('开启后未验证用户登录被拒（403 auth.email_not_verified）', async () => {
+  it('开启后未验证用户仍可登录，验证只在特定路由拦截', async () => {
     const u = await registerUser();
 
     // 用管理员 API 开启开关：写入路径会调用 invalidateSettingsCache()，
@@ -281,21 +290,12 @@ describe('require_email_verification', () => {
     });
     expect(patched.status).toBe(200);
 
-    const res = await SELF.fetch('https://x/api/v1/auth/login', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ identifier: u.email, password: PASSWORD }),
-    });
-    expect(res.status).toBe(403);
-    expect((await res.json<{ error: string }>()).error).toBe('auth.email_not_verified');
-
-    await markVerified(u.email);
-    const ok = await SELF.fetch('https://x/api/v1/auth/login', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ identifier: u.email, password: PASSWORD }),
-    });
-    expect(ok.status).toBe(200);
+    // 账号不被拦截：未验证用户照常拿到会话
+    const userCookie = await login(u.email);
+    const session = await authedFetch(userCookie, 'https://x/api/v1/auth/session');
+    expect(session.status).toBe(200);
+    // 未验证状态仍如实回报，用户中心据此显示提示与补发入口
+    expect((await session.json<{ emailVerified: boolean }>()).emailVerified).toBe(false);
 
     // 关掉开关，避免影响其它测试
     await authedFetch(cookie, 'https://x/api/v1/admin/settings', {
@@ -418,6 +418,201 @@ describe('纹理上传', () => {
     });
     expect(res.status).toBe(422);
     expect((await res.json<{ error: string }>()).error).toBe('report.self');
+  });
+  it('待处理举报拦截重复举报；处理完成后可再次举报', async () => {
+    const uploader = await registerUser();
+    const uploaderCookie = await login(uploader.email);
+    const up = await uploadTexture(uploaderCookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'default' });
+    const { id: textureId } = await up.json<{ id: number }>();
+
+    const reporter = await registerUser();
+    const reporterCookie = await login(reporter.email);
+    const submit = (reason: string) => authedFetch(reporterCookie, 'https://x/api/v1/reports', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ textureId, reason }),
+    });
+
+    // 第一次举报成功
+    expect((await submit('第一次举报')).status).toBe(201);
+    // pending 期间重复举报被 409 拦截
+    const dup = await submit('第二次举报');
+    expect(dup.status).toBe(409);
+    expect((await dup.json<{ error: string }>()).error).toBe('report.already_reported');
+
+    // 管理员处理举报（驳回）
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+    const list = await authedFetch(adminCookie, 'https://x/api/v1/reports/admin?status=pending');
+    const { items } = await list.json<{ items: Array<{ id: number }> }>();
+    const report = items.find(() => true);
+    expect(report).toBeDefined();
+    expect((await authedFetch(adminCookie, `https://x/api/v1/reports/${report!.id}/resolve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ action: 'reject' }),
+    })).status).toBe(200);
+
+    // 处理完成后可再次举报
+    expect((await submit('处理后再举报')).status).toBe(201);
+  });
+  it('举报押金扣款失败时撤销占位：不留举报记录也不扣分', async () => {
+    const uploader = await registerUser();
+    const uploaderCookie = await login(uploader.email);
+    const up = await uploadTexture(uploaderCookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'default' });
+    const { id: textureId } = await up.json<{ id: number }>();
+
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+    const setDelta = (value: number) => authedFetch(adminCookie, 'https://x/api/v1/admin/settings', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ settings: [{ key: 'reporter_score_delta', value }] }),
+    });
+    // 押金高于注册初始分（1000），提交必然扣款失败
+    expect((await setDelta(-2000)).status).toBe(200);
+    try {
+      const reporter = await registerUser();
+      const reporterCookie = await login(reporter.email);
+      const res = await authedFetch(reporterCookie, 'https://x/api/v1/reports', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+        body: JSON.stringify({ textureId, reason: '押金不足' }),
+      });
+      expect(res.status).toBe(402);
+
+      const rows = await env.DB.prepare('SELECT id FROM reports WHERE reporter_id = ?').bind(reporter.id).all();
+      expect(rows.results ?? []).toEqual([]);
+      const me = await authedFetch(reporterCookie, 'https://x/api/v1/me');
+      expect((await me.json<{ score: number }>()).score).toBe(1000);
+    } finally {
+      // 积分设置是全局的，恢复原值避免影响后续用例
+      expect((await setDelta(0)).status).toBe(200);
+    }
+  });
+  it('官方材质不提供举报与评论通道', async () => {
+    // 造一条官方材质（站点自有内容，official_key 非空）
+    const officialId = (await env.DB.prepare(
+      "INSERT INTO textures(hash,kind,model,name,uploader_id,size_bytes,visibility,width,height,likes,official_key,origin,created_at,updated_at) VALUES(?, 'skin','default','Official Test',NULL,8192,'public',64,64,1,'test.official', 'repost', 1, 1)",
+    ).bind('e'.repeat(64)).run().then(r => r.meta.last_row_id));
+    expect(officialId).toBeGreaterThan(0);
+
+    const reporter = await registerUser();
+    const reporterCookie = await login(reporter.email);
+    const submit = (path: string, body: Record<string, unknown>) => authedFetch(reporterCookie, `https://x${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify(body),
+    });
+
+    // 举报被 403 拒绝，且不落库
+    const report = await submit(`/api/v1/reports`, { textureId: officialId, reason: '官方材质举报' });
+    expect(report.status).toBe(403);
+    expect((await report.json<{ error: string }>()).error).toBe('report.official_disabled');
+    const reportRows = await env.DB.prepare('SELECT id FROM reports WHERE texture_id = ?').bind(officialId).all();
+    expect(reportRows.results ?? []).toEqual([]);
+
+    // 发评论被 403 拒绝
+    const comment = await submit(`/api/v1/textures/${officialId}/comments`, { content: '官方材质评论' });
+    expect(comment.status).toBe(403);
+    expect((await comment.json<{ error: string }>()).error).toBe('comment.official_disabled');
+    const commentRows = await env.DB.prepare('SELECT id FROM comments WHERE texture_id = ?').bind(officialId).all();
+    expect(commentRows.results ?? []).toEqual([]);
+
+    // 读取官方材质的评论列表同样 403
+    const list = await authedFetch(reporterCookie, `https://x/api/v1/textures/${officialId}/comments`);
+    expect(list.status).toBe(403);
+    expect((await list.json<{ error: string }>()).error).toBe('comment.official_disabled');
+  });
+  it('举报频率限制：每分钟超过 3 条被 429 拒绝', async () => {
+    const uploader = await registerUser();
+    const uploaderCookie = await login(uploader.email);
+    const texIds: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      // 每张 PNG 内容不同（填充 chunk 数量不同），避免哈希重复被去重拦截
+      const up = await uploadTexture(uploaderCookie, makePng({ width: 64, height: 64, fillerChunks: i + 1 }), { kind: 'skin', model: 'default' });
+      texIds.push((await up.json<{ id: number }>()).id);
+    }
+
+    const reporter = await registerUser();
+    const reporterCookie = await login(reporter.email);
+    const submit = (textureId: number) => authedFetch(reporterCookie, 'https://x/api/v1/reports', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ textureId, reason: '频控测试' }),
+    });
+
+    expect((await submit(texIds[0]!)).status).toBe(201);
+    expect((await submit(texIds[1]!)).status).toBe(201);
+    expect((await submit(texIds[2]!)).status).toBe(201);
+    const fourth = await submit(texIds[3]!);
+    expect(fourth.status).toBe(429);
+    expect((await fourth.json<{ error: string }>()).error).toBe('report.rate_limited');
+  });
+  it('管理员禁用举报权限后该用户不能举报，session 同步返回状态', async () => {
+    const uploader = await registerUser();
+    const uploaderCookie = await login(uploader.email);
+    const up = await uploadTexture(uploaderCookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'default' });
+    const { id: textureId } = await up.json<{ id: number }>();
+
+    const reporter = await registerUser();
+    const reporterCookie = await login(reporter.email);
+
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+
+    // 禁用举报权限
+    expect((await authedFetch(adminCookie, `https://x/api/v1/admin/users/${reporter.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ reportingDisabled: true }),
+    })).status).toBe(200);
+
+    // session 返回禁用状态
+    const session = await authedFetch(reporterCookie, 'https://x/api/v1/auth/session');
+    expect((await session.json<{ reportingDisabled: boolean; commentsDisabled: boolean }>())).toMatchObject({ reportingDisabled: true, commentsDisabled: false });
+
+    // /me 与 session 的序列化保持一致
+    const me = await authedFetch(reporterCookie, 'https://x/api/v1/me');
+    expect((await me.json<{ reportingDisabled: boolean; commentsDisabled: boolean }>())).toMatchObject({ reportingDisabled: true, commentsDisabled: false });
+
+    // 提交举报被 403 拒绝
+    const res = await authedFetch(reporterCookie, 'https://x/api/v1/reports', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ textureId, reason: '被禁用后举报' }),
+    });
+    expect(res.status).toBe(403);
+    expect((await res.json<{ error: string }>()).error).toBe('report.disabled');
+  });
+  it('管理员禁用评论权限后该用户不能发评论', async () => {
+    const uploader = await registerUser();
+    const uploaderCookie = await login(uploader.email);
+    const up = await uploadTexture(uploaderCookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'default' });
+    const { id: textureId } = await up.json<{ id: number }>();
+
+    const commenter = await registerUser();
+    const commenterCookie = await login(commenter.email);
+
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+    expect((await authedFetch(adminCookie, `https://x/api/v1/admin/users/${commenter.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ commentsDisabled: true }),
+    })).status).toBe(200);
+
+    const res = await authedFetch(commenterCookie, `https://x/api/v1/textures/${textureId}/comments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({ content: '被禁用后的评论' }),
+    });
+    expect(res.status).toBe(403);
+    expect((await res.json<{ error: string }>()).error).toBe('comment.user_disabled');
   });
   it('keeps texture awards intact when switching from private to public and claws them back only when privatizing', async () => {
     const user = await registerUser();
@@ -1088,6 +1283,41 @@ describe('sitemap 自动生成', () => {
     expect(body).toContain('Disallow: /api/');
   });
 
+  it('Claude 抓取代理在 robots.txt 被单独禁止，且请求层直接 403', async () => {
+    for (const agent of BLOCKED_CRAWLER_AGENTS) {
+      const body = await (await SELF.fetch('https://x/robots.txt')).text();
+      expect(body, agent).toContain(`User-agent: ${agent}\nDisallow: /`);
+    }
+
+    const bot = { headers: { 'user-agent': 'Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)' } };
+    // 整站一律 403：API、SPA 路由、协议路径、衍生图与静态资源都不例外。
+    // 断言响应体而不只看状态码 —— /raw/1 这类路径在关闭下载时自身也返回 403，
+    // 只看状态码分不出是守卫拦的还是路由拒的。
+    for (const path of ['/api/v1/settings/public', '/skinlib', '/textures/abc', '/api/yggdrasil', '/raw/1', '/avatar/u/1', '/manual/x.png', '/yggc/authserver/authenticate']) {
+      const res = await SELF.fetch(`https://x${path}`, bot);
+      expect(res.status, path).toBe(403);
+      expect(await res.text(), path).toBe('Forbidden');
+      expect(res.headers.get('cache-control'), path).toBe('no-store');
+    }
+    // robots.txt 自身放行，否则合规爬虫读不到自己的禁止规则
+    expect((await SELF.fetch('https://x/robots.txt', bot)).status).toBe(200);
+    // 名单里每个 UA 在请求层都被拦，不依赖单测那份清单
+    for (const agent of BLOCKED_CRAWLER_AGENTS) {
+      const blocked = await SELF.fetch('https://x/api/v1/settings/public', { headers: { 'user-agent': `Mozilla/5.0 (compatible; ${agent}/1.0)` } });
+      expect(blocked.status, agent).toBe(403);
+      expect(await blocked.text(), agent).toBe('Forbidden');
+    }
+
+    // 用户主动让 Claude 读取页面（Claude-User）不是爬虫：不声明也不拦
+    const userAgentBot = { headers: { 'user-agent': 'claude-user/1.0; +claude-user@anthropic.com' } };
+    expect(await (await SELF.fetch('https://x/robots.txt')).text()).not.toContain('User-agent: Claude-User');
+    expect((await SELF.fetch('https://x/api/v1/settings/public', userAgentBot)).status).toBe(200);
+
+    // 普通浏览器不受影响
+    const browser = { headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36' } };
+    expect((await SELF.fetch('https://x/api/v1/settings/public', browser)).status).toBe(200);
+  });
+
   it('sitemap.xml 仅包含公开页面；私有纹理和账号页面不出现', async () => {
     const u = await registerUser();
     const cookie = await login(u.email);
@@ -1376,5 +1606,199 @@ describe('rateLimiter', () => {
     // ratelimits binding → 中间件走 binding 缺失分支放行。断言请求可达业务层。
     const res = await SELF.fetch('https://x/api/v1/health');
     expect(res.status).toBe(200);
+  });
+});
+
+// ── 未登录下载限制 ───────────────────────────────────────────────────────────
+
+async function readSettingRow(key: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key=? AND locale=''")
+    .bind(key)
+    .first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+async function writeSetting(key: string, value: string | null): Promise<void> {
+  if (value === null) {
+    await env.DB.prepare("DELETE FROM settings WHERE key=? AND locale=''").bind(key).run();
+  } else {
+    await env.DB.prepare(
+      "INSERT INTO settings(key,locale,value,updated_at) VALUES(?, '', ?, ?) ON CONFLICT(key,locale) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+    )
+      .bind(key, value, Date.now())
+      .run();
+  }
+  invalidateSettingsCache();
+}
+
+describe('未登录下载限制', () => {
+  it('关闭 allow_anonymous_download 后匿名下载返回 401，登录用户与游戏协议出口不受影响', async () => {
+    const u = await registerUser();
+    const cookie = await login(u.email);
+    const up = await uploadTexture(cookie, makePng({ width: 64, height: 64 }), {
+      kind: 'skin',
+      name: uniq('anon'),
+    });
+    expect(up.status).toBe(201);
+    const { id: tid, hash } = await up.json<{ id: number; hash: string }>();
+
+    const previousDownload = await readSettingRow('allow_texture_download');
+    const previousAnonymous = await readSettingRow('allow_anonymous_download');
+    try {
+      await writeSetting('allow_texture_download', 'true');
+      await writeSetting('allow_anonymous_download', 'true');
+      const open = await SELF.fetch(`https://x/raw/${tid}`);
+      expect(open.status).toBe(200);
+      expect((await open.arrayBuffer()).byteLength).toBeGreaterThan(0);
+
+      await writeSetting('allow_anonymous_download', 'false');
+      const blocked = await SELF.fetch(`https://x/raw/${tid}`);
+      expect(blocked.status).toBe(401);
+      await blocked.arrayBuffer();
+
+      const signedIn = await authedFetch(cookie, `https://x/raw/${tid}`);
+      expect(signedIn.status).toBe(200);
+      expect((await signedIn.arrayBuffer()).byteLength).toBeGreaterThan(0);
+
+      // 按哈希取字节是 Minecraft 协议出口，CSL 客户端不带 Cookie，
+      // 因此该设置只能收口浏览器下载入口，不能连带阻断这里。
+      const protocol = await SELF.fetch(`https://x/textures/${hash}`);
+      expect(protocol.status).toBe(200);
+      expect((await protocol.arrayBuffer()).byteLength).toBeGreaterThan(0);
+    } finally {
+      await writeSetting('allow_texture_download', previousDownload);
+      await writeSetting('allow_anonymous_download', previousAnonymous);
+    }
+  });
+});
+
+// ── 工单回复身份 ─────────────────────────────────────────────────────────────
+
+describe('工单回复身份', () => {
+  interface TicketCategory { id: number }
+
+  async function createTicket(cookie: string): Promise<number> {
+    const cats = await authedFetch(cookie, 'https://x/api/v1/tickets/categories');
+    const { items } = await cats.json<{ items: TicketCategory[] }>();
+    expect(items.length).toBeGreaterThan(0);
+    const form = new FormData();
+    form.set('title', uniq('t'));
+    form.set('categoryId', String(items[0]!.id));
+    form.set('description', '初始描述');
+    const res = await authedFetch(cookie, 'https://x/api/v1/tickets', { method: 'POST', body: form });
+    expect(res.status).toBe(201);
+    return (await res.json<{ id: number }>()).id;
+  }
+
+  it('管理员在用户端回复自己的工单仍记为用户回复，状态回到 pending', async () => {
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+
+    const ticketId = await createTicket(adminCookie);
+
+    // 通过用户端点回复（管理员账号）
+    const form = new FormData();
+    form.set('body', '我是管理员但以用户身份补充信息');
+    const reply = await authedFetch(adminCookie, `https://x/api/v1/tickets/${ticketId}/messages`, { method: 'POST', body: form });
+    expect(reply.status).toBe(200);
+
+    const detail = await authedFetch(adminCookie, `https://x/api/v1/tickets/${ticketId}`);
+    const { ticket, messages } = await detail.json<{ ticket: { status: string }; messages: Array<{ authorType: string; body: string }> }>();
+    const mine = messages.filter(m => m.body === '我是管理员但以用户身份补充信息');
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.authorType).toBe('user');
+    // 用户回复把工单推回 pending（等待客服处理）
+    expect(ticket.status).toBe('pending');
+  });
+
+  it('管理员通过管理端点回复记为 admin 回复，状态推进为 in_progress', async () => {
+    const owner = await registerUser();
+    const ownerCookie = await login(owner.email);
+    const ticketId = await createTicket(ownerCookie);
+
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+
+    const form = new FormData();
+    form.set('body', '客服回复');
+    const reply = await authedFetch(adminCookie, `https://x/api/v1/admin/tickets/${ticketId}/messages`, { method: 'POST', body: form });
+    expect(reply.status).toBe(200);
+
+    const detail = await authedFetch(ownerCookie, `https://x/api/v1/tickets/${ticketId}`);
+    const { ticket, messages } = await detail.json<{ ticket: { status: string }; messages: Array<{ authorType: string; body: string }> }>();
+    const replyMsg = messages.find(m => m.body === '客服回复');
+    expect(replyMsg?.authorType).toBe('admin');
+    expect(ticket.status).toBe('in_progress');
+  });
+
+  it('内部备注对普通用户不可见；用户端点传 internal=true 被忽略', async () => {
+    const owner = await registerUser();
+    const ownerCookie = await login(owner.email);
+    const ticketId = await createTicket(ownerCookie);
+
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+
+    // 管理端点发内部备注
+    const internalForm = new FormData();
+    internalForm.set('body', '内部备注内容');
+    internalForm.set('internal', 'true');
+    expect((await authedFetch(adminCookie, `https://x/api/v1/admin/tickets/${ticketId}/messages`, { method: 'POST', body: internalForm })).status).toBe(200);
+
+    // 管理员能看到内部备注
+    const adminDetail = await authedFetch(adminCookie, `https://x/api/v1/admin/tickets/${ticketId}`);
+    const adminMessages = await adminDetail.json<{ messages: Array<{ internal: number }> }>();
+    expect(adminMessages.messages.some(m => m.internal === 1)).toBe(true);
+
+    // 普通用户看不到内部备注，状态也不因内部备注改变
+    const ownerDetail = await authedFetch(ownerCookie, `https://x/api/v1/tickets/${ticketId}`);
+    const ownerView = await ownerDetail.json<{ ticket: { status: string }; messages: Array<{ body: string }> }>();
+    expect(ownerView.messages.some(m => m.body === '内部备注内容')).toBe(false);
+    expect(ownerView.ticket.status).toBe('pending');
+
+    // 用户端点传 internal=true 被忽略（不产生内部消息，也不 403）
+    const smuggle = new FormData();
+    smuggle.set('body', '用户正常回复');
+    smuggle.set('internal', 'true');
+    expect((await authedFetch(ownerCookie, `https://x/api/v1/tickets/${ticketId}/messages`, { method: 'POST', body: smuggle })).status).toBe(200);
+    const after = await authedFetch(adminCookie, `https://x/api/v1/admin/tickets/${ticketId}`);
+    const afterView = await after.json<{ messages: Array<{ body: string; internal: number }> }>();
+    const smuggled = afterView.messages.find(m => m.body === '用户正常回复');
+    expect(smuggled?.internal).toBe(0);
+  });
+
+  it('非管理员调用管理端点回复被 403 拒绝', async () => {
+    const owner = await registerUser();
+    const ownerCookie = await login(owner.email);
+    const ticketId = await createTicket(ownerCookie);
+
+    const form = new FormData();
+    form.set('body', '越权尝试');
+    const res = await authedFetch(ownerCookie, `https://x/api/v1/admin/tickets/${ticketId}/messages`, { method: 'POST', body: form });
+    expect(res.status).toBe(403);
+  });
+
+  it('管理员在用户端查看工单按用户身份更新读标记', async () => {
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+    const ticketId = await createTicket(adminCookie);
+
+    // 先置一个旧的用户读标记
+    const now = Date.now();
+    await env.DB.prepare('UPDATE tickets SET last_user_read_at=? WHERE id=?').bind(now - 60_000, ticketId).run();
+
+    // 用户端点查看 → last_user_read_at 应被推进
+    expect((await authedFetch(adminCookie, `https://x/api/v1/tickets/${ticketId}`)).status).toBe(200);
+    const row = await env.DB.prepare('SELECT last_user_read_at as v FROM tickets WHERE id=?').bind(ticketId).first<{ v: number }>();
+    expect(row!.v).toBeGreaterThan(now - 1000);
+
+    // 「我的工单」列表不再显示未读（EXISTS 返回 0/1 整数）
+    const list = await authedFetch(adminCookie, 'https://x/api/v1/tickets');
+    const listBody = await list.json<{ items: Array<{ id: number; userUnread: number }> }>();
+    expect(listBody.items.find(t => t.id === ticketId)?.userUnread).toBe(0);
   });
 });

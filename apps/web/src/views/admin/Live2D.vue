@@ -4,6 +4,9 @@ import type { Live2DModelInfo } from '@pigeon-skin/shared/live2d';
 import { ApiError, live2dApi } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import Live2DCanvas from '@/components/Live2DCanvas.vue';
+import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
+import { useSearchExpression } from '@/lib/search-expression';
+import { matchSearch, searchSchema } from '@pigeon-skin/shared/search';
 
 const i18n = useI18n();
 const models = ref<Live2DModelInfo[]>([]);
@@ -25,9 +28,12 @@ const name = ref('');
 const file = ref<File | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const preview = computed(() => models.value.find(model => model.id === selected.value));
+const searchState = useSearchExpression(search, 'live2d');
+const live2dSchema = searchSchema('live2d');
 const modelGroups = computed(() => {
-  const term = search.value.trim().toLowerCase();
-  const matches = models.value.filter(model => model.id === selected.value || !term || model.name.toLowerCase().includes(term));
+  const ast = searchState.value;
+  // 解析不了的输入按普通关键词过滤（见 searchAst），当前选中的模型始终保留在列表里
+  const matches = models.value.filter(model => model.id === selected.value || !ast || matchSearch(ast, live2dSchema, { name: model.name, id: model.id }));
   return [
     { label: 'live2d.uploaded_models', items: matches.filter(model => !model.builtin) },
     { label: 'live2d.cubism2_models', items: matches.filter(model => model.builtin && model.version === 2) },
@@ -84,7 +90,7 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="page">
     <PageHeader :title="i18n.t('live2d.title')" />
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
@@ -97,7 +103,7 @@ onMounted(load);
           <div class="flex items-center gap-2"><AppSwitch v-model="enabled" :disabled="busy" :label="i18n.t('live2d.enabled')" /><span>{{ i18n.t('live2d.enabled') }}</span></div>
           <div>
             <label for="live2d-model" class="mb-2 block text-sm">{{ i18n.t('live2d.model') }}</label>
-            <AppInput v-model="search" type="search" class="mb-2" :placeholder="i18n.t('live2d.search_models')" :aria-label="i18n.t('live2d.search_models')" :disabled="busy" />
+            <SearchExpressionField v-model="search" schema-key="live2d" class="mb-2" :placeholder="i18n.t('live2d.search_models')" :aria-label="i18n.t('live2d.search_models')" :disabled="busy" />
             <AppSelect id="live2d-model" v-model="selected" :options="modelGroups.flatMap(group => group.items.map(model => ({ value: model.id, label: `${i18n.t(group.label)} · ${model.name}` })))" :disabled="busy" />
             <p class="mt-2 text-xs text-muted">{{ i18n.t('live2d.catalog_hint') }} <a class="text-brand underline" href="https://github.com/imuncle/live2d" target="_blank" rel="noopener noreferrer">imuncle/live2d</a></p>
           </div>

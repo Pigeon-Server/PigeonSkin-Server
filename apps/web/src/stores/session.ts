@@ -33,7 +33,8 @@ export function useSessionStore() {
     password: string;
     keep?: boolean;
     destination?: string;
-    turnstileToken?: string;
+    captchaToken?: string;
+    captchaRandstr?: string;
     retainUserId?: number;
     conflictPasswords?: Array<{ userId: number; password: string }>;
   }) {
@@ -48,7 +49,8 @@ export function useSessionStore() {
     password: string;
     playerName?: string;
     nickname?: string;
-    turnstileToken?: string;
+    captchaToken?: string;
+    captchaRandstr?: string;
   }) {
     await api.register(input);
     await fetchSession(true);

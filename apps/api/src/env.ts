@@ -22,19 +22,32 @@ export interface Bindings {
   RL_GLOBAL?: { limit(params: { key: string }): Promise<{ success: boolean }> };
   /** 认证端点的更紧桶 */
   RL_AUTH?: { limit(params: { key: string }): Promise<{ success: boolean }> };
+  /** 皮肤库反爬：匿名访客桶（按 IP 计数，默认 60 req/min） */
+  RL_SKINLIB?: { limit(params: { key: string }): Promise<{ success: boolean }> };
+  /** 皮肤库反爬：登录用户桶（按账号计数，默认 300 req/min） */
+  RL_SKINLIB_USER?: { limit(params: { key: string }): Promise<{ success: boolean }> };
 
   // ── 运行环境与业务配置的兼容绑定 ────────────────────────────────────────
   ENVIRONMENT: 'development' | 'preview' | 'production';
   /** 规范 Origin，用于邮件链接与绝对 URL */
   APP_URL: string;
   MAIL_FROM: string;
-  /** Turnstile 开关。自托管部署可关掉。 */
+  /** 邮件驱动：resend（HTTP API）或 smtp（直连 SMTP，走 cloudflare:sockets） */
+  MAIL_DRIVER?: string;
+  SMTP_HOST?: string;
+  SMTP_PORT?: string;
+  SMTP_ENCRYPTION?: string;
+  SMTP_USERNAME?: string;
+  SMTP_PASSWORD?: string;
+  /** Turnstile 开关。自托管部署可关掉。已由 CAPTCHA_DRIVER 取代，仅迁移期读取。 */
   TURNSTILE_ENABLED: string;
   /** 是否下发预生成的衍生图 */
   DERIVATIVES_ENABLED: string;
   OFFICIAL_CATALOG_ENABLED?: string;
   /** 限流开关 */
   RATE_LIMIT_ENABLED?: string;
+  /** 皮肤库反爬守卫开关（默认开）。关闭后皮肤库不再限流与挑战 */
+  SKINLIB_GUARD_ENABLED?: string;
 
   // ── Secrets（wrangler secret put）────────────────────────────────────────
   /** 会话与签名链接的签名密钥 */
@@ -45,6 +58,13 @@ export interface Bindings {
   UPDATE_MANIFEST_URL?: string;
   TURNSTILE_SECRET?: string;
   TURNSTILE_SITE_KEY?: string;
+  /** 人机验证驱动：'' 关闭 | turnstile | recaptcha_v2 | recaptcha_v3 | tencent | aliyun */
+  CAPTCHA_DRIVER?: string;
+  CAPTCHA_SITE_KEY?: string;
+  CAPTCHA_SECRET?: string;
+  ALIYUN_CAPTCHA_ACCESS_KEY_ID?: string;
+  /** reCAPTCHA v3 可信度分数阈值（0–100，50 = 0.50） */
+  RECAPTCHA_V3_THRESHOLD?: string;
   RESEND_API_KEY?: string;
   /**
    * 旧站的 SALT 环境变量值。**仅迁移期需要**，用于验证 SALTED2* 家族的历史哈希。
@@ -66,6 +86,21 @@ export interface Bindings {
 
   /** Workers AI 审核评论用的绑定（wrangler ai） */
   AI?: { run(model: string, input: unknown): Promise<unknown> };
+
+  // ── Node 自托管部署的 LLM 审核配置（Workers 上不存在，无绑定即 fail-open）──
+  /** workers（默认，用平台 AI 绑定）| openai（任意 OpenAI 兼容端点）| anthropic | systemone（判别模型） */
+  AI_MODERATION_DRIVER?: string;
+  OPENAI_API_KEY?: string;
+  /** 默认 https://api.openai.com/v1；可指向 Ollama/vLLM/OpenRouter 等 */
+  OPENAI_BASE_URL?: string;
+  OPENAI_MODERATION_MODEL?: string;
+  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_MODERATION_MODEL?: string;
+  /** TypeSafe System One（Jev 判别模型）API Key */
+  TYPESAFE_API_KEY?: string;
+  /** Node 自托管经 Cloudflare REST API 调用 Clef 判别模型时的账户与凭据 */
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  CLOUDFLARE_API_TOKEN?: string;
 }
 
 /** 判断是否启用了某个布尔型部署配置（'true' / '1' 都算开） */
@@ -100,6 +135,7 @@ export const SETTING_DEFAULTS = {
   max_upload_size_kb: '1024',
   max_texture_width: '8192',
   allow_texture_download: 'false',
+  allow_anonymous_download: 'true',
   private_texture_status: '403',
   sign_score_min: '10',
   sign_score_max: '100',
@@ -149,12 +185,42 @@ export const SETTING_DEFAULTS = {
   // 评论区（Workers AI 审核）
   comments_enabled: 'true',
   comments_ai_moderation: 'true',
+
+  // ── AI 网关（ai-gateway.ts 任务注册表的可配置项）──────────────────────────
+  // 全局并发上限：单次 processDueJobs 同时执行的 LLM 调用数
+  ai_max_concurrency: '2',
+  // 材质名/简介：AI 翻译与 AI 审核（默认关，需要管理员显式开启）
+  texture_ai_translation: 'false',
+  texture_ai_moderation: 'false',
+  // 站点公告：AI 翻译（默认关，需要管理员显式开启）
+  notification_ai_translation: 'false',
+  // 单次 AI 调用超时（秒）。自托管推理模型（Qwen/DeepSeek-R1）可能远慢于托管 API
+  ai_timeout_seconds: '25',
+  // 思考模式：default=随模型；disabled=禁用思考（Qwen3 enable_thinking=false，快且直接输出结论）；
+  // enabled=强制开启。仅对 OpenAI 兼容驱动通过 chat_template_kwargs 下发
+  ai_reasoning: 'default',
+
   official_resources_auto_update: 'true',
   // restricted-email-domains（JSON 数组字符串）
   restricted_email_allow: '[]',
   restricted_email_deny: '[]',
   // sitemap 纳入的 URL 上限（纹理+玩家各取 min）
   sitemap_max_urls: '20000',
+
+  // ── AI 网关每任务的可覆盖项 ────────────────────────────────────────────────
+  // 键形如 ai_<task>_model / ai_<task>_prompt / ai_<task>_mode，空 = 用
+  // ai-gateway.ts AI_JOB_DEFINITIONS 里的内置默认。
+  ai_comments_moderation_model: '',
+  ai_comments_moderation_prompt: '',
+  ai_comments_moderation_mode: '',
+  ai_texture_translate_model: '',
+  ai_texture_translate_prompt: '',
+  ai_texture_moderate_model: '',
+  ai_texture_moderate_prompt: '',
+  ai_texture_moderate_mode: '',
+  // ── 判别模型驱动（System One / Clef）──────────────────────────────────────
+  // 判别模型 noul 概率 ≥ 阈值判定违规。按整数百分数存储（10–90），50 = 0.5
+  ai_discriminative_threshold: '50',
 } as const;
 
 export type SettingKey = keyof typeof SETTING_DEFAULTS;

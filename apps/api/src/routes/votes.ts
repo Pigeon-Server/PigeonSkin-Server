@@ -2,6 +2,9 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { AppError, currentUser, currentAdmin, readJson, readPagination, paginate, toErrorResponse } from '../framework.ts';
 import { getSettingBool, clientIp, type AppEnv } from '../lib.ts';
+import { jsonArrayEachRows, jsonArrayLength, jsonGroupArrayText } from '@pigeon-skin/db';
+import { expressionMentionsValue } from '@pigeon-skin/shared/search';
+import { appendFragment, readSearch, readSearchAst, voteStatusExpr } from '../search/index.ts';
 import { audit } from '../services/audit.ts';
 import { voteInput, draftInput, findVote, voteDetail, voteStatus, eligibility, saveDraft, type VoteRow } from '../services/votes.ts';
 import { serverBackendVoteAdapter } from '../services/vote-playtime.ts';
@@ -45,7 +48,7 @@ export function registerVoteRoutes(app: Hono<AppEnv>) {
     if (body.optionIds.some(id => !options.results.some(o => o.id === id))) throw new AppError('common.invalid_request', 422);
     const ballotId = crypto.randomUUID(), now = Date.now(), selected = JSON.stringify(body.optionIds);
     const result = await c.env.DB.batch([
-c.env.DB.prepare("INSERT OR IGNORE INTO pigeon_ballots (id, vote_id, user_id, voter_name, option_ids, created_at, updated_at, ip) SELECT ?, v.id, u.id, u.nickname, ?, ?, ?, ? FROM pigeon_votes v JOIN users u ON u.id = ? WHERE v.id = ? AND v.version = ? AND v.status = 'published' AND v.archived_at IS NULL AND v.starts_at <= ? AND v.ends_at > ? AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'votes_enabled' AND locale = '' AND value IN ('false', '0')) AND u.role != 'banned' AND u.score >= v.min_score AND (v.registered_before IS NULL OR u.created_at <= v.registered_before) AND (v.require_verified = 0 OR u.email_verified_at IS NOT NULL) AND json_array_length(?) <= v.max_choices AND NOT EXISTS (SELECT 1 FROM json_each(?) j WHERE NOT EXISTS (SELECT 1 FROM pigeon_vote_options o WHERE o.vote_id = v.id AND o.id = j.value))")
+c.env.DB.prepare(`INSERT OR IGNORE INTO pigeon_ballots (id, vote_id, user_id, voter_name, option_ids, created_at, updated_at, ip) SELECT ?, v.id, u.id, u.nickname, ?, ?, ?, ? FROM pigeon_votes v JOIN users u ON u.id = ? WHERE v.id = ? AND v.version = ? AND v.status = 'published' AND v.archived_at IS NULL AND v.starts_at <= ? AND v.ends_at > ? AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'votes_enabled' AND locale = '' AND value IN ('false', '0')) AND u.role != 'banned' AND u.score >= v.min_score AND (v.registered_before IS NULL OR u.created_at <= v.registered_before) AND (v.require_verified = 0 OR u.email_verified_at IS NOT NULL) AND ${jsonArrayLength('?')} <= v.max_choices AND NOT EXISTS (SELECT 1 FROM ${jsonArrayEachRows('?')} j WHERE NOT EXISTS (SELECT 1 FROM pigeon_vote_options o WHERE o.vote_id = v.id AND o.id = j.value))`)
         .bind(ballotId, selected, now, now, clientIp(c), user.id, v.id, body.version, now, now, selected, selected),
       c.env.DB.prepare('INSERT INTO pigeon_ballot_events (ballot_id, option_ids, created_at, revision) SELECT id, option_ids, created_at, revision FROM pigeon_ballots WHERE id = ?').bind(ballotId),
     ]);
@@ -57,18 +60,28 @@ c.env.DB.prepare("INSERT OR IGNORE INTO pigeon_ballots (id, vote_id, user_id, vo
   });
   r.use('/admin/votes/*', async (c, next) => { currentAdmin(c); await next(); });
   r.get('/admin/votes', async c => {
-    currentAdmin(c); const page = readPagination(c), status = c.req.query('status') || '', q = c.req.query('q') || '', now = Date.now();
-    const filter = "(? = '' OR CASE WHEN archived_at IS NOT NULL THEN 'archived' WHEN status != 'published' THEN status WHEN ends_at <= ? THEN 'ended' WHEN starts_at > ? THEN 'scheduled' ELSE 'active' END = ?) AND (? = 'archived' OR archived_at IS NULL) AND title LIKE ?";
-    const binds = [status, now, now, status, status, `%${q}%`];
-    const total = await c.env.DB.prepare(`SELECT count(*) AS n FROM pigeon_votes WHERE ${filter}`).bind(...binds).first<{ n: number }>();
-    const rows = await c.env.DB.prepare(`SELECT v.*, (SELECT count(*) FROM pigeon_ballots b WHERE b.vote_id = v.id) AS participants FROM pigeon_votes v WHERE ${filter} ORDER BY created_at DESC, id LIMIT ? OFFSET ?`).bind(...binds, page.perPage, page.offset).all<VoteRow & { participants: number }>();
+    currentAdmin(c); const page = readPagination(c), status = c.req.query('status') || '';
+    // 状态是与公开列表共用的派生表达式；搜索表达式编译成片段后并入 WHERE。
+    // 归档行默认不出现，只有状态下拉选 archived、或表达式明确写了 status:archived 时才放行
+    const ast = readSearchAst(c, 'votes');
+    const wantsArchived = ast !== null && expressionMentionsValue(ast, 'status', 'archived');
+    const conditions = [
+      `(? = '' OR ${voteStatusExpr('v')} = ?)`,
+      wantsArchived ? '1=1' : `(? = 'archived' OR v.archived_at IS NULL)`,
+    ];
+    // 归档放行时第二条条件没有占位符，绑定值必须同步减少
+    const binds: unknown[] = wantsArchived ? [status, status] : [status, status, status];
+    appendFragment(conditions, binds, readSearch(c, 'votes'));
+    const filter = conditions.join(' AND ');
+    const total = await c.env.DB.prepare(`SELECT count(*) AS n FROM pigeon_votes v WHERE ${filter}`).bind(...binds).first<{ n: number }>();
+    const rows = await c.env.DB.prepare(`SELECT v.*, (SELECT count(*) FROM pigeon_ballots b WHERE b.vote_id = v.id) AS participants FROM pigeon_votes v WHERE ${filter} ORDER BY v.created_at DESC, v.id LIMIT ? OFFSET ?`).bind(...binds, page.perPage, page.offset).all<VoteRow & { participants: number }>();
     return c.json(paginate(rows.results.map(v => ({ id: v.id, title: v.title, description: v.description, status: voteStatus(v), startsAt: v.starts_at, endsAt: v.ends_at, participants: v.participants })), total?.n ?? 0, page));
   });
   r.get('/admin/votes/records', async c => {
     currentAdmin(c); const page = readPagination(c), vote = c.req.query('vote') || '', user = c.req.query('user') || '';
     const condition = "(? = '' OR b.vote_id = ?) AND (? = '' OR b.user_id = ?)";
     const total = await c.env.DB.prepare(`SELECT count(*) AS n FROM pigeon_ballots b WHERE ${condition}`).bind(vote, vote, user, user).first<{ n: number }>();
-    const rows = await c.env.DB.prepare(`SELECT b.id, b.vote_id AS voteId, v.title AS voteTitle, b.user_id AS userId, b.voter_name AS voterName, b.option_ids AS optionIds, b.created_at AS createdAt, b.ip, (SELECT json_group_array(o.title) FROM pigeon_vote_options o, json_each(b.option_ids) j WHERE o.id = j.value AND o.vote_id = b.vote_id) AS optionTitles FROM pigeon_ballots b JOIN pigeon_votes v ON v.id = b.vote_id WHERE ${condition} ORDER BY b.created_at DESC, b.id LIMIT ? OFFSET ?`).bind(vote, vote, user, user, page.perPage, page.offset).all<{ optionIds: string; optionTitles: string }>();
+    const rows = await c.env.DB.prepare(`SELECT b.id, b.vote_id AS voteId, v.title AS voteTitle, b.user_id AS userId, b.voter_name AS voterName, b.option_ids AS optionIds, b.created_at AS createdAt, b.ip, (SELECT ${jsonGroupArrayText('o.title')} FROM pigeon_vote_options o, ${jsonArrayEachRows('b.option_ids')} j WHERE o.id = j.value AND o.vote_id = b.vote_id) AS optionTitles FROM pigeon_ballots b JOIN pigeon_votes v ON v.id = b.vote_id WHERE ${condition} ORDER BY b.created_at DESC, b.id LIMIT ? OFFSET ?`).bind(vote, vote, user, user, page.perPage, page.offset).all<{ optionIds: string; optionTitles: string }>();
     return c.json(paginate(rows.results.map(b => ({ ...b, optionIds: JSON.parse(b.optionIds), optionTitles: JSON.parse(b.optionTitles) })), total?.n ?? 0, page));
   });
   r.get('/admin/votes/export', async c => {
@@ -76,7 +89,7 @@ c.env.DB.prepare("INSERT OR IGNORE INTO pigeon_ballots (id, vote_id, user_id, vo
     const condition = "(? = '' OR b.vote_id = ?) AND (? = '' OR b.user_id = ?)";
     const total = await c.env.DB.prepare(`SELECT count(*) AS n FROM pigeon_ballots b WHERE ${condition}`).bind(vote, vote, user, user).first<{ n: number }>();
     if ((total?.n ?? 0) > 5000) throw new AppError('votes.export_limit', 422);
-    const { results } = await c.env.DB.prepare(`SELECT v.title, b.user_id, b.voter_name, b.created_at, b.ip, (SELECT json_group_array(o.title) FROM pigeon_vote_options o, json_each(b.option_ids) j WHERE o.id = j.value AND o.vote_id = b.vote_id) AS choices FROM pigeon_ballots b JOIN pigeon_votes v ON v.id = b.vote_id WHERE ${condition} ORDER BY b.created_at, b.id LIMIT 5000`).bind(vote, vote, user, user).all<{ title: string; user_id: number | null; voter_name: string; created_at: number; ip: string | null; choices: string }>();
+    const { results } = await c.env.DB.prepare(`SELECT v.title, b.user_id, b.voter_name, b.created_at, b.ip, (SELECT ${jsonGroupArrayText('o.title')} FROM pigeon_vote_options o, ${jsonArrayEachRows('b.option_ids')} j WHERE o.id = j.value AND o.vote_id = b.vote_id) AS choices FROM pigeon_ballots b JOIN pigeon_votes v ON v.id = b.vote_id WHERE ${condition} ORDER BY b.created_at, b.id LIMIT 5000`).bind(vote, vote, user, user).all<{ title: string; user_id: number | null; voter_name: string; created_at: number; ip: string | null; choices: string }>();
     const cell = (v: unknown) => { let s = String(v ?? ''); if (/^[\s]*[=+@-]/.test(s)) s = `'${s}`; return `"${s.replace(/"/g, '""')}"`; };
     const rows = [['投票', '用户 ID', '用户昵称', '所选选项', '提交时间（UTC）', 'IP'], ...results.map(b => [b.title, b.user_id, b.voter_name, (JSON.parse(b.choices) as string[]).join('；'), new Date(b.created_at).toISOString(), b.ip])];
     await audit(c.env, { actorId: actor.id, action: 'admin.vote.export', detail: `vote:${vote};user:${user};count:${results.length}` });

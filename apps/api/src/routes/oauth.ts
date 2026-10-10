@@ -200,7 +200,7 @@ export function registerOAuthRoutes(app: Hono<AppEnv>): void {
     if (!user) throw new AppError('common.unauthorized', 401);
     const provider = c.req.param('provider');
     if (!providers(c).some(p => p.id === provider)) throw new AppError('common.not_found', 404);
-    const deleted = await c.env.DB.prepare("DELETE FROM user_identities WHERE user_id = ? AND provider = ? AND (EXISTS (SELECT 1 FROM users WHERE id = ? AND password_hash != '') OR EXISTS (SELECT 1 FROM user_identities WHERE user_id = ? AND provider IN ('github', 'littleskin', 'microsoft') AND provider != ?)) RETURNING provider")
+    const deleted = await c.env.DB.prepare("DELETE FROM user_identities WHERE user_id = ? AND provider = ? AND (EXISTS (SELECT 1 FROM users WHERE id = ? AND password_hash != '') OR EXISTS (SELECT 1 FROM (SELECT user_id, provider FROM user_identities) AS ui WHERE ui.user_id = ? AND ui.provider IN ('github', 'littleskin', 'microsoft') AND ui.provider != ?)) RETURNING provider")
       .bind(user.id, provider, user.id, user.id, provider).first();
     if (!deleted && await c.env.DB.prepare('SELECT 1 FROM user_identities WHERE user_id = ? AND provider = ?').bind(user.id, provider).first()) throw new AppError('auth.cannot_unbind_last', 409);
     return c.json({ ok: true });

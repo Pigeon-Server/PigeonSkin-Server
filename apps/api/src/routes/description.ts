@@ -5,10 +5,11 @@
 
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { eq } from 'drizzle-orm';
-import { createDb, textures, texturesDescription } from '@pigeon-skin/db';
+import { and, eq } from 'drizzle-orm';
+import { createDb, textures, textureTranslations, texturesDescription } from '@pigeon-skin/db';
 import { AppError, currentUser, fail } from '../framework.ts';
 import { getSettingInt, isAdmin, type AppEnv } from '../lib.ts';
+import { enqueueTextureAiJobs } from './textures.ts';
 
 type Ctx = Context<AppEnv>;
 
@@ -39,11 +40,24 @@ descriptionRoutes.get('/textures/:id/description', async (c) => {
   if (!Number.isInteger(id) || id <= 0) throw fail.notFound();
   await loadTexture(c, id);
 
+  const locale = c.req.query('locale') || '';
   const [row] = await createDb(c.env.DB)
     .select().from(texturesDescription)
     .where(eq(texturesDescription.tid, id))
     .limit(1);
-  return c.json({ description: row?.description ?? '' });
+  const description = row?.description ?? '';
+
+  // 请求语言下的 AI 译文（无译文或 locale 为空则不返回）
+  let translatedDescription: string | undefined;
+  if (locale) {
+    const [tr] = await createDb(c.env.DB)
+      .select({ description: textureTranslations.description })
+      .from(textureTranslations)
+      .where(and(eq(textureTranslations.tid, id), eq(textureTranslations.locale, locale)))
+      .limit(1);
+    if (tr?.description) translatedDescription = tr.description;
+  }
+  return c.json({ description, ...(translatedDescription !== undefined ? { translatedDescription } : {}) });
 });
 
 descriptionRoutes.put('/textures/:id/description', async (c) => {
@@ -71,6 +85,9 @@ descriptionRoutes.put('/textures/:id/description', async (c) => {
       target: texturesDescription.tid,
       set: { description, updatedAt: now },
     });
+
+  // 简介被修改：重置翻译/审核任务（不阻塞响应；cron 兜底）
+  c.executionCtx.waitUntil(enqueueTextureAiJobs(c.env, id));
 
   return c.json({ ok: true, description });
 });

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { hashPassword } from '@pigeon-skin/auth';
+import { dayOfMs } from '@pigeon-skin/db';
 import { currentAdmin, fail, readJson } from '../framework.ts';
 import { audit } from '../services/audit.ts';
 import { invalidateSettingsCache, type AppEnv } from '../lib.ts';
@@ -102,7 +103,7 @@ siteManagementRoutes.get('/admin/chart', async (c) => {
   start.setUTCDate(start.getUTCDate() - 30);
   const sql = (table: 'users' | 'textures') =>
     c.env.DB.prepare(
-      `SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch') AS date, count(*) AS n FROM ${table} WHERE created_at >= ? GROUP BY date`,
+      `SELECT ${dayOfMs('created_at')} AS date, count(*) AS n FROM ${table} WHERE created_at >= ? GROUP BY date`,
     )
       .bind(start.getTime())
       .all<{ date: string; n: number }>();

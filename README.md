@@ -4,6 +4,18 @@ Pigeon Skin Server 是专为 Minecraft 玩家、服主与创作者打造的现�
 
 无论你是想为几位联机好友搭建一个免受服务器运维困扰的换装小站，还是面向更多玩家建立开放的皮肤分享社区，Pigeon Skin Server 都希望为你提供更轻盈、顺畅且开箱即用的体验。
 
+## 一键部署
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Pigeon-Server/PigeonSkin-Server)
+
+点击按钮后，Cloudflare 会将仓库克隆到你自己的 GitHub 账号，读取 `apps/api/wrangler.jsonc` 引导你创建 D1、R2、Queues 等所需资源并完成首次部署。本项目为 monorepo，如果向导中预填的构建与部署命令不符合预期，请将根目录设为 `apps/api` 并按[部署上线](#部署上线)一节的命令调整。
+
+首次部署完成后，还需依次完成：
+
+1. 在 Worker 的构建设置或部署命令中对 D1 应用 `packages/db/migrations` 迁移（等同 `npm run db:migrate:prod`）；
+2. 按下文[配置说明](#配置说明)设置 `APP_URL`，并写入 `SETUP_TOKEN`、`SESSION_SECRET`、`MFA_ENCRYPTION_KEY` 等机密；
+3. 访问站点的 `/setup` 路径，输入 `SETUP_TOKEN` 完成管理员初始化。
+
 ## 核心特性
 
 - **直观的材质呈现与衣柜管理**：支持高精度 3D 动态实时预览，无缝兼容双层皮肤（Alex 纤细手部 / Steve 经典手部）与高清披风。支持多角色灵活切换，兼顾公开材质分享与私密材质安全。
@@ -96,7 +108,7 @@ npm run dev
 
 ## 部署上线
 
-Pigeon Skin Server 原生适配 Cloudflare 基础设施。常见部署流程如下：
+Pigeon Skin Server 原生适配 Cloudflare 基础设施。如果想跳过手动配置，可直接使用顶部的[一键部署](#一键部署)按钮。常见部署流程如下：
 
 1. **创建 Cloudflare 资源**  
    在 Cloudflare 控制台创建对应的 D1 数据库、R2 存储桶（存放玩家上传的皮肤与材质）以及异步处理队列。
@@ -120,6 +132,58 @@ Pigeon Skin Server 原生适配 Cloudflare 基础设施。常见部署流程如�
    ```
 
 4. 部署完成后，访问站点的 `/setup` 路径，输入先前配置的 `SETUP_TOKEN`，即可完成站点的首次初始化。
+
+## 管理 CLI
+
+`tools/cli` 提供运维命令：用户管理、材质批量导入导出、核心业务表备份、站点设置读写。所有数据操作通过 wrangler 执行（不自行持有 Cloudflare 凭据），生产环境需先 `wrangler login`。注意：CLI 直写数据库，不受应用层 admin API 权限模型约束，属运维级操作。
+
+```sh
+# 查看 help
+npm run cli
+
+# 创建用户（--generate-password 生成随机密码并打印一次）
+npm run cli -- users create --email op@example.com --generate-password --role admin
+
+# 批量导入皮肤/披风 PNG（校验、按 sha256 上传 R2、写 textures 元数据，不扣积分）
+npm run cli -- textures import --dir ./skins --kind skin --uploader admin@example.com
+# 批量导入推荐走站点管理端点（warm 连接并发，比 wrangler 通道快约两个数量级）：
+#   管理界面「Pigeon API」签发密钥并勾选「批量导入纹理」权限后加 --api-key，
+#   生产环境配套 --site-url；本地开发默认打 http://127.0.0.1:8787
+
+# 导出材质（PNG + manifest.json，可直接作为 import --manifest 输入）
+npm run cli -- textures export --out ./textures-backup
+
+# 核心业务表备份（users/players/closet/textures 等 JSON，含密码哈希，注意保管）
+npm run cli -- data export --out ./backup
+npm run cli -- data import --from ./backup --yes   # 跳过式合并，已存在行不改动
+
+# 旧 Blessing Skin（PHP 版）一条命令迁移：自动发现 .env（MySQL）或 *.sql dump
+npm run cli -- legacy analyze --dir /path/to/old-blessing-skin
+npm run cli -- legacy migrate --dir /path/to/old-blessing-skin                    # → 本地开发库
+npm run cli -- legacy migrate --dir /path/to/old-blessing-skin --env production \
+  --yes --site-url https://skin.example.com                                       # → 未初始化的生产站点
+# dump 快照（如 phpMyAdmin 导出的 .sql）模式：无 .env 时需 --pwd-method 指定旧站密码算法
+
+# 站点设置读写（键白名单见 apps/api/src/env.ts 的 SETTING_DEFAULTS）
+npm run cli -- settings set --key site_name --value "我的皮肤站"
+```
+
+全局选项：`--env production` 操作生产库（此时写操作必须加 `--yes`）、`--json` 供脚本消费。详细用法见 `npm run cli` 输出。
+
+## 管理级 API
+
+站点暴露 machine-facing 的管理 API（`/api/v1/pigeon/admin/*`），供 CLI、监控与自动化集成。鉴权使用管理界面「Pigeon API」签发的 API key（`api-key` 请求头），按 scope 授权：
+
+| scope | 能力 |
+|---|---|
+| `players.read` / `users.read` / `users.email` | 游戏协议查询（`/api/ps-api/*`） |
+| `admin.texture.import` | 批量导入纹理（`POST /api/v1/pigeon/admin/import/textures`） |
+| `admin.users.write` | 用户创建/查询/修改/删除/重置密码/吊销会话 |
+| `admin.textures.write` | 纹理查询/改名/可见性/删除 |
+| `admin.stats.read` | 站点统计与审计日志查询 |
+| `admin.settings.write` | 站点设置读写与广播通知（secret 键只显示占位符，superAdminOnly 键不可见不可写） |
+
+所有端点按 key 限流（默认 60 次/30 秒，`pigeon_api_window_seconds` / `pigeon_api_request_limit` 可调）。管理端点要求 key 签发者当前至少为 admin（实时检查：签发者被降级或封禁后其 key 即失效）。用户/纹理操作的审计 actor 记 key 签发者；设置与广播记为系统操作并在 detail 附 key 标识。CLI 的 `users`、`settings`、`textures import` 命令支持 `--api-key` 走这些端点，缺省回落 wrangler 直连通道。
 
 ## 游戏加载接口
 

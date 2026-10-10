@@ -165,8 +165,55 @@ describe('迁移应用', () => {
   });
   it('全部迁移都能干净地应用到空库', () => {
     expect(appliedMigrations).toEqual([
-      '0000_init.sql', '0001_textures_fts.sql', '0002_plugins.sql', '0003_site_management.sql', '0004_ygg_throttle.sql', '0005_ygg_log_owners.sql', '0006_ygg_connect.sql', '0007_oauth.sql', '0008_pigeon.sql', '0009_account_initialization.sql', '0010_product_name.sql', '0011_search_submissions.sql', '0012_legacy_account_conflicts.sql', '0013_email_uniqueness.sql', '0014_official_catalog.sql', '0015_official_resource_sync.sql', '0016_official_resource_jobs.sql', '0017_account_security.sql', '0018_texture_lineage.sql', '0019_tickets.sql', '0020_ticket_categories.sql', '0021_score_settlement.sql', '0022_texture_origin.sql', '0023_manual_content.sql',
+      '0000_init.sql', '0001_textures_fts.sql', '0002_plugins.sql', '0003_site_management.sql', '0004_ygg_throttle.sql', '0005_ygg_log_owners.sql', '0006_ygg_connect.sql', '0007_oauth.sql', '0008_pigeon.sql', '0009_account_initialization.sql', '0010_product_name.sql', '0011_search_submissions.sql', '0012_legacy_account_conflicts.sql', '0013_email_uniqueness.sql', '0014_official_catalog.sql', '0015_official_resource_sync.sql', '0016_official_resource_jobs.sql', '0017_account_security.sql', '0018_texture_lineage.sql', '0019_tickets.sql', '0020_ticket_categories.sql', '0021_score_settlement.sql', '0022_texture_origin.sql', '0023_manual_content.sql', '0024_ai_jobs_and_texture_translations.sql', '0025_report_re_report.sql', '0026_reports_drop_unique.sql', '0027_reports_pending_unique.sql', '0028_notification_translations.sql',
     ]);
+  });
+
+  it('举报允许处理后重报：宽唯一索引已删除，pending 去重由部分唯一索引承担', () => {
+    // 0000_init 仍然创建 reports_reporter_texture_unique，0026 负责用普通索引
+    // 替换它（MySQL 上该唯一索引还兼作 reporter_id 外键的索引支撑，必须先建后删），
+    // 0027 再补上只锁 pending 行的部分唯一索引。
+    // 这里断言的是「全部迁移应用后」的状态：宽唯一索引必须不存在，
+    // 否则已处理的举报会继续阻止同一用户再次举报同一条纹理。
+    const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='reports'").all() as Array<{ name: string }>).map((r) => r.name);
+    expect(indexes).not.toContain('reports_reporter_texture_unique');
+    expect(indexes).toContain('reports_pending_unique');
+    expect(indexes).toContain('reports_reporter_idx');
+    expect(indexes).toContain('reports_status_created_idx');
+    expect(indexes).toContain('reports_texture_idx');
+
+    // 数据行为在独立库上验证，避免与其它用例共享库的既有行冲突
+    const database = new DatabaseSync(':memory:');
+    database.prepare('PRAGMA foreign_keys = ON').run();
+    applyMigrations(database);
+    database.prepare("INSERT INTO users(id,email,password_hash,created_at,updated_at) VALUES(1,'reporter@example.com','hash',1,1)").run();
+    database.prepare("INSERT INTO textures(hash,kind,model,name,uploader_id,size_bytes,visibility,width,height,likes,created_at,updated_at) VALUES(?, 'skin','default','t',1,8192,'public',64,64,0,1,1)").run('c'.repeat(64));
+    database.prepare("INSERT INTO reports(texture_id,uploader_id,reporter_id,reason,status,created_at) VALUES(1,1,1,'首次举报','pending',1)").run();
+    // pending 期间第二条被数据库约束拒绝（不是靠应用层查一次）
+    expect(() => database.prepare("INSERT INTO reports(texture_id,uploader_id,reporter_id,reason,status,created_at) VALUES(1,1,1,'重复举报','pending',2)").run()).toThrow(/UNIQUE/);
+    database.prepare("UPDATE reports SET status='rejected', resolution='', reviewer_id=1, reviewed_at=2 WHERE id=1").run();
+    database.prepare("INSERT INTO reports(texture_id,uploader_id,reporter_id,reason,status,created_at) VALUES(1,1,1,'处理完成后重报','pending',3)").run();
+    expect(database.prepare('SELECT count(*) AS n FROM reports').get()).toMatchObject({ n: 2 });
+    database.close();
+  });
+
+  it('0027 清理竞态产生的重复 pending 后再建唯一索引', () => {
+    // 模拟既有库：0026 已应用（宽唯一索引已换成普通索引），但应用层条件插入
+    // 在快照读下留下了重复 pending；0027 必须先清理再建索引，否则索引建不上。
+    const database = new DatabaseSync(':memory:');
+    database.prepare('PRAGMA foreign_keys = ON').run();
+    for (const name of readdirSync(MIGRATIONS_DIR).filter((n) => n.endsWith('.sql') && n < '0027').sort()) {
+      runSqlScript(database, readFileSync(join(MIGRATIONS_DIR, name), 'utf8'));
+    }
+    database.prepare("INSERT INTO users(id,email,password_hash,created_at,updated_at) VALUES(1,'dup@example.com','hash',1,1)").run();
+    database.prepare("INSERT INTO textures(hash,kind,model,name,uploader_id,size_bytes,visibility,width,height,likes,created_at,updated_at) VALUES(?, 'skin','default','t',1,8192,'public',64,64,0,1,1)").run('d'.repeat(64));
+    for (const [id, reason] of [[1, '最早'], [2, '重复一'], [3, '重复二']] as const) {
+      database.prepare(`INSERT INTO reports(id,texture_id,uploader_id,reporter_id,reason,status,created_at) VALUES(${id},1,1,1,'${reason}','pending',${id})`).run();
+    }
+    runSqlScript(database, readFileSync(join(MIGRATIONS_DIR, '0027_reports_pending_unique.sql'), 'utf8'));
+    expect(database.prepare('SELECT id, reason FROM reports ORDER BY id').all()).toEqual([{ id: 1, reason: '最早' }]);
+    expect((database.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='reports'").all() as Array<{ name: string }>).map((r) => r.name)).toContain('reports_pending_unique');
+    database.close();
   });
 
   it('创建了全部业务表', () => {

@@ -18,7 +18,8 @@ const session = useSessionStore();
 const i18n = useI18n();
 const site = useSiteSettings();
 void site.fetch();
-const turnstileToken = ref('');
+const captchaToken = ref('');
+const captchaRandstr = ref('');
 const challenge = ref<InstanceType<typeof VerificationChallenge> | null>(null);
 
 const identifier = ref('');
@@ -57,7 +58,8 @@ async function submit() {
       password: password.value,
       keep: keep.value,
       destination: typeof route.query.redirect === 'string' ? route.query.redirect : '/user',
-      turnstileToken: turnstileToken.value,
+      captchaToken: captchaToken.value,
+      captchaRandstr: captchaRandstr.value,
       ...(retainedId.value ? { retainUserId: retainedId.value, conflictPasswords: requiresPasswords.value.map(userId => ({ userId, password: conflictPasswords.value[userId] || '' })) } : {}),
     });
     if (result.requiresTwoFactor) { password.value = ''; conflictPasswords.value = {}; await router.push('/auth/two-factor'); return; }
@@ -78,8 +80,8 @@ async function submit() {
 </script>
 
 <template>
-  <div class="auth-fields">
-    <h1 class="text-2xl font-bold">{{ i18n.t('auth.login') }}</h1>
+  <div>
+    <h1>{{ i18n.t('auth.login') }}</h1>
     <AppForm class="mt-6 space-y-4" @submit.prevent="submit">
       <div>
         <label class="mb-1 block text-sm font-medium" for="identifier">
@@ -105,11 +107,11 @@ async function submit() {
         />
       </div>
       <div class="flex items-center gap-2 text-sm"><AppCheckbox v-model="keep" :label="i18n.t('auth.keep')" /><span>{{ i18n.t('auth.keep') }}</span></div>
-      <VerificationChallenge ref="challenge" v-model="turnstileToken" />
+      <VerificationChallenge ref="challenge" v-model="captchaToken" v-model:randstr="captchaRandstr" />
       <fieldset v-if="conflicts.length" class="space-y-3 rounded-lg border border-line p-4">
         <legend class="px-1 font-semibold">{{ i18n.t('auth.conflict_choose') }}</legend>
         <p class="text-sm text-muted">{{ i18n.t('auth.conflict_merge_hint') }}</p>
-        <AppRadioGroup v-model="retainedId" name="retained-account" :options="conflicts.map(account => ({ value: account.id, label: `${account.nickname || i18n.t('general.anonymous')} · ID ${account.id}` }))" class="grid gap-2" />
+        <AppRadioGroup v-model="retainedId" name="retained-account" :options="conflicts.map(account => ({ value: account.id, label: `${account.nickname || i18n.t('general.unknown')} · ID ${account.id}` }))" class="grid gap-2" />
         <div v-for="userId in requiresPasswords" :key="userId">
           <label class="mb-1 block text-sm" :for="`conflict-password-${userId}`">{{ i18n.t('auth.conflict_password', { id: userId }) }}</label>
           <AppInput :id="`conflict-password-${userId}`" v-model="conflictPasswords[userId]" type="password" autocomplete="current-password" required />
@@ -124,13 +126,13 @@ async function submit() {
     <AppButton v-if="passkeySupported" class="btn mt-3 w-full" :disabled="busy" @click="passkeyLogin">{{ i18n.t('security.passkey_login') }}</AppButton>
     <div class="mt-4 space-y-1 text-sm text-muted">
       <p>
-        <router-link to="/forgot-password" class="text-brand-600 dark:text-brand-400">
+        <router-link to="/forgot-password" class="text-brand-600 dark:text-brand-300">
           {{ i18n.t('auth.forgot-link') }}
         </router-link>
       </p>
       <p>
         {{ i18n.t('auth.no_account') }}
-        <router-link to="/register" class="text-brand-600 dark:text-brand-400">
+        <router-link to="/register" class="text-brand-600 dark:text-brand-300">
           {{ i18n.t('general.register') }}
         </router-link>
       </p>

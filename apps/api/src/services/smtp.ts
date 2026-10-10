@@ -219,7 +219,12 @@ function base64Wrap(text: string): string {
 }
 
 function formatAddress(address: { name?: string; address: string }): string {
-  return address.name ? `${encodeHeaderText(address.name)} <${address.address}>` : address.address;
+  if (!address.name) return address.address;
+  // ASCII 显示名含 atext 之外的字符（引号/逗号等）时按 RFC 5322 quoted-string
+  // 输出并转义内部引号与反斜杠，生成完全合规的头部
+  const name = encodeHeaderText(address.name);
+  if (!/^[\w !#$%&'*+/=?^`{|}~.-]*$/.test(name)) return `"${name.replace(/([\\"])/g, '\\$1')}" <${address.address}>`;
+  return `${name} <${address.address}>`;
 }
 
 /**
@@ -272,6 +277,16 @@ export async function sendViaSmtp(
 
   let connection = await withTimeout(connector(options.host, options.port, options.encryption), timeoutMs, 'connect');
   const client = new SmtpClient(connection, timeoutMs);
+  // 信封地址在开网络连接前就校验：配置无效时不必等到认证阶段才失败，
+  // 也堵住换行截断 SMTP 命令的注入（部署 env 的 MAIL_FROM 不经过设置校验）
+  const envelopeFrom = parseAddress(content.from).address;
+  const envelopeTo = parseAddress(content.to).address;
+  if (containsUnsafeHeader(envelopeFrom) || !/^[^\s@]+@[^\s@]+$/.test(envelopeFrom)) {
+    throw new SmtpError('mail-from', undefined, '发件人地址无效');
+  }
+  if (containsUnsafeHeader(envelopeTo) || !/^[^\s@]+@[^\s@]+$/.test(envelopeTo)) {
+    throw new SmtpError('rcpt-to', undefined, '收件人地址无效');
+  }
   try {
     assertReply(await client.readReply(), 'greeting', [220]);
 

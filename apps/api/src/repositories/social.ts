@@ -1,19 +1,20 @@
 // 收藏与举报仓储。
 import { and, eq, sql } from 'drizzle-orm';
-import { closet, reports, textures, users } from '@pigeon-skin/db';
+import { closet, isLockConflict, isUniqueViolation, reports, textures, users } from '@pigeon-skin/db';
 import type { Db } from './textures.ts';
+import { fragmentToSql, type SqlFragment } from '../search/compile.ts';
 
 // ── 收藏 ─────────────────────────────────────────────────────────────────────
 
 export async function listCloset(
   db: Db,
   userId: number,
-  filter: { category?: string | undefined; keyword?: string | undefined; page?: number | undefined; perPage?: number | undefined },
+  filter: { category?: string | undefined; search?: SqlFragment | null | undefined; page?: number | undefined; perPage?: number | undefined },
 ) {
   const where = and(
     eq(closet.userId, userId),
     filter.category ? eq(textures.kind, filter.category) : sql`1=1`,
-    filter.keyword ? sql`${textures.name} LIKE ${'%' + filter.keyword + '%'}` : sql`1=1`,
+    filter.search ? fragmentToSql(filter.search) : sql`1=1`,
   );
 
   const perPage = filter.perPage || 24;
@@ -126,20 +127,47 @@ export async function findReportById(db: Db, id: number) {
   return row ?? null;
 }
 
+/** 查找举报人未处理完的举报；已 resolved/rejected 的历史举报不阻止再次举报 */
 export async function findReportByReporterAndTexture(db: Db, reporterId: number, textureId: number) {
   const [row] = await db
     .select({ id: reports.id })
     .from(reports)
-    .where(and(eq(reports.reporterId, reporterId), eq(reports.textureId, textureId)))
+    .where(and(eq(reports.reporterId, reporterId), eq(reports.textureId, textureId), eq(reports.status, 'pending')))
     .limit(1);
   return row ?? null;
 }
 
+/**
+ * 插入一条待处理举报：同一举报人对同一纹理已有 pending 举报时不写入。
+ * 返回 true 表示真的插入成功，false 表示已有 pending（含并发抢先的情况）。
+ *
+ * 条件插入（WHERE NOT EXISTS）负责常规路径，但它在 PostgreSQL/MySQL 的
+ * 快照读下并不原子 —— 并发请求可能同时认为"没有 pending"。真正的保证是
+ * 0027 的部分唯一索引 reports_pending_unique（MySQL 为表达式唯一索引）：
+ * 后者让第二个写入者收到唯一冲突，这里把冲突映射成同一业务结果。
+ * `FROM (SELECT 1) AS src` 是 MySQL 的硬性要求（无 FROM 的 SELECT 不允许带 WHERE）。
+ */
 export async function insertReport(
-  db: Db,
+  d1: D1Database,
   row: { textureId: number; uploaderId: number | null; reporterId: number; reason: string; createdAt: number },
-) {
-  await db.insert(reports).values({ ...row, status: 'pending' });
+): Promise<boolean> {
+  const bind = () => [row.textureId, row.uploaderId, row.reporterId, row.reason, row.createdAt, row.reporterId, row.textureId];
+  const statement = `INSERT INTO reports (texture_id, uploader_id, reporter_id, reason, status, created_at)
+         SELECT ?, ?, ?, ?, 'pending', ?
+         FROM (SELECT 1) AS src
+         WHERE NOT EXISTS (SELECT 1 FROM reports WHERE reporter_id = ? AND texture_id = ? AND status = 'pending')`;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const result = await d1.prepare(statement).bind(...bind()).run();
+      return (result.meta.changes ?? 0) > 0;
+    } catch (error) {
+      if (isUniqueViolation(error)) return false;
+      // MySQL 在 REPEATABLE READ 下并发条件插入可能因间隙锁死锁（实测 60 并发出现数次），
+      // 被回滚的一方重试一次就能看到对方的结果，不需要让用户看到 500
+      if (attempt === 1 && isLockConflict(error)) continue;
+      throw error;
+    }
+  }
 }
 
 export async function markReportReviewed(

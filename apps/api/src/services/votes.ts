@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Context } from 'hono';
+import { dialect } from '@pigeon-skin/db';
 import { AppError } from '../framework.ts';
 import type { AppEnv } from '../lib.ts';
 import { serverBackendVoteAdapter, type PlayRequirement } from './vote-playtime.ts';
@@ -75,7 +76,15 @@ export async function voteDetail(c: Context<AppEnv>, v: VoteRow, admin = false) 
   let counts = new Map<string, number>();
   if (resultsVisible) {
     participants = (await c.env.DB.prepare('SELECT count(*) AS n FROM pigeon_ballots WHERE vote_id = ?').bind(v.id).first<{ n: number }>())!.n;
-    const { results } = await c.env.DB.prepare('SELECT j.value AS id, count(*) AS n FROM pigeon_ballots b, json_each(b.option_ids) j WHERE b.vote_id = ? GROUP BY j.value').bind(v.id).all<{ id: string; n: number }>();
+    // SQLite 的 json_each 可作表值函数直接相关引用外层行；PG/MySQL 的
+    // jsonb_array_elements_text / JSON_TABLE 同样支持该形态，但方言展开后的
+    // 派生表（子查询）形式在 SQLite 无法引用同层 FROM 项，故按方言生成。
+    const ballotOptions = dialect() === 'sqlite'
+      ? 'json_each(b.option_ids) j'
+      : dialect() === 'postgres'
+        ? "LATERAL (SELECT value FROM jsonb_array_elements_text(b.option_ids::jsonb)) j"
+        : "JSON_TABLE(b.option_ids, '$[*]' COLUMNS (value TEXT PATH '$')) j";
+    const { results } = await c.env.DB.prepare(`SELECT j.value AS id, count(*) AS n FROM pigeon_ballots b, ${ballotOptions} WHERE b.vote_id = ? GROUP BY j.value`).bind(v.id).all<{ id: string; n: number }>();
     counts = new Map(results.map(r => [r.id, r.n]));
   }
   return { id: v.id, title: v.title, description: v.description, status, startsAt: v.starts_at, endsAt: v.ends_at, maxChoices: v.max_choices, resultsPolicy: v.results_policy,

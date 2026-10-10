@@ -8,7 +8,7 @@ import {
   buildMime, dotStuff, encodeHeaderText, parseAddress, sendViaSmtp, smtpTransport, SmtpError,
   type SmtpConnection,
 } from '../src/services/smtp.ts';
-import { isEmailConfigured, processBroadcastEmail, sendEmail, type EmailEnv } from '../src/services/email.ts';
+import { isEmailConfigured, processBroadcastEmail, resolveMailFrom, sendEmail, type EmailEnv } from '../src/services/email.ts';
 import type { EmailQueueMessage } from '../src/services/email.ts';
 import { invalidateSettingsCache } from '../src/lib.ts';
 import { makeAdmin, runMigrations } from './setup.ts';
@@ -287,6 +287,19 @@ describe('mail driver dispatch', () => {
   beforeEach(async () => { await runMigrations(); await clearMailSettings(); });
   afterEach(() => { smtpTransport.connect = originalConnector; });
 
+  it('resolves mail_from display names against the SMTP account', () => {
+    // 纯名称 → 地址取 SMTP 账号,名称保留
+    expect(resolveMailFrom('Pigeon Skin', 'message@fsj-mc.club')).toEqual({ name: 'Pigeon Skin', address: 'message@fsj-mc.club' });
+    // 完整形式与纯邮箱原样透传,账号不参与
+    expect(resolveMailFrom('Site <noreply@skin.test>', 'message@fsj-mc.club')).toEqual({ name: 'Site', address: 'noreply@skin.test' });
+    expect(resolveMailFrom('noreply@skin.test', '')).toEqual({ address: 'noreply@skin.test' });
+    // 账号缺失/非邮箱时纯名称只能原样回落(后续信封校验会拒绝)
+    expect(resolveMailFrom('Pigeon Skin', '')).toEqual({ address: 'Pigeon Skin' });
+    expect(resolveMailFrom('Pigeon Skin', 'not-an-email')).toEqual({ address: 'Pigeon Skin' });
+    // 空值边界
+    expect(resolveMailFrom('', 'message@fsj-mc.club')).toEqual({ address: 'message@fsj-mc.club' });
+  });
+
   it('routes through SMTP with the configured transport', async () => {
     await setMailSettings({ mail_driver: 'smtp', smtp_host: 'mail.example.test', smtp_port: '2525', smtp_encryption: 'none', smtp_username: '', smtp_password: '', mail_from: 'Site <noreply@skin.test>' });
     server = new FakeServer('220 relay ESMTP', (line) => {
@@ -307,6 +320,27 @@ describe('mail driver dispatch', () => {
     expect(seenEncryption).toBe('none');
     expect(server.lines).toContain('MAIL FROM:<noreply@skin.test>');
     expect(server.lines).toContain('RCPT TO:<user@example.test>');
+  });
+
+  it('expands a display-name mail_from to the SMTP account address', async () => {
+    await setMailSettings({ mail_driver: 'smtp', smtp_host: 'mail.example.test', smtp_encryption: 'none', smtp_username: 'message@fsj-mc.club', smtp_password: 'secret', mail_from: 'Pigeon Skin' });
+    server = new FakeServer('220 relay ESMTP', (line) => {
+      if (line.startsWith('EHLO')) return '250 relay';
+      if (line === 'AUTH LOGIN') return '334 VXNlcm5hbWU6';
+      if (line === btoa('message@fsj-mc.club')) return '334 UGFzc3dvcmQ6';
+      if (line === btoa('secret')) return '235 Auth ok';
+      if (line === 'DATA') return '354 Go';
+      if (line === 'QUIT') return '221 Bye';
+      return '250 OK';
+    });
+    smtpTransport.connect = async () => server.connection();
+    const result = await sendEmail({ DB: env.DB, APP_URL: 'https://skin.example' } as EmailEnv, { kind: 'security-code', to: 'user@example.test', code: '123456', locale: 'en' });
+    expect(result).toEqual({ ok: true });
+    // 信封用补全后的账号地址;DATA 头部保留显示名
+    expect(server.lines).toContain('MAIL FROM:<message@fsj-mc.club>');
+    expect(server.lines).toContain('AUTH LOGIN');
+    const dataBody = server.lines.join('\n');
+    expect(dataBody).toContain('From: Pigeon Skin <message@fsj-mc.club>');
   });
 
   it('picks the conventional port when the port is left automatic', async () => {
@@ -348,15 +382,15 @@ describe('mail driver dispatch', () => {
     });
     smtpTransport.connect = async () => rejecting.connection();
     const denied = await sendEmail({ DB: env.DB, APP_URL: 'https://skin.example' } as EmailEnv, { kind: 'security-code', to: 'ghost@example.test', code: '123456', locale: 'en' });
-    expect(denied).toEqual({ ok: false, reason: 'provider-error' });
+    expect(denied).toEqual({ ok: false, reason: 'provider-error', detail: { phase: 'rcpt-to', code: 550 } });
 
-    // 连接直接被断开 → provider-error
+    // 连接直接被断开 → provider-error,无结构化详情
     smtpTransport.connect = async () => {
       const dead = new FakeServer('', () => null);
       return dead.connection();
     };
     const dead = await sendEmail({ DB: env.DB, APP_URL: 'https://skin.example' } as EmailEnv, { kind: 'security-code', to: 'user@example.test', code: '123456', locale: 'en' });
-    expect(dead).toEqual({ ok: false, reason: 'provider-error' });
+    expect(dead).toEqual({ ok: false, reason: 'provider-error', detail: { phase: 'reply', code: null } });
   });
 
   it('delivers queued broadcasts through SMTP and advances the cursor', async () => {
@@ -435,7 +469,7 @@ describe('mail driver dispatch', () => {
 
     const allowed = await SELF.fetch('https://x/api/v1/admin/settings/email-test', { method: 'POST', headers: { cookie: superUser.cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ to: 'operator@example.test' }) });
     expect(allowed.status).toBe(200);
-    expect(await allowed.json()).toEqual({ ok: true, reason: null });
+    expect(await allowed.json()).toEqual({ ok: true, reason: null, detail: null });
     expect(server.lines).toContain('RCPT TO:<operator@example.test>');
   });
 });

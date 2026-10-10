@@ -8,6 +8,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/account/security', meta: { requiresAuth: true, title: 'security.title' }, component: () => import('@/views/user/Security.vue') },
+    { path: '/account/devices', alias: '/user/devices', meta: { requiresAuth: true, title: 'devices.title' }, component: () => import('@/views/user/Devices.vue') },
     { path: '/auth/two-factor', meta: { layout: 'auth', title: 'security.two_factor' }, component: () => import('@/views/auth/TwoFactor.vue') },
     { path: '/manual/:slug?', meta: { layout: 'manual', title: 'manual.title' }, component: () => import('@/views/Manual.vue') },
     { path: '/', component: () => import('@/views/Home.vue') },
@@ -51,6 +52,12 @@ export const router = createRouter({
     },
 
     { path: '/skinlib', meta: { title: 'general.skinlib' }, component: () => import('@/views/skinlib/Index.vue') },
+    // 创作者主页（公开）。放在 /user 用户中心之前，:uid 纯数字与 /user/* 静态段不冲突。
+    {
+      path: '/user/:uid(\\d+)',
+      meta: { title: 'user.profile_title' },
+      component: () => import('@/views/user/Home.vue'),
+    },
     { path: '/editor/:kind', meta: { requiresAuth: true, title: 'editor.title' }, component: () => import('@/views/editor/Editor.vue') },
     { path: '/skinlib/create', meta: { requiresAuth: true, title: 'skinlib.create.title' }, component: () => import('@/views/skinlib/Create.vue') },
     {
@@ -118,6 +125,7 @@ export const router = createRouter({
         { path: 'players', component: () => import('@/views/admin/Players.vue') },
         { path: 'textures', component: () => import('@/views/admin/Textures.vue') },
         { path: 'comments', component: () => import('@/views/admin/Comments.vue') },
+        { path: 'tasks', component: () => import('@/views/admin/BackgroundTasks.vue') },
         { path: 'reports', component: () => import('@/views/admin/Reports.vue') },
         { path: 'tickets', component: () => import('@/views/admin/Tickets.vue') },
         { path: 'tickets/:id', component: () => import('@/views/admin/Ticket.vue') },

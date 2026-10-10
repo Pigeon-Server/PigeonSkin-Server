@@ -16,6 +16,7 @@
     "./live2d": "./src/live2d.ts",
     ".": "./src/index.ts",
     "./schemas": "./src/schemas.ts",
+    "./search": "./src/search/index.ts",
     "./skin-config": "./src/skin-config.ts",
     "./default-skins": "./src/default-skins.ts",
     "./official-textures": "./src/official-textures.ts",

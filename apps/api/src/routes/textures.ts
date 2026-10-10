@@ -9,8 +9,25 @@ import {
   currentUser, fail, paginate, readJsonOptional, readPagination, readQuery,
 } from '../framework.ts';
 import * as textures from '../services/textures.ts';
-import { flag } from '../env.ts';
-import { getSetting, getSettingBool, getSettingInt, type AppEnv } from '../lib.ts';
+import { compileSearchInput } from '../search/index.ts';
+import { enqueueAiJob, processDueJobs } from '../services/ai-jobs.ts';
+import { flag, type Bindings } from '../env.ts';
+import { getSetting, getSettingBool, getSettingInt, readSettings, type AppEnv } from '../lib.ts';
+
+/**
+ * 材质写入后的 AI 任务入队：按开关分别入翻译/审核队列，
+ * 然后立即触发一次派发（processDueJobs 自身会认领并执行）。
+ * 由调用方包在 waitUntil 里，失败不影响主请求。
+ */
+export async function enqueueTextureAiJobs(env: Bindings, tid: number): Promise<void> {
+  const values = await readSettings(env);
+  await Promise.all([
+    enqueueAiJob(env, 'translate_texture', tid, { enabled: values.texture_ai_translation === 'true' }),
+    enqueueAiJob(env, 'moderate_texture_name', tid, { enabled: values.texture_ai_moderation === 'true' }),
+    enqueueAiJob(env, 'moderate_texture_description', tid, { enabled: values.texture_ai_moderation === 'true' }),
+  ]);
+  await processDueJobs(env).catch(() => {});
+}
 
 export const textureRoutes = new Hono<AppEnv>();
 
@@ -39,9 +56,10 @@ textureRoutes.get('/', async (c) => {
       model: query.model,
       uploader: query.uploader,
       official: query.official === 'true',
-      keyword: query.keyword,
+      search: compileSearchInput(query.keyword, 'textures'),
       sort: query.sort ?? 'created',
       mine: query.mine === 'true',
+      locale: query.locale,
     },
     page,
   );
@@ -53,7 +71,8 @@ textureRoutes.get('/', async (c) => {
 textureRoutes.get('/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const privateStatus = await getSettingInt(c.env, 'private_texture_status');
-  const texture = await textures.getTexture(c.env, c.get('user'), id, privateStatus);
+  const locale = c.req.query('locale') || undefined;
+  const texture = await textures.getTexture(c.env, c.get('user'), id, privateStatus, locale);
   return c.json(texture);
 });
 
@@ -126,6 +145,9 @@ textureRoutes.post('/', textureUploadBodyLimit, async (c) => {
     await readRates(c.env),
   );
 
+  // AI 翻译/审核：入队后台任务（不阻塞上传；processDueJobs 由 cron/入队触发）。
+  c.executionCtx.waitUntil(enqueueTextureAiJobs(c.env, result.id));
+
   // 上传成功即预生成常用衍生图（2d 头像两个主尺寸 + 预览）。走 waitUntil：
   // 生成失败不阻塞上传响应 —— 读取端点有按需生成的兜底。
   // （2026-09-30 决策：衍生图由服务端 DO 生成，前端不再抓取上传。）
@@ -151,6 +173,10 @@ textureRoutes.patch('/:id', async (c) => {
   const body = await readJsonOptional(c, texturePatchInputSchema);
 
   const { scoreDelta } = await textures.patchTexture(c.env, user, id, body, await readRates(c.env), await getSetting(c.env, 'texture_name_regexp'));
+  // 名称被修改：重置翻译/审核任务（(kind,tid) 唯一，重复入队=重置重跑）
+  if (body.name !== undefined) {
+    c.executionCtx.waitUntil(enqueueTextureAiJobs(c.env, id));
+  }
   return c.json({ ok: true, scoreDelta });
 });
 

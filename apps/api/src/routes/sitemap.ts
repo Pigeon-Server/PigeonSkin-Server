@@ -8,7 +8,8 @@
 //     （每天重建一次，防止失效调用遗漏导致的漂移）。
 //   • URL 集合：/ （首页）、/skinlib（列表页）、/skinlib/:id（仅 public 纹理，
 //     上限 sitemap_max_urls 设置，默认 20000，防超大站打爆 D1）、认证页。
-//   • robots.txt：Allow 全站、Disallow /api /admin /raw /textures（字节无意义），
+//   • robots.txt：被禁抓取代理各占一个独立分组（Disallow 全站），其余
+//     Allow 全站、Disallow /api /admin /raw /textures（字节无意义），
 //     Sitemap 指向 index。
 //
 // 不引入 KV/DO：版本号与缓存都在 Cache API（同一 colo 语义足够，
@@ -23,7 +24,7 @@ import { searchConfiguration } from '../services/search-submissions.ts';
 import { manualCatalog } from '../services/seo.ts';
 import { readManualDocuments } from '../services/manual.ts';
 import { LOCALES, DEFAULT_LOCALE } from '@pigeon-skin/shared/locales';
-import { ROBOTS_API_RULES, ROBOTS_PROTOCOL_DISALLOW } from '../route-metadata.ts';
+import { BLOCKED_CRAWLER_AGENTS, ROBOTS_API_RULES, ROBOTS_PROTOCOL_DISALLOW, ROBOTS_RULES_REVISION } from '../route-metadata.ts';
 
 type Ctx = Context<AppEnv>;
 
@@ -133,10 +134,14 @@ export function registerSitemapRoutes(app: Hono<AppEnv>): void {
   const handler = (kind: 'index' | 'robots') => async (c: Ctx) => {
     const version = await currentVersion();
     const appUrl = c.env.APP_URL.replace(/\/$/, '');
-    return cachedResponse(c, `${SITEMAP_CACHE_PREFIX}${encodeURIComponent(appUrl)}/${kind}`, version, async () => {
+    // robots 的缓存键带上规则修订号：改规则后不必等 1 小时 TTL 或 bump 版本号
+    const cacheKey = `${SITEMAP_CACHE_PREFIX}${encodeURIComponent(appUrl)}/${kind}${kind === 'robots' ? `-r${ROBOTS_RULES_REVISION}` : ''}`;
+    return cachedResponse(c, cacheKey, version, async () => {
       if (kind === 'robots') {
         const allowDownload = await getSettingBool(c.env, 'allow_texture_download');
         const body = [
+          // 被禁抓取代理：独立分组优先于下面的 `*`，其中的 Allow 例外对他们不生效
+          ...BLOCKED_CRAWLER_AGENTS.flatMap((agent) => [`User-agent: ${agent}`, 'Disallow: /', '']),
           'User-agent: *',
           ...ROBOTS_API_RULES,
           ...ROBOTS_PROTOCOL_DISALLOW,

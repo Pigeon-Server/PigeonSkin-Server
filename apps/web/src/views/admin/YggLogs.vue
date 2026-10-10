@@ -2,11 +2,13 @@
 import { onMounted, ref } from 'vue';
 import { adminApi, type YggLogItem } from '@/api';
 import { useI18n } from '@/stores/i18n';
+import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
 import { apiErrorMessage } from '@/lib/api-error';
 const i18n = useI18n();
 const actions = ['authenticate', 'refresh', 'signout', 'join', 'upload-skin', 'upload-cape'];
 const items = ref<YggLogItem[]>([]);
 const action = ref('');
+const search = ref('');
 const page = ref(1);
 const totalPages = ref(1);
 const loading = ref(true);
@@ -17,7 +19,7 @@ async function load() {
   loading.value = true;
   error.value = '';
   try {
-    const data = await adminApi.yggLogs({ action: action.value, page: page.value });
+    const data = await adminApi.yggLogs({ action: action.value, q: search.value.trim() || undefined, page: page.value });
     items.value = data.items;
     totalPages.value = data.totalPages;
   } catch (e) {
@@ -30,18 +32,30 @@ onMounted(load);
 </script>
 <template>
   <PageHeader :title="i18n.t('integration.yggdrasil.logs')">
-    <router-link to="/admin/integrations?module=yggdrasil" class="btn">
-      <AppIcon name="arrow_back" />
-      {{ i18n.t('general.back') }}
-    </router-link>
+    <template #breadcrumb>
+      <nav class="page-breadcrumb">
+        <router-link to="/admin/integrations?module=yggdrasil" class="page-back">
+          <AppIcon name="arrow_back" class="!text-sm" />
+          <span>{{ i18n.t('general.back') }}</span>
+        </router-link>
+      </nav>
+    </template>
   </PageHeader>
-  <AppSelect v-model="action" class="max-w-64 mb-4" :options="[{ value: '', label: i18n.t('common.all') }, ...actions.map(item => ({ value: item, label: i18n.t(`integration.yggdrasil.actions.${item}`) }))]" :aria-label="i18n.t('admin.audit_action')" @change="page = 1; load()" />
+  <AppSelect v-model="action" class="max-w-64" :options="[{ value: '', label: i18n.t('common.all') }, ...actions.map(item => ({ value: item, label: i18n.t(`integration.yggdrasil.actions.${item}`) }))]" :aria-label="i18n.t('admin.audit_action')" @change="page = 1; load()" />
+    <SearchExpressionField
+      v-model="search"
+      schema-key="yggLogs"
+      class="max-w-sm"
+      :aria-label="i18n.t('general.search')"
+      :placeholder="i18n.t('general.search')"
+      @submit="page = 1; load()"
+    />
   <p v-if="error" class="alert alert-danger" role="alert">
     {{ error }}
     <AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton>
   </p>
   <AppSkeleton v-if="loading" :count="3" />
-  <div v-else class="overflow-x-auto rounded-lg border border-line bg-surface">
+  <div v-else class="overflow-x-auto rounded-xl border border-line bg-surface">
     <table class="table">
       <thead>
         <tr>
@@ -77,10 +91,10 @@ onMounted(load);
     </table>
   </div>
   <AppPagination
-    v-model="page"
+    :model-value="page"
     :total-pages="totalPages"
     :busy="loading"
-    @update:model-value="load"
+    @update:model-value="(value: number) => { page = value; load(); }"
   />
   <AppDialog v-model="detailOpen" :title="i18n.t('integration.yggdrasil.details')">
     <pre

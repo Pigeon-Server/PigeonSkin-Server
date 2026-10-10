@@ -4,6 +4,8 @@ import { adminApi } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import { confirmAction } from '@/stores/dialog';
 import { apiErrorMessage } from '@/lib/api-error';
+// 与 API 侧 notification-template.ts 的 NOTIFICATION_VARIABLES 对齐
+const NOTIFICATION_VARIABLES = ['site_name', 'site_url', 'player', 'email', 'uid', 'score', 'date'] as const;
 const i18n = useI18n();
 const title = ref('');
 const content = ref('');
@@ -74,6 +76,17 @@ watch([title, content, sendEmail, i18n.locale], () => { void refreshEmailPreview
         </label>
         <AppInput id="notif-content" v-model="content" multiline class="min-h-56" maxlength="10000" />
       </div>
+      <details class="text-sm">
+        <summary class="cursor-pointer text-muted select-none">{{ i18n.t('admin.notification_variables') }}</summary>
+        <p class="mt-2 text-xs text-muted">{{ i18n.t('admin.notification_variables_hint') }}</p>
+        <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+          <template v-for="variable in NOTIFICATION_VARIABLES" :key="variable">
+            <dt class="font-mono">{{ `{{${variable}}}` }}</dt>
+            <dd class="text-muted">{{ i18n.t(`admin.var_${variable}`) }}</dd>
+          </template>
+        </dl>
+        <p class="mt-2 text-xs text-muted">{{ i18n.t('admin.notification_ai_translation_note') }}</p>
+      </details>
       <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
       <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
       <AppButton type="submit" class="btn-primary" :loading="busy">

@@ -1,5 +1,5 @@
 export { manualGroups, manualPages } from '@pigeon-skin/shared/manual';
-import { manualPages } from '@pigeon-skin/shared/manual';
+import { matchSearch, parseSearchExpressionLenient, searchSchema } from '@pigeon-skin/shared/search';
 import { marked, type Token } from 'marked';
 import type { Locale } from '@pigeon-skin/shared/locales';
 import english from './localized/en.json';
@@ -26,11 +26,22 @@ export function manualSections(content: string) {
   }
   return sections.map(section => ({ ...section, content: section.content.trim() }));
 }
-export function searchManual(query: string) {
-  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  if (!terms.length) return [];
-  return manualPages.filter(page => {
-    const text = `${page.title} ${page.description} ${manualContent(page.slug)}`.toLocaleLowerCase();
-    return terms.every(term => text.includes(term));
-  });
+/**
+ * 手册页面搜索。内置页与自定义页共用这一个实现，避免两套搜索语义并存。
+ *
+ * 空输入不过滤；解析不了的输入按普通关键词处理（与站内其他搜索一致）。
+ */
+export function searchManualPages(
+  query: string,
+  pages: readonly { slug: string; title: string; description: string; group: string }[],
+  contentOf: (slug: string) => string,
+): readonly { slug: string; title: string; description: string; group: string }[] {
+  const schema = searchSchema('manual');
+  const ast = parseSearchExpressionLenient(query, schema);
+  if (!ast) return pages;
+  return pages.filter(page => matchSearch(ast, schema, {
+    title: page.title,
+    body: `${page.description} ${contentOf(page.slug)}`,
+    group: page.group,
+  }));
 }

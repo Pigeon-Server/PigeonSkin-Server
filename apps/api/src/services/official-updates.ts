@@ -1,13 +1,21 @@
 import type { Bindings } from '../env.ts';
+import { dialect, jsonArrayEachRows, boolToInt } from '@pigeon-skin/db';
 import { textureObjectKey } from '@pigeon-skin/minecraft';
 import { candidateTexture, type ResourceCandidate } from './official-sources.ts';
 
 export interface SyncState { checked_at: number | null; succeeded_at: number | null; started_at: number | null; client_version: string; added: number; updated: number; pending: number; error: string | null; phase: string }
 interface ExistingResource { id: number; official_key: string; hash: string; kind: string; model: string | null }
 
+/** JSON 对象字段提取（dialect.ts 的 jsonArrayElement 只覆盖数组下标形态） */
+function jsonObjectField(expr: string, field: string): string {
+  if (dialect() === 'postgres') return `(${expr})::jsonb #>> '{${field}}'`;
+  if (dialect() === 'mysql') return `JSON_UNQUOTE(JSON_EXTRACT(${expr}, '$.${field}'))`;
+  return `json_extract(${expr}, '$.${field}')`;
+}
+
 export async function officialResourceStatus(env: Bindings) {
   const state = await env.DB.prepare('SELECT * FROM official_resource_sync WHERE id = 1').first<SyncState>();
-  const counts = await env.DB.prepare("SELECT sum(kind='skin') AS skins,sum(kind='cape') AS capes FROM textures WHERE official_key IS NOT NULL").first<{ skins: number; capes: number }>();
+  const counts = await env.DB.prepare(`SELECT sum(${boolToInt(`kind = 'skin'`)}) AS skins,sum(${boolToInt(`kind = 'cape'`)}) AS capes FROM textures WHERE official_key IS NOT NULL`).first<{ skins: number; capes: number }>();
   return { checkedAt: state?.checked_at ?? null, succeededAt: state?.succeeded_at ?? null, running: state?.started_at != null, phase: state?.phase || 'idle', clientVersion: state?.client_version || '1.21.4', added: state?.added ?? 0, updated: state?.updated ?? 0, pending: state?.pending ?? 0, error: !!state?.error, skins: counts?.skins || 0, capes: counts?.capes || 0 };
 }
 
@@ -52,7 +60,8 @@ export async function applyOfficialUpdates(env: Bindings, candidates: ResourceCa
   }
   if (replacements.length) {
     const json = JSON.stringify(replacements);
-    statements.push(env.DB.prepare("UPDATE textures SET hash=(SELECT json_extract(value,'$.hash') FROM json_each(?) WHERE json_extract(value,'$.id')=textures.id),width=(SELECT json_extract(value,'$.width') FROM json_each(?) WHERE json_extract(value,'$.id')=textures.id),height=(SELECT json_extract(value,'$.height') FROM json_each(?) WHERE json_extract(value,'$.id')=textures.id),size_bytes=(SELECT json_extract(value,'$.sizeBytes') FROM json_each(?) WHERE json_extract(value,'$.id')=textures.id),updated_at=? WHERE id IN (SELECT json_extract(value,'$.id') FROM json_each(?))").bind(json, json, json, json, now, json));
+    const field = (f: string) => jsonObjectField('value', f);
+    statements.push(env.DB.prepare(`UPDATE textures SET hash=(SELECT ${field('hash')} FROM ${jsonArrayEachRows('?')} WHERE ${field('id')}=textures.id),width=(SELECT ${field('width')} FROM ${jsonArrayEachRows('?')} WHERE ${field('id')}=textures.id),height=(SELECT ${field('height')} FROM ${jsonArrayEachRows('?')} WHERE ${field('id')}=textures.id),size_bytes=(SELECT ${field('sizeBytes')} FROM ${jsonArrayEachRows('?')} WHERE ${field('id')}=textures.id),updated_at=? WHERE id IN (SELECT ${field('id')} FROM ${jsonArrayEachRows('?')})`).bind(json, json, json, json, now, json));
   }
   for (let start = 0; start < additions.length; start += 10) {
     const chunk = additions.slice(start, start + 10);
@@ -61,8 +70,8 @@ export async function applyOfficialUpdates(env: Bindings, candidates: ResourceCa
   }
   if (changedIds.length) {
     const ids = JSON.stringify(changedIds);
-    statements.push(env.DB.prepare('UPDATE players SET updated_at=? WHERE skin_texture_id IN (SELECT value FROM json_each(?)) OR cape_texture_id IN (SELECT value FROM json_each(?))').bind(now, ids, ids));
-    statements.push(env.DB.prepare('UPDATE uuid SET version=version+1 WHERE player_id IN (SELECT id FROM players WHERE skin_texture_id IN (SELECT value FROM json_each(?)) OR cape_texture_id IN (SELECT value FROM json_each(?)))').bind(ids, ids));
+    statements.push(env.DB.prepare(`UPDATE players SET updated_at=? WHERE skin_texture_id IN (SELECT CAST(value AS BIGINT) FROM ${jsonArrayEachRows('?')}) OR cape_texture_id IN (SELECT CAST(value AS BIGINT) FROM ${jsonArrayEachRows('?')})`).bind(now, ids, ids));
+    statements.push(env.DB.prepare(`UPDATE uuid SET version=version+1 WHERE player_id IN (SELECT id FROM players WHERE skin_texture_id IN (SELECT CAST(value AS BIGINT) FROM ${jsonArrayEachRows('?')}) OR cape_texture_id IN (SELECT CAST(value AS BIGINT) FROM ${jsonArrayEachRows('?')}))`).bind(ids, ids));
   }
   statements.push(env.DB.prepare('UPDATE official_catalog_state SET revision=? WHERE id=1').bind(revision));
   if (batch) statements.push(env.DB.prepare('INSERT INTO official_resource_batches (job_id,batch_key,added,updated) VALUES (?,?,?,?)').bind(batch.jobId, batch.key, added, updated));

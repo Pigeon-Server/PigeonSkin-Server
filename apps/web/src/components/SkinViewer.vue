@@ -212,19 +212,19 @@ defineExpose({ capture });
     </div>
     <div v-if="controls" class="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-surface px-3 py-2">
       <div class="flex flex-wrap items-center gap-1">
-        <AppButton v-for="color in ['transparent', 'white', 'gray', 'black'] as const" :key="color" class="btn-icon !h-7 !w-7" :disabled="loading || failed" :aria-label="i18n.t('skinlib.background_' + color)" :aria-pressed="background === color" @click="setBackground(color)">
+        <AppButton v-for="color in ['transparent', 'white', 'gray', 'black'] as const" :key="color" class="btn-icon btn-sm" :disabled="loading || failed" :aria-label="i18n.t('skinlib.background_' + color)" :aria-pressed="background === color" @click="setBackground(color)">
           <span class="h-4 w-4 rounded-sm border border-line" :style="{ background: colors[color] || 'repeating-conic-gradient(#b8bdc5 0% 25%, #fff 0% 50%) 50% / 8px 8px' }" />
         </AppButton>
-        <AppButton class="btn-icon !h-7 !w-7" :disabled="loading || failed" :aria-label="i18n.t('skinlib.background_previous')" @click="changePicture(-1)"><AppIcon name="chevron_left" /></AppButton>
+        <AppButton class="btn-icon btn-sm" :disabled="loading || failed" :aria-label="i18n.t('skinlib.background_previous')" @click="changePicture(-1)"><AppIcon name="chevron_left" /></AppButton>
         <span v-if="background === 'picture'" class="text-xs tabular-nums text-muted" role="status">{{ i18n.t('skinlib.background_count', { current: i18n.n(pictureIndex + 1), total: i18n.n(7) }) }}</span>
-        <AppButton class="btn-icon !h-7 !w-7" :disabled="loading || failed" :aria-label="i18n.t('skinlib.background_next')" @click="changePicture(1)"><AppIcon name="chevron_right" /></AppButton>
+        <AppButton class="btn-icon btn-sm" :disabled="loading || failed" :aria-label="i18n.t('skinlib.background_next')" @click="changePicture(1)"><AppIcon name="chevron_right" /></AppButton>
         <AppIcon v-if="backgroundLoading" name="sync" class="animate-spin !text-sm" :aria-label="i18n.t('common.loading')" />
       </div>
       <div class="flex items-center gap-1">
-        <AppButton class="btn-icon !h-7 !w-7" :disabled="loading || failed" :aria-label="i18n.t('skinlib.zoom_out')" @click="zoom(-1)"><AppIcon name="zoom_out" /></AppButton>
-        <AppButton class="btn-icon !h-7 !w-7" :disabled="loading || failed" :aria-label="i18n.t('skinlib.zoom_in')" @click="zoom(1)"><AppIcon name="zoom_in" /></AppButton>
-        <AppButton class="btn-icon !h-7 !w-7" :disabled="loading || failed" :aria-label="i18n.t('skinlib.reset_view')" @click="resetCamera?.()"><AppIcon name="center_focus_strong" /></AppButton>
-        <AppButton class="btn-icon !h-7 !w-7" :disabled="loading || failed || backgroundLoading" :loading="saving" :aria-label="i18n.t('skinlib.capture')" @click="downloadCapture"><AppIcon name="photo_camera" /></AppButton>
+        <AppButton class="btn-icon btn-sm" :disabled="loading || failed" :aria-label="i18n.t('skinlib.zoom_out')" @click="zoom(-1)"><AppIcon name="zoom_out" /></AppButton>
+        <AppButton class="btn-icon btn-sm" :disabled="loading || failed" :aria-label="i18n.t('skinlib.zoom_in')" @click="zoom(1)"><AppIcon name="zoom_in" /></AppButton>
+        <AppButton class="btn-icon btn-sm" :disabled="loading || failed" :aria-label="i18n.t('skinlib.reset_view')" @click="resetCamera?.()"><AppIcon name="center_focus_strong" /></AppButton>
+        <AppButton class="btn-icon btn-sm" :disabled="loading || failed || backgroundLoading" :loading="saving" :aria-label="i18n.t('skinlib.capture')" @click="downloadCapture"><AppIcon name="photo_camera" /></AppButton>
       </div>
     </div>
     <p v-if="backgroundError" class="flex items-center gap-2 px-3 py-2 text-xs text-danger" role="alert">{{ i18n.t('skinlib.background_failed') }}<AppButton class="btn-sm" @click="applyBackground">{{ i18n.t('common.retry') }}</AppButton></p>

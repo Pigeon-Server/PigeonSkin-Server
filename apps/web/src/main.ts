@@ -18,6 +18,7 @@ import AppSkeleton from '@/components/ui/AppSkeleton.vue';
 import AppPagination from '@/components/ui/AppPagination.vue';
 import MarkdownContent from '@/components/ui/MarkdownContent.vue';
 import AppSelect from '@/components/ui/AppSelect.vue';
+import AppCombobox from '@/components/ui/AppCombobox.vue';
 import AppInput from '@/components/ui/AppInput.vue';
 import AppNumberField from '@/components/ui/AppNumberField.vue';
 import AppCheckbox from '@/components/ui/AppCheckbox.vue';
@@ -42,6 +43,7 @@ for (const [name, component] of Object.entries({
   AppPagination,
   MarkdownContent,
   AppSelect,
+  AppCombobox,
   AppInput,
   AppNumberField,
   AppCheckbox,

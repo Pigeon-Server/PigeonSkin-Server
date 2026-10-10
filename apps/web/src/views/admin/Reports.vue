@@ -52,7 +52,7 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div class="page page--dense">
     <PageHeader :title="i18n.t('general.report-manage')" />
     <div class="flex gap-1">
       <AppButton

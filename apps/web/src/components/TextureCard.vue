@@ -20,7 +20,7 @@ const i18n = useI18n();
   <article class="texture-card">
     <router-link :to="`/skinlib/${texture.id}`" class="preview" :aria-label="texture.name">
       <img :src="previewUrl(texture.hash)" :alt="texture.name" loading="lazy" />
-      <span class="absolute left-2.5 top-2.5 badge !bg-surface/85 shadow-sm">
+      <span class="absolute left-2.5 top-2.5 badge !bg-surface/90 shadow-sm">
         {{ i18n.t(texture.kind === 'cape' ? 'general.cape' : texture.model === 'slim' ? 'skinlib.model_slim' : 'skinlib.model_classic') }}
       </span>
       <span v-if="texture.official || texture.origin === 'repost'" class="absolute bottom-2.5 left-2.5 badge !bg-surface/90 shadow-sm">

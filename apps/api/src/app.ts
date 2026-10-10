@@ -6,6 +6,7 @@
 import { Hono } from 'hono';
 import { resolveConfiguration } from './services/configuration.ts';
 import { registerPigeonApi } from './routes/pigeon-api.ts';
+import { registerPigeonAdminApi } from './routes/pigeon-admin.ts';
 import { registerVoteRoutes } from './routes/votes.ts';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
@@ -28,6 +29,8 @@ import { registerYggdrasilRoutes } from './routes/yggdrasil.ts';
 import { registerConnectRoutes } from './routes/connect.ts';
 import { OAuthError } from './services/connect.ts';
 import { descriptionRoutes } from './routes/description.ts';
+import { usersRoutes } from './routes/users.ts';
+import { deviceRoutes } from './routes/devices.ts';
 import { manualRoutes } from './routes/manual.ts';
 import { manualAssetRoutes } from './routes/manual-assets.ts';
 import { commentRoutes, commentAdminRoutes } from './routes/comments.ts';
@@ -37,7 +40,8 @@ import { siteManagementRoutes } from './routes/site-management.ts';
 import { live2dRoutes } from './routes/live2d.ts';
 import { integrationRoutes } from './routes/integrations.ts';
 import { ticketRoutes } from './routes/tickets.ts';
-import { csrfProtection, rateLimiter } from './middleware/security.ts';
+import { blockedCrawlerGuard, csrfProtection, rateLimiter } from './middleware/security.ts';
+import { skinlibGuard } from './middleware/skinlib-guard.ts';
 import { oauthAuthentication, oauthCors } from './middleware/oauth.ts';
 import { resolveSession, sessionToken, type AppEnv } from './lib.ts';
 import { currentAdmin, toErrorResponse } from './framework.ts';
@@ -49,10 +53,13 @@ import {
 import { ensureDefaultCloset, ensureOfficialCatalog } from './services/official-catalog.ts';
 import { renderSearchPage } from './services/seo.ts';
 import { canonicalPagePath } from '@pigeon-skin/shared/seo';
-import { flag } from './env.ts';
+import { isCaptchaEnabled } from './services/captcha.ts';
 
 export function createApp() {
   const app = new Hono<AppEnv>();
+  // 被禁抓取代理最先拦掉：只比较一个请求头，比配置解析、限流、会话都便宜，
+  // 也让静态资产、协议路径和 SPA 回退一视同仁地被挡住（"全面禁止"）。
+  app.use('*', blockedCrawlerGuard());
   app.use('*', async (c, next) => {
     // 资产早退分支（补齐安全头）：非 HTML 资产直接透传；HTML 只放行编辑器
     // iframe（/blockbench/* 是自包含静态页，不参与 SPA SEO 预渲染），其余
@@ -138,6 +145,16 @@ export function createApp() {
     await next();
   });
 
+  // 皮肤库反爬守卫：会话已解析（登录用户按账号计数、匿名按 IP），
+  // 放在官方目录补齐之前，被拦的请求不再触发后续 DB 工作。
+  //
+  // 按路由模式挂载而不是自己解析路径：正则只认 \d+，而路由用 Number() 解析
+  // 参数（/0x47F、/+1151、/%311151 都会被路由接受），自解析会漏掉这些变体，
+  // 形成"换个写法就绕过计数"的缺口。挂载点与路由共用同一套匹配语义。
+  app.use('/api/v1/textures', skinlibGuard());
+  app.use('/api/v1/textures/:id', skinlibGuard());
+  app.use('/api/v1/textures/:id/description', skinlibGuard());
+
   // ── 健康检查 ───────────────────────────────────────────────────────────────
   app.use('/api/v1/*', async (c, next) => {
     const path = c.req.path;
@@ -172,6 +189,7 @@ export function createApp() {
   app.route('/api/v1/auth', authRoutes);
   app.route('/api/v1/auth', securityAuthRoutes);
   app.route('/api/v1/me/security', securityMeRoutes);
+  app.route('/api/v1/me', deviceRoutes);
   app.route('/api/v1/players', playerRoutes);
   app.route('/api/v1/textures', textureRoutes);
   app.route('/api/v1/closet', closetRoutes);
@@ -179,9 +197,15 @@ export function createApp() {
   app.route('/api/v1/tickets', ticketRoutes);
   // 公开设置：站名、注册开关、计费参数等前端启动时需要的值。
   // 用白名单裁剪，绝不把 custom_js、正则等内部配置暴露出去。
+  // 验证码驱动启用时下发 site key（Turnstile/reCAPTCHA/腾讯 AppId/阿里 SceneId），供前端渲染 widget。
   app.get('/api/v1/settings/public', async (c) => {
     const locale = c.req.query('locale') ?? '';
-    return c.json({ ...await readPublic(c.env, locale), turnstile_site_key: flag(c.env.TURNSTILE_ENABLED) ? c.env.TURNSTILE_SITE_KEY || '' : '' });
+    const enabled = isCaptchaEnabled(c.env);
+    return c.json({
+      ...await readPublic(c.env, locale),
+      captcha_driver: enabled ? c.env.CAPTCHA_DRIVER : '',
+      captcha_site_key: enabled ? c.env.CAPTCHA_SITE_KEY || '' : '',
+    });
   });
 
   app.route('/api/v1/me', meRoutes);
@@ -207,6 +231,9 @@ export function createApp() {
     return c.json({ url: `/avatar/user/${user.id}?mode=2d&size=100` });
   });
 
+  // 公开用户资料（创作者主页）
+  app.route('/api/v1', usersRoutes);
+
   // Minecraft 协议挂在根路径：/{player}.json、/textures/{hash} 等。
   // 这些路径由客户端协议固定，不能挪到 /api 下面。
   registerProtocolRoutes(app);
@@ -222,6 +249,7 @@ export function createApp() {
   // Yggdrasil 协议（authlib-injector 外置登录）
   registerYggdrasilRoutes(app);
   registerPigeonApi(app);
+  registerPigeonAdminApi(app);
   registerVoteRoutes(app);
   registerConnectRoutes(app);
   // sitemap.xml / robots.txt 自动生成

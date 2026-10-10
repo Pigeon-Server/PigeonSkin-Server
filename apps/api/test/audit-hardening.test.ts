@@ -69,7 +69,7 @@ describe('积分快照并发结算', () => {
     const imageHash = await hash(crypto.randomUUID());
     const textureId = await seedTexture(imageHash, ownerId, 73);
     await seedTexture(imageHash, ownerId, 0);
-    const actor = { id: ownerId, email: 'refund@example.com', nickname: 'refund', role: 'normal' as const, score: 100, emailVerifiedAt: null, locale: null, isDarkMode: false, avatarTextureId: null, signature: '', needsInitialization: false };
+    const actor = { id: ownerId, email: 'refund@example.com', nickname: 'refund', role: 'normal' as const, score: 100, emailVerifiedAt: null, locale: null, isDarkMode: false, avatarTextureId: null, signature: '', needsInitialization: false, reportingDisabled: false, commentsDisabled: false };
     const results = await Promise.allSettled([1, 2].map(() => deleteTexture(env, actor, textureId, { enabled: true })));
     expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
     const user = await env.DB.prepare('SELECT score FROM users WHERE id=?').bind(ownerId).first<{ score: number }>();

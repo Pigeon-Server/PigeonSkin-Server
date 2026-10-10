@@ -16,6 +16,8 @@ dist/
 !.env.example
 !.env.*.example
 wrangler.deploy.jsonc
+wrangler.min.jsonc
+wrangler.import.jsonc
 
 # 本地工具状态
 .mimosa/
@@ -42,6 +44,7 @@ __pycache__/
 .pytest_cache/
 .idea/
 .vscode/
+.zcode/
 *.swp
 *.swo
 *~
@@ -86,3 +89,4 @@ docs/rewrite/validation-*.md
 
 # 迁移工具的本地检查点与 fixture
 tools/migrate/.tmp/
+dist-node/

@@ -2,6 +2,7 @@
 import { onMounted, ref, watch } from 'vue';
 import { adminApi, type AiJobItem, type SearchSubmissionRecord, type TaskRunItem, type TextureFlagItem } from '@/api';
 import { useI18n } from '@/stores/i18n';
+import { confirmAction } from '@/stores/dialog';
 
 const i18n = useI18n();
 
@@ -97,6 +98,24 @@ async function cancelJob(id: number) {
   } catch { errMsg.value = i18n.t('common.internal_error'); }
 }
 
+const backfilling = ref(false);
+
+async function backfillJobs() {
+  if (backfilling.value) return;
+  if (!(await confirmAction(i18n.t('admin.task_backfill_confirm')))) return;
+  backfilling.value = true;
+  try {
+    const { results } = await adminApi.backfillAiJobs();
+    notice.value = results.length === 0
+      ? i18n.t('admin.task_backfill_empty')
+      : i18n.t('admin.task_backfill_done', {
+          detail: results.map((r) => `${jobKindLabel(r.kind)} +${r.queued}`).join(', '),
+        });
+    await loadJobs();
+  } catch { errMsg.value = i18n.t('common.internal_error'); }
+  finally { backfilling.value = false; }
+}
+
 async function clearFlag(id: number, field: 'name' | 'description') {
   try {
     await adminApi.clearTextureFlag(id, field);
@@ -157,6 +176,7 @@ onMounted(load);
         <div class="flex flex-wrap items-center gap-2">
           <AppSelect v-model="jobKind" class="max-w-48" :options="[{ value: '', label: i18n.t('admin.task_all_types') }, ...JOB_KINDS.map(k => ({ value: k, label: jobKindLabel(k) }))]" @change="() => { jobPage = 1; void loadJobs(); }" />
           <AppSelect v-model="jobStatus" class="max-w-40" :options="[{ value: '', label: i18n.t('admin.task_all_statuses') }, ...JOB_STATUSES.map(s => ({ value: s, label: statusLabel(s) }))]" @change="() => { jobPage = 1; void loadJobs(); }" />
+          <AppButton class="!px-3 !py-1.5 text-xs ml-auto" :disabled="backfilling" @click="backfillJobs">{{ i18n.t('admin.task_backfill') }}</AppButton>
         </div>
         <AppCard class="overflow-x-auto">
           <table class="w-full text-sm">
