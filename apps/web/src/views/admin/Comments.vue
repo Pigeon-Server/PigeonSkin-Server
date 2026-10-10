@@ -54,7 +54,7 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="space-y-3"><PageHeader :title="i18n.t('admin.comments_title')" />
+  <div class="page page--dense"><PageHeader :title="i18n.t('admin.comments_title')" />
     <div class="flex flex-wrap items-center gap-2">
       <AppSelect v-model="status" class="max-w-48" :options="[{ value: '', label: i18n.t('admin.comment_all_status') }, ...['published', 'pending', 'rejected', 'deleted'].map(value => ({ value, label: i18n.t(`comments.status_${value}`) }))]" @change="changeStatus" />
       <span class="text-sm text-muted">{{ i18n.t('common.count', { count: i18n.n(total) }) }}</span>
@@ -90,7 +90,7 @@ onMounted(load);
               <router-link
                 v-if="c.textureId"
                 :to="`/skinlib/${c.textureId}`"
-                class="text-brand-600 hover:underline dark:text-brand-400"
+                class="text-brand-600 hover:underline dark:text-brand-300"
               >
                 #{{ c.textureId }}
               </router-link>

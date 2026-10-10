@@ -5,6 +5,7 @@ import { useI18n } from '@/stores/i18n';
 import { useSessionStore } from '@/stores/session';
 import { confirmAction } from '@/stores/dialog';
 import UserAvatar from '@/components/UserAvatar.vue';
+import VerificationChallenge from '@/components/VerificationChallenge.vue';
 import { apiErrorMessage } from '@/lib/api-error';
 const props = defineProps<{ textureId: number }>();
 const emit = defineEmits<{ count: [value: number] }>();
@@ -21,6 +22,9 @@ const loading = ref(true),
 const listError = ref(''),
   formError = ref(''),
   notice = ref('');
+const captchaToken = ref(''),
+  captchaRandstr = ref('');
+const challenge = ref<InstanceType<typeof VerificationChallenge> | null>(null);
 let requestId = 0;
 let pendingTimer: ReturnType<typeof setTimeout> | undefined;
 let submittedId: number | null = null;
@@ -68,12 +72,15 @@ async function post() {
   formError.value = '';
   notice.value = '';
   try {
-    const created = await commentApi.create(props.textureId, content.value.trim());
+    const created = await commentApi.create(props.textureId, content.value.trim(), captchaToken.value, captchaRandstr.value);
     submittedId = created.id;
     content.value = '';
+    captchaToken.value = '';
+    captchaRandstr.value = '';
     notice.value = i18n.t(created.status === 'pending' ? 'comments.pending' : 'comments.published');
     await load(1);
   } catch (e) {
+    challenge.value?.reset();
     formError.value = apiErrorMessage(e);
   } finally {
     posting.value = false;
@@ -108,7 +115,7 @@ onBeforeUnmount(() => { requestId++; clearTimeout(pendingTimer); });
         <span class="ml-2 text-xs font-normal text-muted">{{ i18n.n(total) }}</span>
       </h2>
     </header>
-    <AppForm v-if="session.user.value" class="mb-5" @submit.prevent="post">
+    <AppForm v-if="session.user.value && !session.user.value.commentsDisabled" class="mb-5" @submit.prevent="post">
       <label for="comment-content" class="mb-2 flex items-center gap-2 text-sm">
         <UserAvatar
           :texture-id="session.user.value.avatarTextureId"
@@ -129,6 +136,7 @@ onBeforeUnmount(() => { requestId++; clearTimeout(pendingTimer); });
         :aria-label="i18n.t('comments.placeholder')"
         :placeholder="i18n.t('comments.placeholder')"
       />
+      <VerificationChallenge ref="challenge" v-model="captchaToken" v-model:randstr="captchaRandstr" class="mt-2" />
       <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
         <span class="text-xs text-muted">
           {{ i18n.t('common.characters', { count: i18n.n(content.length), max: i18n.n(500) }) }}
@@ -157,9 +165,9 @@ onBeforeUnmount(() => { requestId++; clearTimeout(pendingTimer); });
         <div class="min-w-0 flex-1">
           <header class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="text-sm font-semibold">{{ comment.userId === null ? i18n.t('general.anonymous') : comment.userName }}</span>
+              <span class="text-sm font-semibold">{{ comment.userId === null ? i18n.t('admin.anonymous') : comment.userName }}</span>
               <template v-if="comment.userId === session.user.value?.id && (comment.status === 'pending' || comment.status === 'rejected')">
-                <span class="badge" :class="comment.status === 'pending' ? 'badge-default' : '!text-danger'" role="status"><AppIcon v-if="comment.status === 'pending'" name="schedule" class="!text-xs" />{{ i18n.t('comments.status_' + comment.status) }}</span>
+                <span class="badge" :class="comment.status === 'pending' ? 'badge-default' : 'badge-danger'" role="status"><AppIcon v-if="comment.status === 'pending'" name="schedule" class="!text-xs" />{{ i18n.t('comments.status_' + comment.status) }}</span>
                 <span class="text-xs text-muted">{{ i18n.t('comments.private_notice') }}</span>
               </template>
             </div>
@@ -169,7 +177,7 @@ onBeforeUnmount(() => { requestId++; clearTimeout(pendingTimer); });
               </time>
               <AppButton
                 v-if="session.isAdmin.value || session.user.value?.id === comment.userId"
-                class="btn-icon btn-sm !border-0"
+                class="btn-icon btn-sm"
                 :disabled="deleting !== null"
                 :loading="deleting === comment.id"
                 :aria-label="i18n.t('common.delete')"

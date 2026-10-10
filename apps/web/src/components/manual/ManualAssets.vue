@@ -86,7 +86,7 @@ defineExpose({ upload, pick });
 <style scoped>
 .manual-assets-dialog { position: fixed; inset: 0; margin: auto; padding: 0; width: min(940px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 32px); background: var(--v0-surface); color: var(--ink); border: 1px solid var(--v0-border); border-radius: 10px; opacity: 0; transform: translateY(8px) scale(.98); transition: opacity .18s, transform .18s, display .18s allow-discrete, overlay .18s allow-discrete; }
 .manual-assets-dialog[open] { display: flex; flex-direction: column; opacity: 1; transform: none; }
-.manual-assets-dialog::backdrop { background: #0007; opacity: 0; transition: opacity .18s, display .18s allow-discrete, overlay .18s allow-discrete; }
+.manual-assets-dialog::backdrop { background: #0f141a80; backdrop-filter: blur(5px); opacity: 0; transition: opacity .18s, display .18s allow-discrete, overlay .18s allow-discrete; }
 .manual-assets-dialog[open]::backdrop { opacity: 1; }
 .manual-assets-dialog header, .manual-assets-dialog footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; flex-shrink: 0; }
 .manual-assets-dialog header { border-bottom: 1px solid var(--v0-border); }

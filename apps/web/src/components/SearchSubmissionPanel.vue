@@ -59,7 +59,7 @@ onMounted(load);
           <div class="flex justify-between gap-2"><strong>{{ engine.name }}</strong><span class="text-xs text-muted">{{ i18n.t(engine.id === 'sogou' ? 'integration.search.manual' : state.enabled[engine.id] ? 'common.enabled' : 'common.disabled') }}</span></div>
           <p class="text-sm text-muted">{{ i18n.t(`integration.search.${engine.id}_help`) }}</p>
           <p v-if="engine.id !== 'sogou'" class="text-xs text-muted">{{ i18n.t('integration.search.counts', { pending: i18n.n(count(engine.id, 'pending')), submitted: i18n.n(count(engine.id, 'submitted')), failed: i18n.n(count(engine.id, 'failed')) }) }}</p>
-          <a :href="engine.url" target="_blank" rel="noopener noreferrer" class="text-sm text-brand-600 dark:text-brand-400">{{ i18n.t('integration.search.webmaster') }} ↗</a>
+          <a :href="engine.url" target="_blank" rel="noopener noreferrer" class="text-sm text-brand-600 dark:text-brand-300 inline-flex items-center gap-0.5">{{ i18n.t('integration.search.webmaster') }}<AppIcon name="north_east" class="!text-xs" /></a>
         </article>
       </div>
       <div class="overflow-x-auto">

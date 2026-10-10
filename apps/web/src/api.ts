@@ -217,6 +217,10 @@ export interface CurrentUser {
   avatarTextureId: number | null;
   signature?: string | null | undefined;
   needsInitialization: boolean;
+  /** 管理员禁用其提交举报（防滥用风控） */
+  reportingDisabled: boolean;
+  /** 管理员禁用其发表评论（防滥用风控） */
+  commentsDisabled: boolean;
 }
 export interface AccountInitialization {
   needsInitialization: boolean; email: string; nickname: string; emailVerified: boolean; ticket: string;
@@ -230,13 +234,27 @@ export const initializationApi = {
 export const api = {
   health: () => request<{ ok: boolean; db: string; latencyMs: number }>('/api/v1/health'),
 
-  register: (input: { email: string; password: string; playerName?: string; nickname?: string; turnstileToken?: string }) =>
+  /** 创作者主页公开资料 */
+  userProfile: (id: number) => request<UserProfile>(`/api/v1/users/${id}/profile`),
+
+  /** 登录设备：列出自己的浏览器会话与游戏启动器令牌 */
+  devices: () => request<DeviceList>('/api/v1/me/devices'),
+  /** 登录设备：踢掉一个浏览器会话（current=true 表示踢的是当前设备） */
+  revokeDeviceSession: (id: string) => request<{ ok: boolean; current: boolean }>(`/api/v1/me/devices/session/${id}`, { method: 'DELETE' }),
+  /** 登录设备：踢掉一个游戏启动器令牌 */
+  revokeDeviceLauncher: (id: string) => request<{ ok: boolean }>(`/api/v1/me/devices/launcher/${id}`, { method: 'DELETE' }),
+
+  register: (input: { email: string; password: string; playerName?: string; nickname?: string; captchaToken?: string; captchaRandstr?: string }) =>
     request<{ id: number }>('/api/v1/auth/register', { method: 'POST', json: input }),
 
-  login: (input: { identifier: string; password: string; keep?: boolean; destination?: string; turnstileToken?: string; retainUserId?: number; conflictPasswords?: Array<{ userId: number; password: string }> }) =>
+  login: (input: { identifier: string; password: string; keep?: boolean; destination?: string; captchaToken?: string; captchaRandstr?: string; retainUserId?: number; conflictPasswords?: Array<{ userId: number; password: string }> }) =>
     request<LoginResult>('/api/v1/auth/login', { method: 'POST', json: input }),
 
   logout: () => request<void>('/api/v1/auth/logout', { method: 'POST' }),
+
+  /** 自绘图案验证码出题（driver=image 时使用） */
+  captchaChallenge: () =>
+    request<{ challengeId: string; svg: string; ttlSeconds: number }>('/api/v1/auth/captcha/challenge'),
 
   session: () => request<CurrentUser>('/api/v1/auth/session'),
 
@@ -244,8 +262,8 @@ export const api = {
     request<{ ok: boolean; reason?: string }>('/api/v1/auth/verify-email/request', { method: 'POST' }),
   verifyEmailConfirm: (token: string) =>
     request<{ ok: boolean }>('/api/v1/auth/verify-email/confirm', { method: 'POST', json: { token } }),
-  forgotPassword: (email: string, turnstileToken = '') =>
-    request<{ ok: boolean }>('/api/v1/auth/forgot-password', { method: 'POST', json: { email, turnstileToken } }),
+  forgotPassword: (email: string, captchaToken = '', captchaRandstr = '') =>
+    request<{ ok: boolean }>('/api/v1/auth/forgot-password', { method: 'POST', json: { email, captchaToken, captchaRandstr } }),
   resetPassword: (token: string, password: string) =>
     request<{ ok: boolean }>('/api/v1/auth/reset-password', { method: 'POST', json: { token, password } }),
 };
@@ -314,6 +332,83 @@ export interface Paged<T> {
   totalPages: number;
 }
 
+export interface AiJobItem {
+  id: number;
+  kind: 'translate_texture' | 'moderate_texture_name' | 'moderate_texture_description';
+  tid: number;
+  status: 'pending' | 'processing' | 'done' | 'failed' | 'cancelled';
+  attempts: number;
+  nextRunAt: number;
+  lastError: string;
+  createdAt: number;
+  updatedAt: number;
+  texture: { id: number; name: string; uploaderId: number | null; nameFlagged: number; descriptionFlagged: number } | null;
+}
+
+export interface TextureFlagItem {
+  id: number;
+  name: string;
+  nameFlagged: number;
+  nameFlagReason: string;
+  descriptionFlagged: number;
+  descriptionFlagReason: string;
+  uploaderId: number | null;
+}
+
+export interface SearchSubmissionRecord {
+  engine: string;
+  textureId: number;
+  status: string;
+  httpStatus: number | null;
+  attempts: number;
+  lastError: string;
+  updatedAt: number;
+}
+
+export interface TaskRunItem {
+  id: number;
+  name: string;
+  ok: boolean;
+  detail: string;
+  ranAt: number;
+}
+
+/** 登录设备：浏览器会话 */
+export interface BrowserDevice {
+  kind: 'browser';
+  id: string;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: number;
+  lastSeenAt: number;
+  current: boolean;
+}
+
+/** 登录设备：游戏启动器令牌（authlib 外置登录） */
+export interface LauncherDevice {
+  kind: 'launcher';
+  id: string;
+  playerName: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export interface DeviceList {
+  browser: BrowserDevice[];
+  launcher: LauncherDevice[];
+}
+
+/** 创作者主页公开资料 */
+export interface UserProfile {
+  id: number;
+  nickname: string;
+  signature: string;
+  avatarTextureId: number | null;
+  role: string;
+  createdAt: number;
+  counts: { skins: number; capes: number };
+}
+
 export interface TextureQuery {
   // 显式写 | undefined：tsconfig 开了 exactOptionalPropertyTypes，
   // 否则调用方传 `kind: undefined` 会编译不过
@@ -324,12 +419,15 @@ export interface TextureQuery {
   sort?: 'created' | 'likes' | undefined;
   official?: boolean | undefined;
   mine?: boolean | undefined;
+  /** 展示语言：材质名按 AI 译文覆盖 */
+  locale?: string | undefined;
   page?: number | undefined;
   perPage?: number | undefined;
 }
 
 export const textureApi = {
-  list: (q: TextureQuery = {}) => {
+  /** headers 供反爬挑战带 X-Captcha-Token 重试 */
+  list: (q: TextureQuery = {}, headers?: HeadersInit) => {
     const p = new URLSearchParams();
     if (q.kind) p.set('kind', q.kind);
     if (q.model) p.set('model', q.model);
@@ -338,12 +436,18 @@ export const textureApi = {
     if (q.sort) p.set('sort', q.sort);
     if (q.official) p.set('official', 'true');
     if (q.mine) p.set('mine', 'true');
+    if (q.locale) p.set('locale', q.locale);
     if (q.page) p.set('page', String(q.page));
     if (q.perPage) p.set('per_page', String(q.perPage));
-    return request<Paged<TextureSummary>>(`/api/v1/textures?${p}`);
+    return request<Paged<TextureSummary>>(`/api/v1/textures?${p}`, headers ? { headers } : {});
   },
 
-  get: (id: number) => request<TextureSummary>(`/api/v1/textures/${id}`),
+  /** headers 供反爬挑战带 X-Captcha-Token 重试 */
+  get: (id: number, locale?: string, headers?: HeadersInit) =>
+    request<TextureSummary>(
+      `/api/v1/textures/${id}${locale ? `?locale=${encodeURIComponent(locale)}` : ''}`,
+      headers ? { headers } : {},
+    ),
 
   content: async (id: number) => {
     const response = await fetch(`/api/v1/textures/${id}/content`, { credentials: 'same-origin' });
@@ -393,8 +497,11 @@ export const textureApi = {
 
   // ── 纹理描述（原 texture-description 插件）───────────────────────────────
 
-  getDescription: (id: number) =>
-    request<{ description: string }>(`/api/v1/textures/${id}/description`),
+  getDescription: (id: number, locale?: string, headers?: HeadersInit) =>
+    request<{ description: string; translatedDescription?: string }>(
+      `/api/v1/textures/${id}/description${locale ? `?locale=${encodeURIComponent(locale)}` : ''}`,
+      headers ? { headers } : {},
+    ),
 
   putDescription: (id: number, description: string) =>
     request<{ ok: boolean; description: string }>(`/api/v1/textures/${id}/description`, {
@@ -428,9 +535,9 @@ export const commentApi = {
     return request<Paged<CommentItem>>(`/api/v1/textures/${textureId}/comments?${p}`);
   },
 
-  create: (textureId: number, content: string) =>
+  create: (textureId: number, content: string, captchaToken?: string, captchaRandstr?: string) =>
     request<{ ok: boolean; id: number; status?: 'pending' | 'published'; aiFlagged: boolean }>(
-      `/api/v1/textures/${textureId}/comments`, { method: 'POST', json: { content } }),
+      `/api/v1/textures/${textureId}/comments`, { method: 'POST', json: { content, captchaToken, captchaRandstr } }),
 
   /** 用户删除自己的评论（管理员也可删任意一条） */
   remove: (id: number) => request<void>(`/api/v1/comments/${id}`, { method: 'DELETE' }),
@@ -521,9 +628,9 @@ export interface ReportItem {
 }
 
 export const reportApi = {
-  submit: (textureId: number, reason: string) =>
+  submit: (textureId: number, reason: string, captchaToken?: string, captchaRandstr?: string) =>
     request<{ ok: boolean; scoreDelta: number }>('/api/v1/reports', {
-      method: 'POST', json: { textureId, reason },
+      method: 'POST', json: { textureId, reason, captchaToken, captchaRandstr },
     }),
 
   mine: () => request<{ items: ReportItem[] }>('/api/v1/reports'),
@@ -668,6 +775,8 @@ export interface AdminUserRow {
   role: 'banned' | 'normal' | 'admin' | 'super_admin';
   score: number;
   emailVerifiedAt: number | null;
+  reportingDisabled: boolean;
+  commentsDisabled: boolean;
   createdAt: number;
   playerCount: number;
 }
@@ -734,7 +843,7 @@ export const adminApi = {
   integrations: () => request<IntegrationStatus>('/api/v1/admin/integrations'),
   searchSubmissions: () => request<SearchSubmissionStatus>('/api/v1/admin/search-submissions'),
   submitPublicTextures: () => request<{ queued: number }>('/api/v1/admin/search-submissions', { method: 'POST' }),
-  yggLogs: (query: { action?: string | undefined; page?: number | undefined } = {}) => request<Paged<YggLogItem>>(`/api/v1/admin/yggdrasil/logs?${new URLSearchParams({ ...(query.action ? { action: query.action } : {}), page: String(query.page || 1) })}`),
+  yggLogs: (query: { action?: string | undefined; q?: string | undefined; page?: number | undefined } = {}) => request<Paged<YggLogItem>>(`/api/v1/admin/yggdrasil/logs?${new URLSearchParams({ ...(query.action ? { action: query.action } : {}), ...(query.q ? { q: query.q } : {}), page: String(query.page || 1) })}`),
   status: () => request<{ version: string; environment: string; database: boolean; storage: boolean; latencyMs: number }>('/api/v1/admin/status'),
   update: () => request<{ current: string; latest: { version: string; notes: string; url: string } | null; deployConfigured: boolean }>('/api/v1/admin/update'),
   deployUpdate: () => request<{ ok: boolean }>('/api/v1/admin/update', { method: 'POST' }),
@@ -751,8 +860,8 @@ export const adminApi = {
   createTicketCategory: (name: string) => request<TicketCategory>('/api/v1/admin/ticket-categories', { method: 'POST', json: { name } }),
   updateTicketCategory: (id: number, body: { name?: string; hidden?: boolean; sortOrder?: number }) => request<TicketCategory>(`/api/v1/admin/ticket-categories/${id}`, { method: 'PATCH', json: body }),
   deleteTicketCategory: (id: number) => request<TicketCategory>(`/api/v1/admin/ticket-categories/${id}`, { method: 'DELETE' }),
-  tickets: (q: { page?: number | undefined; status?: string | undefined; categoryId?: number | undefined; user?: string | undefined } = {}) => {
-    const p = new URLSearchParams(); if (q.page) p.set('page', String(q.page)); if (q.status) p.set('status', q.status); if (q.categoryId) p.set('category_id', String(q.categoryId)); if (q.user) p.set('user', q.user);
+  tickets: (query: { page?: number | undefined; status?: string | undefined; categoryId?: number | undefined; user?: string | undefined; q?: string | undefined } = {}) => {
+    const p = new URLSearchParams(); if (query.page) p.set('page', String(query.page)); if (query.status) p.set('status', query.status); if (query.categoryId) p.set('category_id', String(query.categoryId)); if (query.user) p.set('user', query.user); if (query.q) p.set('q', query.q);
     return request<{ items: TicketSummary[]; page: number; perPage: number; total: number; totalPages: number; unread: number }>(`/api/v1/admin/tickets?${p}`);
   },
   ticket: (id: number) => request<TicketDetail>(`/api/v1/admin/tickets/${id}`),
@@ -770,6 +879,7 @@ export const adminApi = {
   patchUser: (id: number, body: {
     nickname?: string; email?: string; emailVerified?: boolean; score?: number;
     role?: 'banned' | 'normal' | 'admin';
+    reportingDisabled?: boolean; commentsDisabled?: boolean;
   }) =>
     request<{ ok: boolean; sessionsRevoked: boolean }>(`/api/v1/admin/users/${id}`, {
       method: 'PATCH', json: body,
@@ -782,12 +892,13 @@ export const adminApi = {
   }) =>
     request<{ id: number }>('/api/v1/admin/users', { method: 'POST', json: body }),
 
-  /** 审计日志（分页 + action/actor 过滤） */
-  auditLog: (q: { action?: string | undefined; actorId?: number | undefined; page?: number | undefined } = {}) => {
+  /** 审计日志（分页 + action/actor 过滤；q 为搜索表达式） */
+  auditLog: (query: { action?: string | undefined; actorId?: number | undefined; q?: string | undefined; page?: number | undefined } = {}) => {
     const p = new URLSearchParams();
-    if (q.action) p.set('action', q.action);
-    if (q.actorId !== undefined) p.set('actor_id', String(q.actorId));
-    if (q.page) p.set('page', String(q.page));
+    if (query.action) p.set('action', query.action);
+    if (query.actorId !== undefined) p.set('actor_id', String(query.actorId));
+    if (query.q) p.set('q', query.q);
+    if (query.page) p.set('page', String(query.page));
     return request<Paged<AuditLogItem>>(`/api/v1/admin/audit-log?${p}`);
   },
 
@@ -826,6 +937,58 @@ export const adminApi = {
   deleteComment: (id: number) =>
     request<void>(`/api/v1/admin/comments/${id}`, { method: 'DELETE' }),
 
+  /** 后台任务：AI 任务队列 */
+  /** AI 网关：从当前驱动拉取可用模型列表（null = 驱动无列表 API）；edits 为表单未保存值 */
+  aiModels: (edits?: {
+    ai_driver?: string | undefined;
+    ai_api_key?: string | undefined;
+    openai_base_url?: string | undefined;
+    ai_systemone_api_key?: string | undefined;
+    ai_cloudflare_account_id?: string | undefined;
+    ai_cloudflare_api_token?: string | undefined;
+  }) => {
+    const p = new URLSearchParams();
+    if (edits?.ai_driver) p.set('ai_driver', edits.ai_driver);
+    if (edits?.ai_api_key) p.set('ai_api_key', edits.ai_api_key);
+    if (edits?.openai_base_url) p.set('openai_base_url', edits.openai_base_url);
+    if (edits?.ai_systemone_api_key) p.set('ai_systemone_api_key', edits.ai_systemone_api_key);
+    if (edits?.ai_cloudflare_account_id) p.set('ai_cloudflare_account_id', edits.ai_cloudflare_account_id);
+    if (edits?.ai_cloudflare_api_token) p.set('ai_cloudflare_api_token', edits.ai_cloudflare_api_token);
+    return request<{ models: string[] | null }>(`/api/v1/admin/ai-models?${p}`);
+  },
+  /** AI 网关：连通性测试；edits 为表单未保存值，modelField 是按钮所在字段的设置键 */
+  aiTest: (model?: string, opts?: { modelField?: string | undefined; edits?: Record<string, string | undefined> | undefined }) =>
+    request<{ ok: boolean; model: string | null; reason?: string }>('/api/v1/admin/ai-test', {
+      method: 'POST',
+      json: {
+        ...(model ? { model } : {}),
+        ...(opts?.modelField ? { modelField: opts.modelField } : {}),
+        ...(opts?.edits ? { edits: opts.edits } : {}),
+      },
+    }),
+
+  aiJobs: (q: { kind?: string | undefined; status?: string | undefined; page?: number | undefined } = {}) => {
+    const p = new URLSearchParams({ page: String(q.page || 1) });
+    if (q.kind) p.set('kind', q.kind);
+    if (q.status) p.set('status', q.status);
+    return request<Paged<AiJobItem>>(`/api/v1/admin/ai-jobs?${p}`);
+  },
+  retryAiJob: (id: number) => request<{ ok: boolean }>(`/api/v1/admin/ai-jobs/${id}/retry`, { method: 'POST' }),
+  cancelAiJob: (id: number) => request<{ ok: boolean }>(`/api/v1/admin/ai-jobs/${id}/cancel`, { method: 'POST' }),
+  backfillAiJobs: () => request<{ results: Array<{ kind: string; queued: number }> }>('/api/v1/admin/ai-jobs/backfill', { method: 'POST' }),
+
+  /** 后台任务：AI 审核标记处置 */
+  textureFlags: (page = 1) => request<Paged<TextureFlagItem>>(`/api/v1/admin/texture-flags?page=${page}`),
+  clearTextureFlag: (id: number, field: 'name' | 'description') =>
+    request<{ ok: boolean }>(`/api/v1/admin/texture-flags/${id}/${field}`, { method: 'DELETE' }),
+
+  /** 后台任务：搜索引擎提交记录 */
+  searchSubmissionRecords: (page = 1) => request<Paged<SearchSubmissionRecord>>(`/api/v1/admin/search-submissions?page=${page}`),
+  retrySearchSubmissions: (engine: string) => request<{ ok: boolean; reset: number }>(`/api/v1/admin/search-submissions/${engine}/retry`, { method: 'POST' }),
+
+  /** 后台任务：定时任务运行记录 */
+  taskRuns: () => request<{ items: TaskRunItem[] }>('/api/v1/admin/task-runs'),
+
   players: (q: { keyword?: string | undefined; page?: number | undefined } = {}) => {
     const p = new URLSearchParams();
     if (q.keyword) p.set('q', q.keyword);
@@ -859,6 +1022,10 @@ export const adminApi = {
     request<{
       locale: string;
       values: Record<string, string>;
+      /** AI 覆盖项的内置默认值（空值时前端作 placeholder 展示） */
+      aiDefaults: Record<string, string>;
+      /** 当前生效的 AI 驱动（含部署 env 回落），前端据此联动显隐 */
+      aiEffectiveDriver: 'workers' | 'openai' | 'anthropic' | 'systemone' | '';
       overrides: string[];
       registry: { typed: string[]; extra: string[] };
       specs: Record<string, { kind: 'string' | 'integer' | 'boolean' | 'markdown' | 'enum'; min?: number; max?: number; values?: string[]; localizable?: boolean; superAdminOnly?: boolean; secret?: boolean }>;
@@ -870,6 +1037,10 @@ export const adminApi = {
     }),
   clearSettingOverride: (key: string, locale: string) =>
     request<void>(`/api/v1/admin/settings/${encodeURIComponent(key)}?locale=${encodeURIComponent(locale)}`, { method: 'DELETE' }),
+  sendTestEmail: (to?: string) =>
+    request<{ ok: boolean; reason: 'not-configured' | 'provider-error' | null; detail: { phase: string; code: number | null } | null }>('/api/v1/admin/settings/email-test', {
+      method: 'POST', json: { to },
+    }),
 };
 
 export const setupApi = {

@@ -7,6 +7,7 @@ import { useI18n } from '@/stores/i18n';
 import { useSessionStore } from '@/stores/session';
 import { confirmAction } from '@/stores/dialog';
 import { apiErrorMessage } from '@/lib/api-error';
+import { withSkinlibChallenge } from '@/stores/skinlib-challenge';
 
 const route = useRoute();
 const router = useRouter();
@@ -46,7 +47,7 @@ async function initialize() {
       image = await response.blob();
       if (draft.name) initialName.value = draft.name;
     } else if (!blank) {
-      const metadata = await textureApi.get(textureId);
+      const metadata = await withSkinlibChallenge((headers) => textureApi.get(textureId, undefined, headers));
       if (metadata.kind !== kind.value) throw new Error(i18n.t('editor.wrong_kind'));
       model.value = metadata.model === 'slim' ? 'slim' : 'default';
       initialName.value = metadata.name;

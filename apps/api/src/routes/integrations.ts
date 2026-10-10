@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { currentAdmin, currentUser, readPagination, paginate, fail } from '../framework.ts';
+import { appendFragment, readSearch } from '../search/index.ts';
 import { searchConfiguration, searchSubmissionStatus, queuePublicSubmissions } from '../services/search-submissions.ts';
 import { createSkinConfigs } from '@pigeon-skin/shared/skin-config';
 import { readPublic } from '../services/settings.ts';
@@ -87,15 +88,20 @@ integrationRoutes.get('/admin/yggdrasil/logs', async (c) => {
   currentAdmin(c);
   const page = readPagination(c);
   const action = c.req.query('action') || '';
-  const total = await c.env.DB.prepare(
-    "SELECT count(*) AS n FROM ygg_log WHERE (? = '' OR action = ?)",
-  )
-    .bind(action, action)
+  // 搜索表达式可能引用 players/users 的列（player:name、user:alice），
+  // 因此计数查询与实际查询必须使用同一套 join。
+  const joins = 'FROM ygg_log y LEFT JOIN users u ON u.id = y.user_id LEFT JOIN players p ON p.id = y.player_id';
+  const conditions = ["(? = '' OR y.action = ?)"];
+  const binds: unknown[] = [action, action];
+  appendFragment(conditions, binds, readSearch(c, 'yggLogs'));
+  const where = conditions.join(' AND ');
+  const total = await c.env.DB.prepare(`SELECT count(*) AS n ${joins} WHERE ${where}`)
+    .bind(...binds)
     .first<{ n: number }>();
   const { results } = await c.env.DB.prepare(
-    "SELECT id, ip, action, body, user_id AS userId, player_id AS playerId, created_at AS createdAt FROM ygg_log WHERE (? = '' OR action = ?) ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+    `SELECT y.id, y.ip, y.action, y.body, y.user_id AS userId, y.player_id AS playerId, y.created_at AS createdAt ${joins} WHERE ${where} ORDER BY y.created_at DESC, y.id DESC LIMIT ? OFFSET ?`,
   )
-    .bind(action, action, page.perPage, page.offset)
+    .bind(...binds, page.perPage, page.offset)
     .all<{
       id: number;
       ip: string | null;

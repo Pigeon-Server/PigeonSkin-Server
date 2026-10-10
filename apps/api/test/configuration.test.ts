@@ -102,13 +102,46 @@ describe('Web configuration', () => {
     const state = await (await SELF.fetch('https://x/api/v1/admin/integrations', { headers: { cookie } })).json<{ apiRoot: string }>(); expect(state.apiRoot).toBe('https://skin.example.com/api/yggdrasil');
     expect((await settings(cookie, { site_url: 'javascript:alert(1)' })).status).toBe(422);
     expect((await settings(cookie, { mail_from: 'bad\r\nInjected' })).status).toBe(422);
+    // mail_from 允许纯显示名与纯邮箱;含尖括号必须是完整地址形式
+    expect((await settings(cookie, { mail_from: 'foo<bar' })).status).toBe(422);
+    expect((await settings(cookie, { mail_from: 'noreply@example.com' })).status).toBe(200);
+    // resend 驱动没有账号可供补全,纯显示名无法投递,写入时拦下
+    expect((await settings(cookie, { mail_from: 'Pigeon Skin' })).status).toBe(422);
+    // 切到 smtp 驱动后同一值合法
+    expect((await settings(cookie, { mail_driver: 'smtp' })).status).toBe(422); // smtp 缺 host
+    expect((await settings(cookie, { mail_driver: 'smtp', smtp_host: 'mail.example.test', mail_from: 'Pigeon Skin' })).status).toBe(200);
   });
-  it('configures Turnstile and business switches without exposing the secret', async () => {
+  it('configures the captcha driver and business switches without exposing the secret', async () => {
     const cookie = await admin();
-    expect((await settings(cookie, { turnstile_enabled: 'true' })).status).toBe(422);
-    expect((await settings(cookie, { turnstile_enabled: 'true', turnstile_site_key: 'public-site-key', turnstile_secret: 'private-secret', rate_limit_enabled: 'false' })).status).toBe(200);
-    const pub = await (await SELF.fetch('https://x/api/v1/settings/public')).json<{ turnstile_site_key: string }>(); expect(pub.turnstile_site_key).toBe('public-site-key'); expect(JSON.stringify(pub)).not.toContain('private-secret');
-    const bindings = await resolveConfiguration(env as Bindings); expect(bindings.RATE_LIMIT_ENABLED).toBe('false'); expect(bindings.DERIVATIVES_ENABLED).toBe('true'); expect(bindings.TURNSTILE_SECRET).toBe('private-secret');
+    expect((await settings(cookie, { captcha_driver: 'turnstile' })).status).toBe(422);
+    expect((await settings(cookie, { captcha_driver: 'turnstile', captcha_site_key: 'public-site-key', captcha_secret: 'private-secret', rate_limit_enabled: 'false' })).status).toBe(200);
+    const pub = await (await SELF.fetch('https://x/api/v1/settings/public')).json<{ captcha_driver: string; captcha_site_key: string }>();
+    expect(pub.captcha_driver).toBe('turnstile'); expect(pub.captcha_site_key).toBe('public-site-key'); expect(JSON.stringify(pub)).not.toContain('private-secret');
+    const bindings = await resolveConfiguration(env as Bindings);
+    expect(bindings.RATE_LIMIT_ENABLED).toBe('false'); expect(bindings.DERIVATIVES_ENABLED).toBe('true');
+    expect(bindings.CAPTCHA_DRIVER).toBe('turnstile'); expect(bindings.CAPTCHA_SECRET).toBe('private-secret');
+  });
+  it('rejects aliyun captcha without the access key and accepts it with one', async () => {
+    const cookie = await admin();
+    expect((await settings(cookie, { captcha_driver: 'aliyun', captcha_site_key: 'scene-id', captcha_secret: 'access-key-secret' })).status).toBe(422);
+    expect((await settings(cookie, { captcha_driver: 'aliyun', captcha_site_key: 'scene-id', captcha_secret: 'access-key-secret', aliyun_captcha_access_key_id: 'AKID' })).status).toBe(200);
+    expect((await settings(cookie, { captcha_driver: '' })).status).toBe(200);
+  });
+  it('accepts the image captcha driver without credentials and serves challenges anonymously', async () => {
+    const cookie = await admin();
+    expect((await settings(cookie, { captcha_driver: 'image' })).status).toBe(200);
+    const pub = await (await SELF.fetch('https://x/api/v1/settings/public')).json<{ captcha_driver: string; captcha_site_key: string }>();
+    expect(pub.captcha_driver).toBe('image');
+    expect(pub.captcha_site_key).toBe('');
+    const challenge = await SELF.fetch('https://x/api/v1/auth/captcha/challenge');
+    expect(challenge.status).toBe(200);
+    const body = await challenge.json<{ challengeId: string; svg: string; ttlSeconds: number }>();
+    expect(body.challengeId).toContain('.');
+    expect(body.svg).toContain('<svg');
+    // 驱动关闭时出题端点返回空题面
+    await settings(cookie, { captcha_driver: '' });
+    const off = await (await SELF.fetch('https://x/api/v1/auth/captcha/challenge')).json<{ challengeId: string }>();
+    expect(off.challengeId).toBe('');
   });
   it('keeps Microsoft fallback for verification while rejecting mixed application credentials', async () => {
     const cookie = await admin();

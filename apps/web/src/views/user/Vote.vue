@@ -30,9 +30,18 @@ async function submit() {
 watch(() => route.params.id, load); onMounted(load);
 </script>
 <template>
-  <PageHeader :title="vote?.title || i18n.t('votes.title')"><router-link to="/votes" class="btn">{{ i18n.t('votes.back') }}</router-link></PageHeader>
+  <PageHeader :title="vote?.title || i18n.t('votes.title')">
+    <template #breadcrumb>
+      <nav class="page-breadcrumb">
+        <router-link to="/votes" class="page-back">
+          <AppIcon name="arrow_back" class="!text-sm" />
+          <span>{{ i18n.t('votes.back') }}</span>
+        </router-link>
+      </nav>
+    </template>
+  </PageHeader>
   <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p><AppSkeleton v-if="loading" :count="3" />
-  <div v-else-if="vote" class="max-w-4xl space-y-5">
+  <div v-else-if="vote" class="space-y-5">
     <section class="panel space-y-4">
       <div class="flex flex-wrap gap-3 items-center"><span class="badge">{{ i18n.t(`votes.states.${vote.status}`) }}</span><span class="text-sm text-muted">{{ new Date(vote.startsAt).toLocaleString() }} — {{ new Date(vote.endsAt).toLocaleString() }}</span></div>
       <p class="whitespace-pre-wrap">{{ vote.description }}</p>

@@ -1,7 +1,15 @@
 // 用户资料与积分仓储。
 import { and, eq, sql } from 'drizzle-orm';
-import { players, textures, users } from '@pigeon-skin/db';
+import { players, textures, users, noCaseEq } from '@pigeon-skin/db';
 import type { Db } from './textures.ts';
+import type { SQL } from 'drizzle-orm';
+
+/** 把 helper 产出的含 {COL} 列占位与单个 ? 值占位的 SQL 片段嵌入 drizzle 模板。 */
+function embedFrag(frag: string, column: SQL, value: unknown) {
+  const [lhs = '', rhs = ''] = frag.split('{COL}');
+  const q = rhs.indexOf('?');
+  return sql`${sql.raw(lhs)}${column}${sql.raw(rhs.slice(0, q))}${value}${sql.raw(rhs.slice(q + 1))}`;
+}
 
 export async function findUserProfile(db: Db, id: number) {
   const [row] = await db
@@ -38,7 +46,7 @@ export async function emailTakenByOther(db: Db, email: string, exceptUserId: num
     .select({ id: users.id })
     .from(users)
     .where(and(
-      sql`${users.email} = ${email} COLLATE NOCASE`,
+      embedFrag(noCaseEq('{COL}', '?'), sql`${users.email}`, email),
       sql`${users.id} <> ${exceptUserId}`,
     ))
     .limit(1);

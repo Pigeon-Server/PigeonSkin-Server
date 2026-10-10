@@ -8,7 +8,7 @@ const panel = ref<HTMLElement | null>(null);
 const open = ref(false);
 const top = ref(12);
 function active(link: string) {
-  return props.activePath === link || (['/skinlib', '/votes', '/admin/integrations'].includes(link) && props.activePath.startsWith(`${link}/`));
+  return props.activePath === link || (['/skinlib', '/votes', '/tickets', '/admin/tickets', '/admin/integrations'].includes(link) && props.activePath.startsWith(`${link}/`));
 }
 function toggled(event: Event) {
   open.value = (event as ToggleEvent).newState === 'open';

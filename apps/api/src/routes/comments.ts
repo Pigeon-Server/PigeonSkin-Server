@@ -3,78 +3,21 @@ import type { Context } from 'hono';
 import { and, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import { createDb, comments, textures, users } from '@pigeon-skin/db';
 import { AppError, currentAdmin, currentUser, fail, paginate, readPagination } from '../framework.ts';
-import { getSettingBool, type AppEnv } from '../lib.ts';
+import { isModerationConfigured, moderateComment } from '../services/ai-gateway.ts';
+import { captchaAllows, verifyCaptcha } from '../services/captcha.ts';
+import { clientIp, getSettingBool, type AppEnv } from '../lib.ts';
 
 type Ctx = Context<AppEnv>;
 
-/** AI 审核结果 */
-interface ModerationVerdict {
-  action: 'allow' | 'reject' | 'flag';
-  reason?: string;
-}
-
-async function moderate(c: Ctx, content: string): Promise<ModerationVerdict> {
-  if (!await getSettingBool(c.env, 'comments_ai_moderation')) return { action: 'allow' };
-  if (!c.env.AI) return { action: 'allow' }; // 无 AI 绑定 fail-open
-
-  try {
-    const started = Date.now();
-    const pending = c.env.AI.run('@cf/meta/llama-guard-3-8b', {
-      messages: [{ role: 'user', content }],
-      max_tokens: 64,
-      temperature: 0,
-    });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Comment moderation timed out')), 25_000); });
-    const result = await Promise.race([pending, timeout]).finally(() => clearTimeout(timer)) as { response?: string; safe?: boolean; category?: string } | string;
-
-    const elapsed = Date.now() - started;
-    if (elapsed > 8000) console.warn('AI 审核耗时偏高', elapsed);
-
-    const text = typeof result === 'string' ? result : (result.response ?? '');
-    const parsed = typeof result === 'object' && typeof result.safe === 'boolean' ? result : safeParse(text);
-    if (parsed === null) return { action: 'allow' }; // 解析失败 fail-open
-    if (parsed.safe === false) {
-      return { action: 'reject', ...(parsed.category ? { reason: parsed.category } : {}) };
-    }
-    return { action: 'allow' };
-  } catch (e) {
-    console.error('AI 审核失败（fail-open）', e);
-    return { action: 'allow' };
-  }
-}
-
-function safeParse(text: string): { safe?: boolean; category?: string } | null {
-  try {
-    const json = JSON.parse(text.replace(/^```json\s*|```\s*$/g, '')) as {
-      safe?: boolean; category?: string;
-    };
-    if (typeof json === 'object' && json !== null) {
-      return {
-        ...(typeof json.safe === 'boolean' ? { safe: json.safe } : {}),
-        ...(json.category !== undefined ? { category: json.category } : {}),
-      };
-    }
-    return null;
-  } catch {
-    // llama-guard 原生输出 "safe"/"S1\n..." 形态
-    const t = text.trim().toUpperCase();
-    if (t === 'SAFE') return { safe: true };
-    if (t.startsWith('UNSAFE') || /^S\d/.test(t)) {
-      const category = t.startsWith('UNSAFE') ? t.split('\n').slice(1).join(', ') : t;
-      return { safe: false, ...(category ? { category } : {}) };
-    }
-    return null;
-  }
-}
-
-// 评论区只存在于公开材质：私密材质不设评论区（拥有者与管理员亦然），
-// 对任何人都不可读、不可评，避免借评论侧信道披露私密材质的存在。
+// 评论区只存在于公开的非官方材质：私密材质不设评论区（拥有者与管理员亦然），
+// 对任何人都不可读、不可评，避免借评论侧信道披露私密材质的存在；
+// 官方材质是站点自有内容，不提供社区评论通道。
 async function assertTextureCommentable(c: Ctx, textureId: number): Promise<void> {
   const [t] = await createDb(c.env.DB)
-    .select({ visibility: textures.visibility })
+    .select({ visibility: textures.visibility, official: sql<boolean>`${textures.officialKey} IS NOT NULL`.mapWith(Boolean) })
     .from(textures).where(eq(textures.id, textureId)).limit(1);
   if (!t || t.visibility !== 'public') throw fail.notFound('texture.not_found');
+  if (t.official) throw fail.forbidden('comment.official_disabled');
 }
 
 export const commentRoutes = new Hono<AppEnv>();
@@ -126,10 +69,22 @@ commentRoutes.post('/textures/:id/comments', async (c) => {
     throw fail.forbidden('comment.disabled');
   }
 
-  const body: { content?: unknown } = await c.req.json().catch(() => ({}));
+  // 管理员禁用了评论权限的用户不能发言（防滥用）
+  const [commenter] = await createDb(c.env.DB).select({ commentsDisabled: users.commentsDisabled }).from(users).where(eq(users.id, user.id)).limit(1);
+  if (commenter?.commentsDisabled) throw fail.forbidden('comment.user_disabled');
+
+  const body: { content?: unknown; captchaToken?: unknown; captchaRandstr?: unknown } = await c.req.json().catch(() => ({}));
   const content = typeof body.content === 'string' ? body.content.trim() : '';
   if (content.length === 0) throw fail.invalid('common.invalid_request', { content: 'required' });
   if (content.length > 500) throw fail.invalid('comment.too_long');
+
+  // 防刷靠验证码；验证码未启用时 verifyCaptcha 返回 disabled，放行
+  const verdict = await verifyCaptcha(
+    c.env,
+    { token: typeof body.captchaToken === 'string' ? body.captchaToken : '', randstr: typeof body.captchaRandstr === 'string' ? body.captchaRandstr : '' },
+    clientIp(c),
+  );
+  if (!captchaAllows(verdict, false)) throw fail.forbidden('auth.captcha_failed');
 
   // 发言频率：单纹理 10 秒一条 + 全局每分钟 5 条（AI fail-open 时这是主防线）
   const recent = await createDb(c.env.DB)
@@ -148,7 +103,7 @@ commentRoutes.post('/textures/:id/comments', async (c) => {
     throw new AppError('comment.rate_limited', 429);
   }
 
-  const reviewing = !!c.env.AI && await getSettingBool(c.env, 'comments_ai_moderation');
+  const reviewing = await getSettingBool(c.env, 'comments_ai_moderation') && await isModerationConfigured(c.env);
 
   const [created] = await createDb(c.env.DB)
     .insert(comments)
@@ -164,7 +119,7 @@ commentRoutes.post('/textures/:id/comments', async (c) => {
     .returning({ id: comments.id });
 
   if (reviewing) c.executionCtx.waitUntil((async () => {
-    const verdict = await moderate(c, content);
+    const verdict = await moderateComment(c.env, content);
     await createDb(c.env.DB).update(comments).set({
       status: verdict.action === 'reject' ? 'rejected' : 'published',
       aiFlagged: verdict.action !== 'allow',

@@ -194,6 +194,9 @@ export async function createNodeRuntime(): Promise<NodeRuntime> {
   assignOptional(bindings as unknown as Record<string, unknown>, 'OPENAI_MODERATION_MODEL', optional('OPENAI_MODERATION_MODEL'));
   assignOptional(bindings as unknown as Record<string, unknown>, 'ANTHROPIC_API_KEY', optional('ANTHROPIC_API_KEY'));
   assignOptional(bindings as unknown as Record<string, unknown>, 'ANTHROPIC_MODERATION_MODEL', optional('ANTHROPIC_MODERATION_MODEL'));
+  assignOptional(bindings as unknown as Record<string, unknown>, 'TYPESAFE_API_KEY', optional('TYPESAFE_API_KEY'));
+  assignOptional(bindings as unknown as Record<string, unknown>, 'CLOUDFLARE_ACCOUNT_ID', optional('CLOUDFLARE_ACCOUNT_ID'));
+  assignOptional(bindings as unknown as Record<string, unknown>, 'CLOUDFLARE_API_TOKEN', optional('CLOUDFLARE_API_TOKEN'));
 
   // ── 队列（REDIS_URL 配置时用 Redis List/ZSET，否则落业务库 node_jobs 表）──
   let queueRunner: QueueConsumerRunner | RedisQueueConsumerRunner;

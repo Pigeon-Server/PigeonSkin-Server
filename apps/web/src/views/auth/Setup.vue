@@ -12,7 +12,7 @@ async function submit() { busy.value = true; error.value = ''; try { await setup
 onMounted(load);
 </script>
 <template>
-  <h1 class="text-2xl font-semibold mb-6">{{ i18n.t('setup.title') }}</h1>
+  <h1>{{ i18n.t('setup.title') }}</h1>
   <p v-if="error" class="alert alert-danger" role="alert">{{ error }}<AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
   <p v-if="loading" role="status">{{ i18n.t('common.loading') }}</p>
   <EmptyState v-else-if="status?.locked" :title="i18n.t('setup.locked')" icon="lock"><router-link to="/login" class="btn">{{ i18n.t('general.login') }}</router-link></EmptyState>

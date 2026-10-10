@@ -16,7 +16,7 @@ const i18n = useI18n();
           :aria-label="i18n.t('common.close')"
           @click="open = false"
         >
-          <span class="material-icons" aria-hidden="true">close</span>
+          <AppIcon name="close" />
         </AppButton>
       </header>
       <div class="p-5"><slot /></div>

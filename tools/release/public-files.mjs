@@ -31,13 +31,23 @@ const rules = [
   ['literal-secret', /\b(?:SESSION_SECRET|MFA_ENCRYPTION_KEY|SETUP_TOKEN|JWT_SECRET|SMTP_PASSWORD|CLOUDFLARE_API_TOKEN|RESEND_API_KEY|[A-Z_]+CLIENT_SECRET|LEGACY_SALT)[ \t]*[=:][ \t]*["']?([A-Za-z0-9+/=_-]{8,})/g],
 ];
 
+// 文档与本地 compose 里的占位凭据（`user:pass@host`、`pigeon:pigeon@postgres`）
+// 不是泄漏：用户名、密码、主机三部分都必须是占位词才放行，真实值照旧命中。
+const credentialUrl = /^[a-z][a-z0-9+]*:\/\/([^:@/]+):([^@/]+)@([^:@/]+)/i;
+const placeholder = /^(?:user(?:name)?|pass(?:word)?|pwd|login|account|host(?:name)?|db|database|pigeon|localhost|postgres(?:ql)?|mysql|mariadb|redis|mongo(?:db)?|example\.com|change-?me[\w-]*|your[\w-]*|placeholder[\w-]*|example[\w-]*|[x*]{3,}|<[^>]+>|\$\{[^}]+\}|\{[^}]+\})$/i;
+
 export function scanText(file, text) {
   const findings = [];
   for (const [rule, pattern] of rules) {
     pattern.lastIndex = 0;
     for (const match of text.matchAll(pattern)) {
       if (rule === 'literal-secret' && /^(?:undefined|null|process|env|bindings|c\.env)$/.test(match[1])) continue;
+      if (rule === 'literal-secret' && placeholder.test(match[1])) continue;
       if (rule === 'literal-secret' && file.endsWith('.test.ts') && /^(?:(?:test|legacy|local-test|dev)-[\w-]+|(?:github|little|microsoft)-secret|secret-must-never-be-returned|mail-test)$/.test(match[1])) continue;
+      if (rule === 'credential-url') {
+        const parts = credentialUrl.exec(match[0]);
+        if (parts && placeholder.test(parts[1]) && placeholder.test(parts[2]) && placeholder.test(parts[3])) continue;
+      }
       findings.push({ path: file, line: text.slice(0, match.index).split('\n').length, rule });
     }
   }

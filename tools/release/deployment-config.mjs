@@ -23,6 +23,9 @@ export function deploymentConfig(environment, variables) {
     origin = url.origin;
   } catch { throw new Error(`请通过 ${prefix}_APP_URL 配置 HTTPS 站点 Origin`); }
   target.vars.APP_URL = origin;
+  if (process.env.DEPLOY_MAIN_ENTRY) {
+    config.main = process.env.DEPLOY_MAIN_ENTRY;
+  }
   target.d1_databases[0].database_id = databaseId;
   const bucketName = variables[`${prefix}_R2_BUCKET_NAME`];
   if (bucketName) {

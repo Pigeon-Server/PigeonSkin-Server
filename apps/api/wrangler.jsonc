@@ -4,7 +4,22 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
-  "observability": { "enabled": true },
+  "observability": {
+      "logs": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "invocation_logs": true,
+        "persist": true
+      },
+      "traces": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "persist": true
+      },
+      "issue_detection": {
+        "enabled": false
+      }
+    },
   "queues": {
     "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-dev" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-dev" }],
     "consumers": [{ "queue": "pigeon-search-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1 }, { "queue": "pigeon-email-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-dev" }]
@@ -12,8 +27,10 @@
 
   // ── 静态资源（前端 SPA）──────────────────────────────────────────────────
   // 前端构建产物直接挂在 Worker 上：API 与 SPA 同源，Cookie/协议路径零 CORS。
-  // not_found_handling = single-page-application：非资产路径回 index.html，
-  // 而 run_worker_first 保证 /api 与协议路径始终进 Worker 代码。
+  // not_found_handling = single-page-application：非资产路径回 index.html。
+  // run_worker_first 保持 true（每个请求先过 Worker 代码）：反爬守卫要在
+  // 请求层拦截被禁爬虫，覆盖包括 SPA 深链在内的全部路径；协议与 SEO 端点
+  // （/{player}.json、/sitemap-N.xml 等）也依赖 Worker 处理非资产路径。
   "assets": {
     "directory": "../web/dist",
     "binding": "ASSETS",
@@ -50,11 +67,15 @@
     { "binding": "BUCKET", "bucket_name": "bs-dev-textures" }
   ],
   // 原生 Rate Limiting binding：边缘限流，无存储、无成本。
-  // RL_GLOBAL 防扫描（200 req/10s/IP），RL_AUTH 管认证端点（30 req/min/IP）。
+  // RL_GLOBAL 防扫描（200 req/10s/IP），RL_AUTH 管认证端点（30 req/min/IP）；
+  // RL_SKINLIB / RL_SKINLIB_USER 管皮肤库列表/详情——匿名访客按 IP 紧桶
+  //（60 req/min），登录用户按账号松桶（300 req/min）。
   // 中间件在 binding 缺失或 RATE_LIMIT_ENABLED 关闭时 fail-open。
   "ratelimits": [
     { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 200, "period": 10 } },
-    { "name": "RL_AUTH", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }
+    { "name": "RL_AUTH", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_SKINLIB", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RL_SKINLIB_USER", "namespace_id": "1004", "simple": { "limit": 300, "period": 60 } }
   ],
   "vars": {
     "ENVIRONMENT": "development",
@@ -90,7 +111,9 @@
       },
       "ratelimits": [
         { "name": "RL_GLOBAL", "namespace_id": "1101", "simple": { "limit": 200, "period": 10 } },
-        { "name": "RL_AUTH", "namespace_id": "1102", "simple": { "limit": 30, "period": 60 } }
+        { "name": "RL_AUTH", "namespace_id": "1102", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_SKINLIB", "namespace_id": "1103", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_SKINLIB_USER", "namespace_id": "1104", "simple": { "limit": 300, "period": 60 } }
       ],
       "vars": {
         "ENVIRONMENT": "preview",
@@ -125,15 +148,18 @@
       },
       "ratelimits": [
         { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 200, "period": 10 } },
-        { "name": "RL_AUTH", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }
+        { "name": "RL_AUTH", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_SKINLIB", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_SKINLIB_USER", "namespace_id": "1004", "simple": { "limit": 300, "period": 60 } }
       ],
       "vars": {
         "ENVIRONMENT": "production",
         "DERIVATIVES_ENABLED": "true"
       },
-      // 过期会话/令牌/登录尝试的定时清理。小时级足够 —— 免费额度下
-      // 每次 Cron 触发就是一小批 D1 写，没必要更频繁。
-      "triggers": { "crons": ["0 * * * *"] }
+      // 小时级清理（0 * * * *）+ 分钟级 AI 任务派发（* * * * *，
+      // processDueJobs 认领到期任务，含指数退避重试）。免费额度下每次
+      // 触发就是一小批 D1 读写，分钟级对 AI 队列的时效足够。
+      "triggers": { "crons": ["0 * * * *", "* * * * *"] }
     }
   }
 }

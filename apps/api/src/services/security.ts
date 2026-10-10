@@ -3,6 +3,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { base64url } from 'jose';
 import { hashToken, mintTokenWithHash, verifyStoredPassword } from '@pigeon-skin/auth';
 import { LIMITS } from '@pigeon-skin/shared';
+import { isUniqueViolation, noCaseEq } from '@pigeon-skin/db';
 import type { SecondFactor, SecurityChallenge, SecurityStatus } from '@pigeon-skin/shared/security';
 import {
   generateAuthenticationOptions, generateRegistrationOptions,
@@ -217,7 +218,7 @@ export async function finishLogin(c: Ctx, row: repo.ChallengeRow) {
   const { token, tokenHash } = await mintTokenWithHash();
   const statements = [c.env.DB.prepare("INSERT INTO sessions (id, user_id, created_at, last_seen_at, expires_at, absolute_expires_at, ip, user_agent) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM account_security WHERE user_id = ? AND version = ?) AND EXISTS (SELECT 1 FROM users WHERE id = ? AND password_hash = ? AND email = ? AND role = ? AND role != 'banned' AND merged_into_user_id IS NULL) RETURNING id")
     .bind(tokenHash, user.id, now, now, now + idleSeconds * 1000, now + absoluteSeconds * 1000, clientIp(c), c.req.header('user-agent') ?? null, user.id, row.version, user.id, user.password_hash, user.email, user.role)];
-  statements.push(c.env.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND id != ? AND EXISTS (SELECT 1 FROM sessions WHERE id = ?)').bind(now, user.id, tokenHash, tokenHash));
+  statements.push(c.env.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND id != ? AND EXISTS (SELECT 1 FROM (SELECT id FROM sessions WHERE id = ?) AS s)').bind(now, user.id, tokenHash, tokenHash));
   statements.push(c.env.DB.prepare('DELETE FROM security_challenges WHERE id = ?').bind(row.id));
   const result = await c.env.DB.batch(statements);
   if (!result[0]!.results.length) throw new AppError('security.challenge_expired', 401);
@@ -371,7 +372,7 @@ export async function beginEmailChange(c: Ctx, email: string) {
   if (user.email.toLowerCase() === email.toLowerCase()) throw fail.invalid();
   const domainVerdict = await checkEmailDomain(c.env, email);
   if (domainVerdict) throw fail.forbidden(domainVerdict);
-  if (await c.env.DB.prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE AND id != ? AND merged_into_user_id IS NULL').bind(email, user.id).first()) throw fail.conflict('auth.email_taken');
+  if (await c.env.DB.prepare(`SELECT id FROM users WHERE ${noCaseEq('email', '?')} AND id != ? AND merged_into_user_id IS NULL`).bind(email, user.id).first()) throw fail.conflict('auth.email_taken');
   const row = await newChallenge(c, user.id, 'change-email', { email }); await sendChallengeEmail(c, row);
 }
 export async function confirmEmailChange(c: Ctx, code: string) {
@@ -384,7 +385,7 @@ export async function confirmEmailChange(c: Ctx, code: string) {
     c.env.DB.prepare(`UPDATE verification_tokens SET consumed_at=? WHERE user_id=? AND consumed_at IS NULL AND ${guard}`).bind(Date.now(), user.id),
     c.env.DB.prepare(`UPDATE password_reset_tokens SET consumed_at=? WHERE user_id=? AND consumed_at IS NULL AND ${guard}`).bind(Date.now(), user.id),
   ], false, { row, claim }); }
-  catch (error) { if (String(error).includes('UNIQUE')) throw fail.conflict('auth.email_taken'); throw error; }
+  catch (error) { if (isUniqueViolation(error)) throw fail.conflict('auth.email_taken'); throw error; }
   c.executionCtx.waitUntil(Promise.allSettled([user.email, email].map(to => sendEmail(c.env, { kind: 'email-changed', to, nickname: user.nickname, oldEmail: user.email, newEmail: email, locale: user.locale }))));
   return result;
 }

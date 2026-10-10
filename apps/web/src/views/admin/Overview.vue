@@ -55,7 +55,7 @@ onMounted(load);
       </p>
     </div>
   </div>
-  <section class="panel mt-5">
+  <section class="panel">
     <div class="flex flex-wrap justify-between gap-3">
       <h2 class="font-semibold">{{ i18n.t('admin.chart_title') }}</h2>
       <div class="flex gap-5 text-xs">
@@ -101,7 +101,7 @@ onMounted(load);
       </g>
     </svg>
   </section>
-  <div class="grid gap-3 sm:grid-cols-3 mt-5">
+  <div class="grid gap-3 sm:grid-cols-3">
     <router-link
       v-for="entry in [{ to: '/admin/reports', label: 'general.report-manage', icon: 'flag' }, { to: '/admin/notifications', label: 'admin.broadcast', icon: 'campaign' }, { to: '/admin/status', label: 'general.status', icon: 'monitor_heart' }]"
       :key="entry.to"

@@ -10,20 +10,22 @@
 // 失败任务按 attempts 指数退避（2^n 分钟），超过上限置 failed 等管理员处理。
 
 import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { aiJobs, createDb, textures, textureTranslations, texturesDescription } from '@pigeon-skin/db';
+import { aiJobs, createDb, notificationTranslations, textures, textureTranslations, texturesDescription } from '@pigeon-skin/db';
 import type { Bindings } from '../env.ts';
 import { getSettingInt, readSettings } from '../lib.ts';
+import { LOCALES } from '@pigeon-skin/shared/locale';
 import { AI_JOB_DEFINITIONS, parseJsonOutput, runAiJob, toVerdict, parseVerdict } from './ai-gateway.ts';
 
 const TEXTURE_TRANSLATE_DEF = AI_JOB_DEFINITIONS.texture_translate;
 const TEXTURE_MODERATE_DEF = AI_JOB_DEFINITIONS.texture_moderate;
+const NOTIFICATION_TRANSLATE_DEF = AI_JOB_DEFINITIONS.notification_translate;
 
-const SUPPORTED_LOCALES = ['zh_CN', 'zh_TW', 'en', 'es_ES', 'ru_RU', 'ja_JP'] as const;
+const SUPPORTED_LOCALES = LOCALES;
 
 const MAX_ATTEMPTS = 5;
 const MAX_CONCURRENCY_FALLBACK = 2;
 
-export type AiJobKind = 'translate_texture' | 'moderate_texture_name' | 'moderate_texture_description';
+export type AiJobKind = 'translate_texture' | 'moderate_texture_name' | 'moderate_texture_description' | 'translate_notification';
 
 // ── 入队 ────────────────────────────────────────────────────────────────────
 
@@ -32,7 +34,7 @@ export type AiJobKind = 'translate_texture' | 'moderate_texture_name' | 'moderat
  * 否则插入。返回是否真的写入了行（功能关闭时返回 false 且不写）。
  */
 export async function enqueueAiJob(
-  env: Bindings,
+  env: Pick<Bindings, 'DB'>,
   kind: AiJobKind,
   tid: number,
   options?: { enabled?: boolean },
@@ -48,6 +50,39 @@ export async function enqueueAiJob(
       set: { status: 'pending', attempts: 0, nextRunAt: now, lastError: '', updatedAt: now },
     });
   return true;
+}
+
+/**
+ * 存量材质补跑：为当前所有材质补齐缺失的 (kind, tid) 任务行，
+ * 已有任务（任意状态）不重置，避免把已完成的全部重跑。
+ * 只补功能开关处于开启状态的 kind；全关时返回空。
+ */
+export async function backfillAiJobs(
+  env: Bindings,
+): Promise<Array<{ kind: AiJobKind; queued: number }>> {
+  const values = await readSettings(env);
+  const kinds: AiJobKind[] = [];
+  if (values.texture_ai_translation === 'true') kinds.push('translate_texture');
+  if (values.texture_ai_moderation === 'true') kinds.push('moderate_texture_name', 'moderate_texture_description');
+  if (kinds.length === 0) return [];
+
+  const db = createDb(env.DB);
+  const results: Array<{ kind: AiJobKind; queued: number }> = [];
+  const now = Date.now();
+  for (const kind of kinds) {
+    const [before] = await db.select({ n: sql<number>`count(*)` }).from(aiJobs).where(eq(aiJobs.kind, kind));
+    // INSERT OR IGNORE … SELECT：并发补跑或与上传入队竞争时安全去重；
+    // 重写层把 OR IGNORE 机械转换为 PG ON CONFLICT DO NOTHING / MySQL INSERT IGNORE
+    await db.run(sql`
+      INSERT OR IGNORE INTO ai_jobs (kind, tid, status, attempts, next_run_at, last_error, created_at, updated_at)
+      SELECT ${kind}, t.id, 'pending', 0, ${now}, '', ${now}, ${now}
+      FROM textures t
+      WHERE NOT EXISTS (SELECT 1 FROM ai_jobs j WHERE j.kind = ${kind} AND j.tid = t.id)
+    `);
+    const [after] = await db.select({ n: sql<number>`count(*)` }).from(aiJobs).where(eq(aiJobs.kind, kind));
+    results.push({ kind, queued: (after?.n ?? 0) - (before?.n ?? 0) });
+  }
+  return results;
 }
 
 // ── 派发与执行 ──────────────────────────────────────────────────────────────
@@ -114,6 +149,9 @@ async function runClaimedJob(
         break;
       case 'moderate_texture_description':
         error = await runModerateTextureDescription(env, job.tid);
+        break;
+      case 'translate_notification':
+        error = await runTranslateNotification(env, job.tid);
         break;
     }
     if (error) throw new AiJobError(error);
@@ -205,6 +243,66 @@ async function runTranslateTexture(env: Bindings, tid: number): Promise<string> 
   const db = createDb(env.DB);
   await db.delete(textureTranslations).where(eq(textureTranslations.tid, tid));
   await db.insert(textureTranslations).values(rows);
+  return '';
+}
+
+interface NotificationTranslationPayload {
+  translations?: Record<string, { title?: string; body?: string }>;
+}
+
+/**
+ * 站点公告翻译。tid 是「模板骨架」（变量未渲染的管理员原文）的 FNV-1a 哈希，
+ * 即 ai_jobs 的去重键：同一模板群发给 N 个用户只执行一次。骨架源行由广播方
+ * 入队时写入 notification_translations（locale='' 哨兵），本任务据此调用
+ * AI —— 个性化变量（邮箱/积分等）从不进入提示词。译文按 (locale, 哈希) 写回
+ * （骨架仍含 {{变量}}），读取方按哈希匹配后自行按收件人渲染。源行丢失视为
+ * 永久失败。
+ */
+async function runTranslateNotification(env: Bindings, tid: number): Promise<string> {
+  const values = await readSettings(env);
+  if (values.notification_ai_translation !== 'true') return '';
+
+  const db = createDb(env.DB);
+  const [source] = await db
+    .select()
+    .from(notificationTranslations)
+    .where(and(eq(notificationTranslations.contentHash, String(tid)), eq(notificationTranslations.locale, '')))
+    .limit(1);
+  if (!source) throw new AiJobError('notification source row missing', { permanent: true });
+
+  const sourceLocale = 'zh_CN';
+  const targets = SUPPORTED_LOCALES.filter((l: string) => l !== sourceLocale);
+  const request = [
+    `Source title: ${source.sourceTitle}`,
+    `Source body: ${source.sourceBody}`,
+    `Target locales: ${targets.join(', ')}`,
+  ].join('\n');
+
+  const text = await runAiJob(env, NOTIFICATION_TRANSLATE_DEF, request, { maxChars: 22_000 });
+  if (text === null) throw new AiJobError('AI call unavailable or failed');
+  const parsed = parseJsonOutput<NotificationTranslationPayload>(text);
+  const translations = parsed?.translations;
+  if (!translations || typeof translations !== 'object') throw new AiJobError('unparseable translation output');
+
+  const now = Date.now();
+  const rows: Array<typeof notificationTranslations.$inferInsert> = [];
+  for (const [locale, t] of Object.entries(translations)) {
+    if (!targets.includes(locale as never)) continue;
+    if (!t || typeof t !== 'object') continue;
+    const title = typeof t.title === 'string' ? t.title.trim().slice(0, 500) : '';
+    const body = typeof t.body === 'string' ? t.body.trim().slice(0, 20_000) : '';
+    if (!title && !body) continue;
+    rows.push({ locale, contentHash: String(tid), sourceTitle: source.sourceTitle, sourceBody: source.sourceBody, title, body, createdAt: now, updatedAt: now });
+  }
+  if (rows.length === 0) throw new AiJobError('no usable translations in output');
+
+  await db
+    .insert(notificationTranslations)
+    .values(rows)
+    .onConflictDoUpdate({
+      target: [notificationTranslations.contentHash, notificationTranslations.locale],
+      set: { title: sql`excluded.title`, body: sql`excluded.body`, updatedAt: now },
+    });
   return '';
 }
 

@@ -48,8 +48,8 @@ async function submit(approve: boolean) {
 onMounted(() => { if (!device.value || code.value) void load(); });
 </script>
 <template>
-  <div class="auth-fields space-y-5">
-    <h1 class="text-2xl font-bold">{{ i18n.t(device ? 'connect.device_title' : 'connect.authorize_title') }}</h1>
+  <div class="space-y-5">
+    <h1>{{ i18n.t(device ? 'connect.device_title' : 'connect.authorize_title') }}</h1>
     <p v-if="done" class="alert alert-success" role="status">{{ i18n.t('connect.device_done') }}</p>
     <template v-else>
       <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>

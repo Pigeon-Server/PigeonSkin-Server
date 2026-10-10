@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from './schema.ts';
 
 export * from './schema.ts';
+export * from './dialect.ts';
 
 /** D1 binding 的最小形状，避免依赖 @cloudflare/workers-types */
 export interface D1Like {

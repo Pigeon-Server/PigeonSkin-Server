@@ -11,7 +11,7 @@ function links(content: string): string[] {
   return result.sort();
 }
 describe('localized manual', () => {
-  it('provides all fourteen documents, headings and safe configuration links in all six languages', () => {
+  it('provides all fifteen documents, headings and safe configuration links in all six languages', () => {
     for (const locale of LOCALES) for (const page of manualPages) {
       const source = manualContent(page.slug);
       const content = manualContent(page.slug, locale);

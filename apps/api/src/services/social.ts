@@ -3,13 +3,15 @@
 // 收藏在旧版里同时承担"喜欢"的职责：textures.likes 就是收藏人数，
 // 上传时自动收藏自己所以初始为 1。这里保留同一语义，并且把
 // "删行 + likes 增减 + 积分结算"收在一处，避免计数漂移。
-import { eq } from 'drizzle-orm';
-import { createDb, notifications, users } from '@pigeon-skin/db';
+import { and, eq, gt, sql } from 'drizzle-orm';
+import { scalarMax, createDb, notifications, reports, users } from '@pigeon-skin/db';
 import { textureObjectKey } from '@pigeon-skin/minecraft';
 import { AppError, fail } from '../framework.ts';
-import { isAdmin } from '../lib.ts';
+import { isAdminRole } from './authorization.ts';
+import type { Role } from '@pigeon-skin/shared';
 import { audit } from './audit.ts';
 import * as repo from '../repositories/social.ts';
+import type { SqlFragment } from '../search/compile.ts';
 import * as textureRepo from '../repositories/textures.ts';
 import type { Bindings } from '../env.ts';
 
@@ -36,7 +38,7 @@ export interface SocialRates {
 export async function listCloset(
   env: SocialEnv,
   userId: number,
-  filter: { category?: string | undefined; keyword?: string | undefined; page?: number | undefined; perPage?: number | undefined },
+  filter: { category?: string | undefined; search?: SqlFragment | null | undefined; page?: number | undefined; perPage?: number | undefined },
 ) {
   return repo.listCloset(db(env), userId, filter);
 }
@@ -55,7 +57,7 @@ export async function collectTexture(
   // 私有纹理只有所有者与管理员能收藏（旧版同此）
   if (texture.visibility === 'private'
       && texture.uploaderId !== actor.id
-      && !isAdmin(actor as never)) {
+      && !isAdminRole(actor.role as Role)) {
     throw fail.forbidden('closet.texture_private');
   }
 
@@ -119,7 +121,7 @@ export async function removeClosetEntry(
   const statements = [
     env.DB.prepare(`DELETE FROM closet WHERE user_id = ? AND texture_id = ?`)
       .bind(actor.id, textureId),
-    env.DB.prepare(`UPDATE textures SET likes = MAX(0, likes - 1) WHERE id = ? AND changes() > 0`)
+    env.DB.prepare(`UPDATE textures SET likes = ${scalarMax('0', 'likes - 1')} WHERE id = ? AND changes() > 0`)
       .bind(textureId),
   ];
   if (refund > 0) {
@@ -131,7 +133,7 @@ export async function removeClosetEntry(
   if (!results[0]?.meta.changes) throw fail.notFound('closet.not_found');
 
   if (rates.perLikeAward > 0 && entry.uploaderId && entry.uploaderId !== actor.id) {
-    await env.DB.prepare(`UPDATE users SET score = MAX(0, score - ?) WHERE id = ?`)
+    await env.DB.prepare(`UPDATE users SET score = ${scalarMax('0', 'score - ?')} WHERE id = ?`)
       .bind(rates.perLikeAward, entry.uploaderId).run();
   }
 }
@@ -146,15 +148,42 @@ export async function submitReport(
   rates: SocialRates,
 ): Promise<{ scoreDelta: number }> {
   const database = db(env);
+  // 管理员禁用了举报权限的用户不能提交举报（防滥用）
+  const [reporterRow] = await database.select({ reportingDisabled: users.reportingDisabled, role: users.role }).from(users).where(eq(users.id, reporter.id)).limit(1);
+  if (reporterRow?.reportingDisabled && !isAdminRole(reporterRow.role as Role)) throw fail.forbidden('report.disabled');
+
   const texture = await textureRepo.findTextureById(database, textureId);
   if (!texture) throw fail.notFound('texture.not_found');
+  // 官方材质是站点自有内容，不提供社区举报通道
+  if (texture.official) throw fail.forbidden('report.official_disabled');
   // 举报是社区监督机制：拥有者举报自己没有意义，还会空转押金/奖励的积分流动
   if (texture.uploaderId === reporter.id) throw fail.invalid('report.self');
 
-  // 同一举报人对同一纹理只能报一次（新 schema 有 UNIQUE 约束兜底）
+  // 同一举报人对同一纹理存在待处理举报时不能再报；处理完成后可重新举报
   if (await repo.findReportByReporterAndTexture(database, reporter.id, textureId)) {
     throw fail.conflict('report.already_reported');
   }
+
+  // 提交频率：全局每分钟最多 3 条，防止刷举报（pending 去重只限同一纹理）。
+  // 计数与插入是两步，PostgreSQL/MySQL 的快照读下并发提交可以少算几条 ——
+  // 这里当成软限制：真正防刷的是待处理去重（有唯一索引兜底）与验证码。
+  const recent = await database
+    .select({ n: sql<number>`count(*)` })
+    .from(reports)
+    .where(and(eq(reports.reporterId, reporter.id), gt(reports.createdAt, Date.now() - 60_000)));
+  if ((recent[0]?.n ?? 0) >= 3) throw new AppError('report.rate_limited', 429);
+
+  // 先占位再动积分：并发重复提交时后到的那条拿不到行（唯一索引兜底），不留积分副作用
+  const createdAt = Date.now();
+  const inserted = await repo.insertReport(env.DB, {
+    textureId,
+    // 快照举报时刻的上传者，不随之后变化重算
+    uploaderId: texture.uploaderId,
+    reporterId: reporter.id,
+    reason,
+    createdAt,
+  });
+  if (!inserted) throw fail.conflict('report.already_reported');
 
   // 举报可以收费也可以奖励，由设置决定。默认 0，即完全惰性。
   // 负数（押金）时先检查余额，不允许把分数扣成负数。
@@ -165,21 +194,19 @@ export async function submitReport(
         .prepare('UPDATE users SET score = score + ? WHERE id = ? AND score >= ?')
         .bind(delta, reporter.id, -delta)
         .run();
-      if ((charged.meta.changes ?? 0) === 0) throw fail.insufficientScore();
+      if ((charged.meta.changes ?? 0) === 0) {
+        // 扣分失败就不该留下举报记录；删掉刚占位的那条（条件精确到本次 createdAt）
+        await env.DB
+          .prepare("DELETE FROM reports WHERE reporter_id = ? AND texture_id = ? AND status = 'pending' AND created_at = ?")
+          .bind(reporter.id, textureId, createdAt)
+          .run();
+        throw fail.insufficientScore();
+      }
     } else {
       await env.DB.prepare('UPDATE users SET score = score + ? WHERE id = ?')
         .bind(delta, reporter.id).run();
     }
   }
-
-  await repo.insertReport(database, {
-    textureId,
-    // 快照举报时刻的上传者，不随之后变化重算
-    uploaderId: texture.uploaderId,
-    reporterId: reporter.id,
-    reason,
-    createdAt: Date.now(),
-  });
 
   return { scoreDelta: delta };
 }

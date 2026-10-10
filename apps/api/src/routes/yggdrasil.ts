@@ -3,7 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import type { Context } from 'hono';
 import { and, eq, sql } from 'drizzle-orm';
 import {
-  createDb, mojangVerifications, players, textures, users, uuidMap, yggLog, yggTokens,
+  createDb, mojangVerifications, players, textures, users, uuidMap, yggLog, yggTokens, noCaseEq,
 } from '@pigeon-skin/db';
 import { verifyStoredPassword, hashToken, hashPassword } from '@pigeon-skin/auth';
 import { getSetting, getSettingBool, getSettingInt, needsAccountInitialization, type AppEnv } from '../lib.ts';
@@ -33,7 +33,7 @@ async function throttle(c: Ctx, username: string) {
   const gap = await getSettingInt(c.env, 'ygg_rate_limit');
   if (!gap) return;
   const identifier = await hashToken(username.toLowerCase());
-  const ip = c.req.header('cf-connecting-ip') || 'unknown';
+  const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('cf-connecting-ip') || 'unknown';
   const now = Date.now();
   const result = await c.env.DB.batch([
     c.env.DB.prepare("INSERT INTO auth_attempts (ip, identifier, kind, succeeded, created_at) SELECT ?, 'ip', 'ygg-ip', 0, ? WHERE NOT EXISTS (SELECT 1 FROM auth_attempts WHERE ip = ? AND kind = 'ygg-ip' AND created_at > ?) RETURNING id")
@@ -135,7 +135,7 @@ async function signedProfileResponse(c: Ctx, profile: Record<string, unknown>, u
 
 async function profilesOf(c: Ctx, userId: number) { return gameProfiles(c, userId); }
 async function uuidFor(c: Ctx, name: string): Promise<string> {
-  const p = await c.env.DB.prepare('SELECT id FROM players WHERE name = ? COLLATE NOCASE').bind(name).first<{ id: number }>();
+  const p = await c.env.DB.prepare(`SELECT id FROM players WHERE ${noCaseEq('name', '?')}`).bind(name).first<{ id: number }>();
   if (!p) throw forbidden('The player does not exist.');
   return (await uuidForPlayer(c, p.id)).id;
 }
@@ -143,7 +143,7 @@ async function uuidFor(c: Ctx, name: string): Promise<string> {
 async function logYgg(c: Ctx, action: string, body?: string, userId: number | null = null, playerId: number | null = null): Promise<void> {
   try {
     await createDb(c.env.DB).insert(yggLog).values({
-      ip: c.req.header('cf-connecting-ip') ?? null,
+      ip: c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('cf-connecting-ip') || null,
       action,
       body: body ?? null,
       userId,
@@ -385,7 +385,7 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
     const { userId, profile } = await requireToken(c, accessToken);
     if (!profile || profile.id !== selectedProfile) throw forbidden('Invalid profile.');
     await c.env.DB.prepare('INSERT INTO ygg_sessions (server_hash, player_id, profile_uuid, profile_version, token_id, ip, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(server_hash, player_id) DO UPDATE SET profile_uuid = excluded.profile_uuid, profile_version = excluded.profile_version, token_id = excluded.token_id, ip = excluded.ip, expires_at = excluded.expires_at')
-      .bind(await hashToken(serverId), profile.playerId, profile.id, profile.version, await hashToken(accessToken), c.req.header('cf-connecting-ip') ?? '', Date.now() + 120000).run();
+      .bind(await hashToken(serverId), profile.playerId, profile.id, profile.version, await hashToken(accessToken), c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('cf-connecting-ip') || '', Date.now() + 120000).run();
     await logYgg(c, 'join', selectedProfile, userId, profile.playerId);
     return c.body(null, 204);
   });
@@ -396,7 +396,7 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
     const ip = c.req.query('ip');
     if (!username || !serverId) return c.body(null, 204);
 
-    const join = await c.env.DB.prepare("SELECT u.uuid AS id, p.name, s.ip FROM ygg_sessions s JOIN uuid u ON u.player_id = s.player_id JOIN players p ON p.id = s.player_id JOIN users a ON a.id = p.user_id JOIN ygg_tokens t ON t.id = s.token_id WHERE s.server_hash = ? AND p.name = ? COLLATE NOCASE AND s.expires_at > ? AND t.expires_at > ? AND u.uuid = s.profile_uuid AND u.version = s.profile_version AND a.role != 'banned'")
+    const join = await c.env.DB.prepare(`SELECT u.uuid AS id, p.name, s.ip FROM ygg_sessions s JOIN uuid u ON u.player_id = s.player_id JOIN players p ON p.id = s.player_id JOIN users a ON a.id = p.user_id JOIN ygg_tokens t ON t.id = s.token_id WHERE s.server_hash = ? AND ${noCaseEq('p.name', '?')} AND s.expires_at > ? AND t.expires_at > ? AND u.uuid = s.profile_uuid AND u.version = s.profile_version AND a.role != 'banned'`)
       .bind(await hashToken(serverId), username, Date.now(), Date.now()).first<{ id: string; name: string; ip: string }>();
     if (!join || (ip && ip !== join.ip)) return c.body(null, 204);
     const profile = await fullProfile(c, join.id, join.name);

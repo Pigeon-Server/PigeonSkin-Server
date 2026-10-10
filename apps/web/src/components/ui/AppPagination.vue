@@ -78,7 +78,7 @@ function goTo(p: number) {
           <AppButton
             v-else
             class="pagination-page-btn"
-            :class="{ active: page === p, '!border-brand-500 !bg-brand-500 !text-white': page === p }"
+            :class="{ active: page === p }"
             :disabled="props.busy"
             :aria-current="page === p ? 'page' : undefined"
             @click="goTo(p)"

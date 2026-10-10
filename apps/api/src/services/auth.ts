@@ -7,7 +7,7 @@
 //
 // 一条新架构带来的性质：旧格式的密码哈希在**首次成功登录**时立即升级为
 // PBKDF2，因此旧哈希会随真实流量逐步消失，不需要批处理也不需要强制重置。
-import { createDb } from '@pigeon-skin/db';
+import { createDb, isUniqueViolation } from '@pigeon-skin/db';
 import { hashPassword, needsRehash, verifyStoredPassword } from '@pigeon-skin/auth';
 import { isValidPlayerName, type PlayerNameRule } from '@pigeon-skin/shared';
 import { AppError, fail } from '../framework.ts';
@@ -120,7 +120,7 @@ export async function register(
       SELECT last_insert_rowid(),?,0,?,? WHERE changes()>0`).bind(displayName, now, now));
     results = await env.DB.batch(statements);
   } catch (e) {
-    if (String(e).includes('UNIQUE')) throw fail.conflict('auth.email_taken');
+    if (isUniqueViolation(e)) throw fail.conflict('auth.email_taken');
     throw e;
   }
   const userId = (results[0]?.results?.[0] as { id?: number } | undefined)?.id;
@@ -145,7 +145,7 @@ async function dummyHash(): Promise<string> {
 export async function login(
   env: AuthEnv,
   input: { identifier: string; password: string; retainUserId?: number | undefined; conflictPasswords?: Array<{ userId: number; password: string }> | undefined },
-  options: { ip: string; requireEmailVerification?: boolean | undefined },
+  options: { ip: string },
 ): Promise<AuthUser> {
   const database = db(env);
   const ip = options.ip;
@@ -193,7 +193,6 @@ export async function login(
     if (!input.retainUserId || missing.length) throw new EmailConflictError(accounts, missing);
     const retained = conflicts.find(account => account.id === input.retainUserId);
     if (!retained || retained.role === 'banned') return failLogin();
-    if (options.requireEmailVerification && retained.emailVerifiedAt === null) throw new AppError('auth.email_not_verified', 403);
     const protectedIds: number[] = [];
     for (const account of conflicts) if ((await securityRepo.methods(env, account.id)).length) protectedIds.push(account.id);
     if (protectedIds.length) pendingMerge = { retainedId: retained.id, ids: conflicts.map(account => account.id) };
@@ -208,15 +207,9 @@ export async function login(
   if (!ok) return failLogin();
   if (user.role === 'banned') throw new AppError('auth.account_banned', 403);
 
-  // 凭据正确但邮箱未验证：不记为失败尝试（不是攻击），改抛专用错误码，
-  // 前端据此展示"去邮箱收验证信"界面。
-  if (options.requireEmailVerification && user.emailVerifiedAt === null) {
-    await repo.recordAttempt(env.DB, {
-      ip, identifier: input.identifier, kind: 'login', succeeded: true,
-    });
-    throw new AppError('auth.email_not_verified', 403);
-  }
-
+  // 邮箱未验证不拦截登录：require_email_verification 只作用于特定路由
+  // （游戏端 yggdrasil、OAuth 账号绑定），账号本身始终可登录，
+  // 未验证状态由用户中心的提示与补发入口处理。
   await repo.recordAttempt(env.DB, {
     ip, identifier: input.identifier, kind: 'login', succeeded: true,
   });

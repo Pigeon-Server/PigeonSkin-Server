@@ -18,6 +18,7 @@ export const manualGroups = [
     { slug: 'score', title: '积分与签到', description: '了解每日签到、积分奖励与站点存储机制。' },
     { slug: 'applications', title: '应用授权', description: '安全确认应用授权请求、设备代码并管理权限。' },
     { slug: 'copyright', title: '创作与举报', description: '尊重原创作者成果，提交版权举报并跟进处理。' },
+    { slug: 'advanced-search', title: '高级搜索', description: '用简单的表达式组合字段与逻辑条件，精确筛选搜索结果。' },
   ] },
   { title: '疑难杂症', pages: [
     { slug: 'faq', title: '常见问题', description: '快速排查账号、材质上传、外置登录与游戏内加载问题。' },

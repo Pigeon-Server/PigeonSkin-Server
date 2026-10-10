@@ -1,7 +1,16 @@
 // 玩家仓储 —— 只负责查询。
 import { and, eq, sql } from 'drizzle-orm';
-import { players, textures, users } from '@pigeon-skin/db';
+import { players, textures, users, noCaseEq, textContains } from '@pigeon-skin/db';
 import type { Db } from './textures.ts';
+import type { SQL } from 'drizzle-orm';
+import { fragmentToSql } from '../search/compile.ts';
+
+/** 把 helper 产出的含 {COL} 列占位与单个 ? 值占位的 SQL 片段嵌入 drizzle 模板。 */
+function embedFrag(frag: string, column: SQL, value: unknown) {
+  const [lhs = '', rhs = ''] = frag.split('{COL}');
+  const q = rhs.indexOf('?');
+  return sql`${sql.raw(lhs)}${column}${sql.raw(rhs.slice(0, q))}${value}${sql.raw(rhs.slice(q + 1))}`;
+}
 
 /**
  * 列表投影。皮肤与披风的哈希用子查询取回，避免为了两个可选关联
@@ -31,8 +40,9 @@ export async function listPlayersPaged(
   filter: { keyword?: string | undefined },
   page: { perPage: number; offset: number },
 ) {
+  // 走共享子串谓词：转义通配符，长值也不会踩到 D1 的 LIKE 模式长度上限
   const where = filter.keyword
-    ? sql`${players.name} LIKE ${'%' + filter.keyword + '%'}`
+    ? fragmentToSql(textContains({ column: '"players"."name"', value: filter.keyword }))
     : sql`1=1`;
 
   const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(players).where(where);
@@ -65,8 +75,11 @@ export async function findPlayerByNameInsensitive(
     .from(players)
     .where(
       excludeId === undefined
-        ? sql`${players.name} = ${name} COLLATE NOCASE`
-        : and(sql`${players.name} = ${name} COLLATE NOCASE`, sql`${players.id} <> ${excludeId}`),
+        ? embedFrag(noCaseEq('{COL}', '?'), sql`${players.name}`, name)
+        : and(
+            embedFrag(noCaseEq('{COL}', '?'), sql`${players.name}`, name),
+            sql`${players.id} <> ${excludeId}`,
+          ),
     )
     .limit(1);
   return row ?? null;

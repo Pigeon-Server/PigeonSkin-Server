@@ -55,7 +55,7 @@ onMounted(load);
   </PageHeader>
   <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
   <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-  <section v-if="data" class="panel max-w-3xl">
+  <section v-if="data" class="panel">
     <div class="flex gap-12 mb-6">
       <div>
         <p class="text-muted text-xs">{{ i18n.t('admin.update_current') }}</p>

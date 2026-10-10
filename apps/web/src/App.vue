@@ -7,11 +7,13 @@ import { useTheme } from '@/composables/theme';
 import { useSiteSettings } from '@/stores/site';
 import NotificationBell from '@/components/NotificationBell.vue';
 import ActionDialog from '@/components/ui/ActionDialog.vue';
+import SkinlibChallengeDialog from '@/components/SkinlibChallengeDialog.vue';
 import SiteFooter from '@/components/SiteFooter.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import Live2DWidget from '@/components/Live2DWidget.vue';
 import SidebarLink from '@/components/SidebarLink.vue';
 import SidebarGroup from '@/components/SidebarGroup.vue';
+import HomeClassic from '@/views/HomeClassic.vue';
 import { applySiteTheme } from '@/lib/theme';
 import { usePreferences } from '@/composables/preferences';
 import LocaleSelect from '@/components/LocaleSelect.vue';
@@ -71,25 +73,27 @@ watch(
 );
 const adminPage = computed(() => route.path.startsWith('/admin'));
 const siteName = computed(() => site.get('site_name') || i18n.t('home.title'));
-const menu = [
-  { title: 'general.skinlib', link: '/skinlib', icon: 'grid_view' },
-  { title: 'manual.title', link: '/manual', icon: 'menu_book' },
+const gameplayMenu = [
+  { title: 'general.user-center', link: '/user', icon: 'space_dashboard' },
   { title: 'general.my-closet', link: '/closet', icon: 'checkroom' },
   { title: 'general.player-manage', link: '/player', icon: 'sports_esports' },
-  { title: 'votes.title', link: '/votes', icon: 'how_to_vote' },
+  { title: 'integration.modules.generator', link: '/user/config', icon: 'settings_suggest' },
 ];
-const visibleMenu = computed(() =>
-  (session.user.value ? menu : menu.filter((item) => ['/skinlib', '/manual'].includes(item.link))).filter(item => item.link !== '/votes' || site.get('votes_enabled') !== 'false'),
-);
-const accountMenu = [
-  { title: 'general.user-center', link: '/user', icon: 'space_dashboard' },
+const exploreMenu = computed(() => [
+  { title: 'general.skinlib', link: '/skinlib', icon: 'grid_view' },
+  ...(session.user.value && site.get('votes_enabled') !== 'false'
+    ? [{ title: 'votes.title', link: '/votes', icon: 'how_to_vote' }]
+    : []),
+  { title: 'manual.title', link: '/manual', icon: 'menu_book' },
+]);
+const accountSupportMenu = [
   { title: 'general.profile', link: '/profile', icon: 'account_circle' },
+  { title: 'devices.title', link: '/account/devices', icon: 'devices' },
   { title: 'oauth.applications', link: '/user/applications', icon: 'verified_user' },
-  { title: 'integration.modules.generator', link: '/user/config', icon: 'description' },
-  { title: 'general.my-reports', link: '/reports', icon: 'outlined_flag' },
   { title: 'ticket.title', link: '/tickets', icon: 'support_agent' },
+  { title: 'general.my-reports', link: '/reports', icon: 'outlined_flag' },
 ];
-const adminMenu = [
+const adminManagementMenu = [
   { title: 'general.dashboard', link: '/admin', icon: 'space_dashboard' },
   { title: 'general.user-manage', link: '/admin/users', icon: 'people_outline' },
   { title: 'general.player-manage', link: '/admin/players', icon: 'sports_esports' },
@@ -99,29 +103,54 @@ const adminMenu = [
   { title: 'ticket.manage', link: '/admin/tickets', icon: 'support_agent' },
   { title: 'ticket.category_manage', link: '/admin/ticket-categories', icon: 'category' },
   { title: 'votes.management', link: '/admin/votes', icon: 'how_to_vote' },
-  { title: 'notif.title', link: '/admin/notifications', icon: 'notifications_none' },
   { title: 'manual.manage', link: '/admin/manual', icon: 'menu_book' },
+];
+const adminConfigurationMenu = [
   { title: 'general.options', link: '/admin/settings', icon: 'tune' },
   { title: 'integration.title', link: '/admin/integrations', icon: 'extension' },
-  { title: 'pigeon.title', link: '/admin/pigeon-api', icon: 'vpn_key' },
+  { title: 'notif.title', link: '/admin/notifications', icon: 'notifications_none' },
   { title: 'live2d.title', link: '/admin/live2d', icon: 'face' },
   { title: 'general.i18n', link: '/admin/translations', icon: 'translate' },
-  { title: 'admin.audit_log', link: '/admin/audit-log', icon: 'history' },
+  { title: 'pigeon.title', link: '/admin/pigeon-api', icon: 'vpn_key' },
+];
+const adminOperationsMenu = [
   { title: 'general.status', link: '/admin/status', icon: 'monitor_heart' },
+  { title: 'admin.tasks_title', link: '/admin/tasks', icon: 'task_alt' },
+  { title: 'admin.audit_log', link: '/admin/audit-log', icon: 'history' },
   { title: 'general.check-update', link: '/admin/update', icon: 'system_update_alt' },
 ];
-const navigationGroups = computed(() => adminPage.value ? [
-  { title: 'sidebar.management', icon: 'people_outline', items: adminMenu.slice(0, 8) },
-  { title: 'sidebar.configuration', icon: 'tune', items: adminMenu.slice(8, 14) },
-  { title: 'sidebar.operations', icon: 'monitor_heart', items: adminMenu.slice(14) },
-] : [
-  ...(session.user.value ? [{ title: 'general.user-center', icon: 'account_circle', items: accountMenu }] : []),
-  { title: 'general.explore', icon: 'explore', items: visibleMenu.value },
+const navigationGroups = computed(() => {
+  if (adminPage.value) {
+    return [
+      { title: 'sidebar.management', icon: 'people_outline', items: adminManagementMenu },
+      { title: 'sidebar.configuration', icon: 'tune', items: adminConfigurationMenu },
+      { title: 'sidebar.operations', icon: 'monitor_heart', items: adminOperationsMenu },
+    ];
+  }
+  if (!session.user.value) {
+    return [
+      { title: 'sidebar.explore_community', icon: 'explore', items: exploreMenu.value },
+    ];
+  }
+  return [
+    { title: 'sidebar.gameplay', icon: 'checkroom', items: gameplayMenu },
+    { title: 'sidebar.explore_community', icon: 'explore', items: exploreMenu.value },
+    { title: 'sidebar.account_support', icon: 'manage_accounts', items: accountSupportMenu },
+  ];
+});
+const allNavItems = computed(() => [
+  ...gameplayMenu,
+  ...exploreMenu.value,
+  { title: 'votes.title', link: '/votes', icon: 'how_to_vote' },
+  ...accountSupportMenu,
+  ...adminManagementMenu,
+  ...adminConfigurationMenu,
+  ...adminOperationsMenu,
 ]);
 const activeTitle = computed(
   () =>
     (typeof route.meta.title === 'string' ? route.meta.title : undefined) ??
-    [...menu, ...accountMenu, ...adminMenu].find((x) => x.link === canonicalPath.value)?.title ??
+    allNavItems.value.find((x) => x.link === canonicalPath.value)?.title ??
     (route.path.startsWith('/skinlib') ? 'general.skinlib' : 'general.index'),
 );
 watch([site.settings, theme.isDark], ([settings, dark]) => applySiteTheme(settings, dark), {
@@ -177,7 +206,7 @@ watch(
           <img :src="authBackgrounds.desktop || authBackgrounds.tablet || authBackgrounds.mobile" alt="" />
         </picture>
         <router-link to="/" class="brand brand-minecraft">
-          {{ siteName }}
+          <span class="truncate">{{ siteName }}</span>
         </router-link>
         <div class="auth-pixels" aria-hidden="true">
           <span />
@@ -207,11 +236,12 @@ watch(
     </div>
   </template>
   <main v-else-if="route.meta.layout === 'manual'" id="main-content" tabindex="-1"><router-view /></main>
+  <main v-else-if="route.path === '/' && site.get('home_style') === 'classic'" id="main-content" tabindex="-1"><HomeClassic /></main>
   <div v-else-if="route.path === '/'" class="public-shell">
     <header class="public-topbar">
-      <div class="public-container flex items-center justify-between w-full min-w-0">
+      <div class="flex items-center justify-between w-full min-w-0">
         <router-link to="/" class="brand brand-minecraft">
-          {{ siteName }}
+          <span class="truncate">{{ siteName }}</span>
         </router-link>
         <div class="topbar-actions">
           <LocaleSelect />
@@ -228,8 +258,9 @@ watch(
     <SiteFooter class="public-footer" />
   </div>
   <div v-else class="app-shell" :class="{ 'sidebar-collapsed': compactSidebar, 'guest-shell': !session.user.value }">
-    <AppButton
+    <button
       v-if="sidebarOpen"
+      type="button"
       class="mobile-scrim"
       :aria-label="i18n.t('common.close')"
       @click="sidebarOpen = false"
@@ -254,7 +285,7 @@ watch(
             :to="item.link"
             :label="i18n.t(item.title)"
             :icon="item.icon"
-            :active="canonicalPath === item.link || (['/skinlib', '/votes', '/admin/integrations'].includes(item.link) && canonicalPath.startsWith(`${item.link}/`))"
+            :active="canonicalPath === item.link || (['/skinlib', '/votes', '/tickets', '/admin/tickets', '/admin/integrations'].includes(item.link) && canonicalPath.startsWith(`${item.link}/`))"
           />
         </nav>
         </template>
@@ -272,10 +303,10 @@ watch(
           <span class="sidebar-text">{{ i18n.t('skinlib.upload.title') }}</span>
         </router-link>
         <div v-if="session.user.value" class="sidebar-profile mt-5">
-            <router-link to="/profile" class="avatar-placeholder" :aria-label="i18n.t('general.profile')" :title="session.user.value.nickname"><UserAvatar :texture-id="session.user.value.avatarTextureId" :user-id="session.user.value.id" :name="session.user.value.nickname" class="h-full w-full rounded" /></router-link>
+            <router-link to="/profile" class="avatar-placeholder" :aria-label="i18n.t('general.profile')" :title="session.user.value.nickname || session.user.value.email"><UserAvatar :texture-id="session.user.value.avatarTextureId" :user-id="session.user.value.id" :name="session.user.value.nickname" class="h-full w-full rounded" /></router-link>
           <div class="sidebar-text min-w-0 flex-1">
             <p class="truncate text-sm font-semibold">
-              {{ session.user.value?.nickname || i18n.t('general.anonymous') }}
+              {{ session.user.value.nickname || session.user.value.email }}
             </p>
             <p class="text-xs text-muted">
               {{ session.user.value ? i18n.t('common.score_value', { score: i18n.n(session.user.value.score) }) : i18n.t('home.product') }}
@@ -307,10 +338,11 @@ watch(
       </div>
     </aside>
     <div class="app-body">
-      <header class="app-topbar" :class="{ 'guest-topbar': !session.user.value }">
+      <header class="app-topbar">
         <div class="flex items-center gap-2 min-w-0">
           <AppButton
-            class="mobile-menu btn-icon"
+            v-if="mobile && session.user.value"
+            class="btn-icon"
             :aria-label="i18n.t('common.menu')"
             :aria-expanded="sidebarOpen"
             aria-controls="app-sidebar"
@@ -318,14 +350,9 @@ watch(
           >
             <AppIcon name="menu" />
           </AppButton>
-          <router-link v-if="!session.user.value" to="/" class="brand brand-minecraft topbar-brand">
-            {{ siteName }}
+          <router-link v-if="!session.user.value || mobile" to="/" class="brand brand-minecraft">
+            <span class="truncate">{{ siteName }}</span>
           </router-link>
-          <span v-if="session.user.value" class="text-xs topbar-breadcrumb truncate">
-            <span class="hidden sm:inline">{{ siteName }}</span>
-            <span class="hidden sm:inline px-2 opacity-40">/</span>
-            <span class="text-current">{{ i18n.t(activeTitle) }}</span>
-          </span>
         </div>
         <div class="topbar-actions shrink-0">
           <NotificationBell v-if="session.user.value" />
@@ -357,6 +384,7 @@ watch(
     </div>
   </div>
   <ActionDialog />
+  <SkinlibChallengeDialog />
   <Live2DWidget v-if="!blocked && !authPage && !route.path.startsWith('/manual') && !['/admin/live2d', '/admin/manual', '/auth/initialize'].includes(route.path)" />
   <AppDialog v-model="sessionErrorOpen" :title="i18n.t('general.notice')">
     <AppAlert variant="danger" role="alert">{{ i18n.t(session.error.value) }}</AppAlert>
@@ -378,7 +406,7 @@ watch(
   height: 38%;
   background: var(--brand-base);
   position: absolute;
-  box-shadow: clamp(6px, 1vw, 12px) clamp(6px, 1vw, 12px) 0 #112f27;
+  box-shadow: clamp(6px, 1vw, 12px) clamp(6px, 1vw, 12px) 0 var(--brand-deep);
 }
 .auth-pixels span:nth-child(2) {
   left: 46%;

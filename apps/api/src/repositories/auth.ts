@@ -1,8 +1,19 @@
 // 认证仓储 —— 只负责查询。
 import type { D1PreparedStatement } from '@cloudflare/workers-types';
-import { eq, sql } from 'drizzle-orm';
-import { players, users } from '@pigeon-skin/db';
+import { eq, sql, type SQL } from 'drizzle-orm';
+import { players, users, noCaseEq } from '@pigeon-skin/db';
 import type { Db } from './textures.ts';
+
+/** 把 helper 产出的含 {COL} 列占位与单个 ? 值占位的 SQL 片段嵌入 drizzle 模板。 */
+function embedFrag(frag: string, column: SQL, value: unknown) {
+  const [lhs = '', rhs = ''] = frag.split('{COL}');
+  const q = rhs.indexOf('?');
+  return sql`${sql.raw(lhs)}${column}${sql.raw(rhs.slice(0, q))}${value}${sql.raw(rhs.slice(q + 1))}`;
+}
+
+function noCaseEqFrag(column: SQL, value: string) {
+  return embedFrag(noCaseEq('{COL}', '?'), column, value);
+}
 
 export interface AuthUserRow {
   id: number;
@@ -24,7 +35,7 @@ export async function findUserByEmail(db: Db, email: string) {
     })
     .from(users)
     // 邮箱唯一性不区分大小写（UNIQUE ... COLLATE NOCASE），查询也必须按 NOCASE
-    .where(sql`${users.email} = ${email} COLLATE NOCASE`)
+    .where(noCaseEqFrag(sql`${users.email}`, email))
     .orderBy(users.mergedIntoUserId, users.id)
     .limit(1);
   return row ?? null;
@@ -32,7 +43,7 @@ export async function findUserByEmail(db: Db, email: string) {
 
 export async function findEmailConflicts(db: Db, email: string) {
   return db.select({ id: users.id, email: users.email, nickname: users.nickname, role: users.role, passwordHash: users.passwordHash, emailVerifiedAt: users.emailVerifiedAt, mergedIntoUserId: users.mergedIntoUserId })
-    .from(users).where(sql`${users.email} = ${email} COLLATE NOCASE AND ${users.legacyEmailConflict} = 1 AND ${users.mergedIntoUserId} IS NULL`).orderBy(users.id).limit(9);
+    .from(users).where(sql`${noCaseEqFrag(sql`${users.email}`, email)} AND ${users.legacyEmailConflict} = 1 AND ${users.mergedIntoUserId} IS NULL`).orderBy(users.id).limit(9);
 }
 
 /** 按 id 取用户的合并状态（判定冲突选择竞态的输家/赢家）。 */
@@ -61,7 +72,7 @@ export async function findUserByPlayerName(db: Db, name: string) {
     })
     .from(players)
     .innerJoin(users, eq(users.id, players.userId))
-    .where(sql`${players.name} = ${name} COLLATE NOCASE`)
+    .where(noCaseEqFrag(sql`${players.name}`, name))
     .limit(1);
   return row ?? null;
 }
@@ -78,7 +89,7 @@ export async function playerNameExists(db: Db, name: string): Promise<boolean> {
   const [row] = await db
     .select({ id: players.id })
     .from(players)
-    .where(sql`${players.name} = ${name} COLLATE NOCASE`)
+    .where(noCaseEqFrag(sql`${players.name}`, name))
     .limit(1);
   return row !== undefined;
 }

@@ -7,7 +7,7 @@
   "private": true,
   "type": "module",
   "packageManager": "npm@11.11.0",
-  "workspaces": ["apps/*", "packages/*", "tools/migrate"],
+  "workspaces": ["apps/*", "packages/*", "tools/migrate", "tools/cli"],
   "engines": {
     "node": ">=22.18",
     "npm": ">=10"
@@ -26,6 +26,7 @@
     "deploy:preview": "node tools/cloudflare.mjs preview deploy",
     "deploy:prod": "node tools/cloudflare.mjs production deploy",
     "migrate:legacy": "npm run migrate --workspace @pigeon-skin/migrate --",
+    "cli": "npm run cli --workspace @pigeon-skin/cli --",
     "db:seed:local": "node tools/seed-local.mjs",
     "check:public": "node tools/release/check-public.mjs"
   },

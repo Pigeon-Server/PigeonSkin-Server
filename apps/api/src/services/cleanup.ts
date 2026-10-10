@@ -5,7 +5,8 @@
 //     WHERE 条件），留着只会拖慢 user_id 索引并占 D1 容量
 //   • verification_tokens / password_reset_tokens —— 过期或已消费的行同理；
 //     已消费的行保留 24h 再删，便于排查"令牌刚被谁用了"
-//   • auth_attempts —— 登录失败计数窗口是 15 分钟，保留 7 天足够任何排查
+//   • auth_attempts —— 登录失败计数窗口是 15 分钟；kind='captcha' 的行是
+//     图案验证码的一次性消费标记（TTL 5 分钟），两类都依赖这个保留期兜底
 //   • ygg_tokens —— 过期/过刷新线的令牌无验证价值
 //   • ygg_log —— 保留 30 天（可配合 YGG_VERBOSE_LOG_DAYS 排查，默认批量压回）
 //

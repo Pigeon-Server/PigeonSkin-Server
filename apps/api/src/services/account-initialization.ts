@@ -2,6 +2,7 @@ import { hashPassword, hashToken } from '@pigeon-skin/auth';
 import { isValidPlayerName, type PlayerNameRule } from '@pigeon-skin/shared';
 import { emailSchema, nicknameSchema, passwordSchema, playerNameSchema } from '@pigeon-skin/shared/schemas';
 import { z } from 'zod';
+import { noCaseEq } from '@pigeon-skin/db';
 import { fail } from '../framework.ts';
 import { getSetting, getSettingBool, getSettingInt, needsAccountInitialization } from '../lib.ts';
 import type { Bindings } from '../env.ts';
@@ -45,13 +46,13 @@ export async function initializeAccount(env: Bindings, id: number, sessionId: st
   if (!await env.DB.prepare('SELECT id FROM oauth_login_states WHERE id = ? AND provider = ? AND user_id = ? AND session_id = ? AND expires_at > ?').bind(ticket, 'initialize', id, sessionId, Date.now()).first()) throw fail.conflict('auth.initialization_expired');
   const verdict = await checkEmailDomain(env, input.email);
   if (verdict) throw fail.forbidden(verdict);
-  const duplicate = await env.DB.prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE AND id != ?').bind(input.email, id).first();
+  const duplicate = await env.DB.prepare(`SELECT id FROM users WHERE ${noCaseEq('email', '?')} AND id != ?`).bind(input.email, id).first();
   if (duplicate) throw fail.conflict('auth.email_taken');
   const status = await initializationStatus(env, id);
   if (status.playerRequired) {
     const name = input.playerName || '';
     if (!isValidPlayerName(name, await getSetting(env, 'player_name_rule') as PlayerNameRule, await getSetting(env, 'player_name_regexp')) || name.length < status.playerNameMin || name.length > status.playerNameMax) throw fail.invalid('player.name_invalid', { playerName: 'invalid' });
-    if (await env.DB.prepare('SELECT id FROM players WHERE name = ? COLLATE NOCASE').bind(name).first()) throw fail.conflict('auth.player_name_taken');
+    if (await env.DB.prepare(`SELECT id FROM players WHERE ${noCaseEq('name', '?')}`).bind(name).first()) throw fail.conflict('auth.player_name_taken');
   }
   const passwordHash = await hashPassword(input.password), now = Date.now();
   const verifiedAt = user.email.toLowerCase() === input.email.toLowerCase() ? user.email_verified_at : null;

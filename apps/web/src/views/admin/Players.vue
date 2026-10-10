@@ -4,6 +4,7 @@ import { onMounted, ref } from 'vue';
 import { adminApi } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import { apiErrorMessage } from '@/lib/api-error';
+import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
 
 const i18n = useI18n();
 interface Row {
@@ -83,13 +84,14 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div class="page page--dense">
     <PageHeader :title="i18n.t('general.player-manage')" />
-    <AppInput
+    <SearchExpressionField
       v-model="keyword"
+      schema-key="adminPlayers"
       class="max-w-sm"
       :placeholder="i18n.t('admin.search_name')"
-      @keyup.enter="page = 1; load()"
+      @submit="page = 1; load()"
     />
     <p v-if="errMsg" class="alert alert-danger" role="alert">{{ errMsg }}<AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
 

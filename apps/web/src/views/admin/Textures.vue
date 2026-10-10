@@ -4,6 +4,7 @@ import { onMounted, ref } from 'vue';
 import { adminApi, avatarUrl, type AdminTextureRow } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import { apiErrorMessage } from '@/lib/api-error';
+import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
 
 const i18n = useI18n();
 const items = ref<AdminTextureRow[]>([]);
@@ -73,8 +74,14 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="space-y-3"><PageHeader :title="i18n.t('general.skinlib')" />
-    <AppInput v-model="keyword" class="max-w-sm" :placeholder="i18n.t('admin.search_name')" @keyup.enter="page = 1; load()" />
+  <div class="page page--dense"><PageHeader :title="i18n.t('general.skinlib')" />
+    <SearchExpressionField
+      v-model="keyword"
+      schema-key="adminTextures"
+      class="max-w-sm"
+      :placeholder="i18n.t('admin.search_name')"
+      @submit="page = 1; load()"
+    />
     <p v-if="notice" class="alert alert-success">{{ notice }}</p>
     <p v-if="errMsg" class="alert alert-danger" role="alert">{{ errMsg }}<AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
 

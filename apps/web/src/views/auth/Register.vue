@@ -14,7 +14,8 @@ const session = useSessionStore();
 const i18n = useI18n();
 const site = useSiteSettings();
 void site.fetch();
-const turnstileToken = ref('');
+const captchaToken = ref('');
+const captchaRandstr = ref('');
 const challenge = ref<InstanceType<typeof VerificationChallenge> | null>(null);
 
 const email = ref('');
@@ -40,7 +41,8 @@ async function submit() {
   try {
     await session.register({
       email: email.value,
-      turnstileToken: turnstileToken.value,
+      captchaToken: captchaToken.value,
+      captchaRandstr: captchaRandstr.value,
       password: password.value,
       ...(withPlayerName.value
         ? { playerName: displayName.value }
@@ -62,8 +64,8 @@ async function submit() {
 </script>
 
 <template>
-  <div class="auth-fields">
-    <h1 class="text-2xl font-bold">{{ i18n.t('auth.register') }}</h1>
+  <div>
+    <h1>{{ i18n.t('auth.register') }}</h1>
     <p v-if="initialScore" class="mt-1 text-sm text-muted">
       {{ i18n.t('auth.initial_score', { score: i18n.n(Number(initialScore)) }) }}
     </p>
@@ -92,7 +94,7 @@ async function submit() {
           {{ i18n.t('auth.player_name_hint') }}
         </p>
       </div>
-      <VerificationChallenge ref="challenge" v-model="turnstileToken" />
+      <VerificationChallenge ref="challenge" v-model="captchaToken" v-model:randstr="captchaRandstr" />
       <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
       <AppButton type="submit" class="btn btn-primary w-full" :loading="busy">
         {{ i18n.t('general.register') }}
@@ -100,7 +102,7 @@ async function submit() {
     </AppForm>
     <p class="mt-4 text-sm text-muted">
       {{ i18n.t('auth.has_account') }}
-      <router-link to="/login" class="text-brand-600 dark:text-brand-400">{{ i18n.t('general.login') }}</router-link>
+      <router-link to="/login" class="text-brand-600 dark:text-brand-300">{{ i18n.t('general.login') }}</router-link>
     </p>
     <OAuthButtons />
   </div>

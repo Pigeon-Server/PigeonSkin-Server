@@ -1,4 +1,5 @@
 import { importPKCS8, SignJWT } from 'jose';
+import { jsonArrayPairRows, leastOf, randomId32, supportsReturning } from '@pigeon-skin/db';
 import type { Bindings } from '../env.ts';
 
 type Env = { DB: Bindings['DB']; APP_URL?: string; SEARCH_SUBMISSIONS?: Pick<NonNullable<Bindings['SEARCH_SUBMISSIONS']>, 'sendBatch'> };
@@ -54,7 +55,7 @@ export async function queuePublicSubmissions(env: Env): Promise<number> {
     if (engine === 'google') { await upsert(env, engine, 0); count++; continue; }
     const now = Date.now();
     const result = await env.DB.prepare(`INSERT INTO search_submissions (engine, texture_id, revision, next_at, updated_at)
-      SELECT ?, id, lower(hex(randomblob(16))), ?, ? FROM textures WHERE visibility = 'public'
+      SELECT ?, id, ${randomId32()}, ?, ? FROM textures WHERE visibility = 'public'
       ON CONFLICT(engine, texture_id) DO UPDATE SET revision = excluded.revision, status = 'pending',
       attempts = 0, next_at = excluded.next_at, http_status = NULL, error = NULL, updated_at = excluded.updated_at`)
       .bind(engine, now, now).run();
@@ -114,18 +115,42 @@ export async function processSearchSubmissions(env: Env, onlyEngine?: Engine): P
     if (!enabled(values, engine)) continue;
     const now = Date.now();
     const lease = now + 60_000;
-    const claimed = await env.DB.prepare(`UPDATE search_submissions SET next_at = ? WHERE engine = ?
-      AND status = 'pending' AND next_at <= ? AND texture_id IN
-      (SELECT texture_id FROM search_submissions WHERE engine = ? AND status = 'pending' AND next_at <= ? ORDER BY next_at, texture_id LIMIT 100)
-      RETURNING engine, texture_id, revision, attempts`).bind(lease, engine, now, engine, now).all<Job>();
-    const jobs = claimed.results;
+    // MySQL 没有 UPDATE...RETURNING：先 SELECT 候选再 UPDATE，两步间可能
+    // 有并发实例重复领取，因此 UPDATE 仍以 next_at=now 原子门闩收口，
+    // 只处理确认被本实例租约命中的行。
+    let claimed: Job[];
+    if (supportsReturning()) {
+      const rows = await env.DB.prepare(`UPDATE search_submissions SET next_at = ? WHERE engine = ?
+        AND status = 'pending' AND next_at <= ? AND texture_id IN
+        (SELECT texture_id FROM search_submissions WHERE engine = ? AND status = 'pending' AND next_at <= ? ORDER BY next_at, texture_id LIMIT 100)
+        RETURNING engine, texture_id, revision, attempts`).bind(lease, engine, now, engine, now).all<Job>();
+      claimed = rows.results;
+    } else {
+      const rows = await env.DB.prepare(`SELECT engine, texture_id, revision, attempts FROM search_submissions WHERE engine = ?
+        AND status = 'pending' AND next_at <= ? ORDER BY next_at, texture_id LIMIT 100`).bind(engine, now).all<Job>();
+      claimed = rows.results;
+      if (claimed.length) {
+        const result = await env.DB.prepare(`UPDATE search_submissions SET next_at = ? WHERE engine = ? AND next_at = ?
+          AND texture_id IN (${claimed.map(() => '?').join(',')})`)
+          .bind(lease, engine, now, ...claimed.map(job => job.texture_id)).run();
+        // 并发实例可能已抢先处理一部分：只保留确认被本实例租约收口的行
+        if (result.meta.changes !== claimed.length) {
+          const updated = await env.DB.prepare(`SELECT texture_id FROM search_submissions WHERE engine = ? AND next_at = ?
+            AND texture_id IN (${claimed.map(() => '?').join(',')})`)
+            .bind(engine, lease, ...claimed.map(job => job.texture_id)).all<{ texture_id: number }>();
+          const leased = new Set(updated.results.map(row => row.texture_id));
+          claimed = claimed.filter(job => leased.has(job.texture_id));
+        }
+      }
+    }
+    const jobs = claimed;
     if (!jobs.length) continue;
     const current = await env.DB.prepare(`SELECT id FROM textures WHERE visibility = 'public' AND id IN (${jobs.map(() => '?').join(',')})`).bind(...jobs.map(job => job.texture_id)).all<{ id: number }>();
     const publicIds = new Set(current.results.map(row => row.id));
     const active = jobs.filter(job => engine === 'google' || publicIds.has(job.texture_id));
     const inactive = jobs.filter(job => !active.includes(job));
     if (inactive.length) await env.DB.prepare(`DELETE FROM search_submissions WHERE engine = ? AND next_at = ?
-      AND EXISTS (SELECT 1 FROM json_each(?) WHERE json_extract(value, '$[0]') = texture_id AND json_extract(value, '$[1]') = revision)`)
+      AND EXISTS (SELECT 1 FROM ${jsonArrayPairRows('?', '', '')} WHERE (ord = 0 AND value0 = CAST(texture_id AS TEXT)) OR (ord = 1 AND value1 = revision))`)
       .bind(engine, lease, JSON.stringify(inactive.map(job => [job.texture_id, job.revision]))).run();
     if (!active.length) continue;
     let response: Response | undefined;
@@ -154,9 +179,9 @@ export async function processSearchSubmissions(env: Env, onlyEngine?: Engine): P
     } catch { error = 'request_failed'; }
     await env.DB.prepare(`UPDATE search_submissions SET
       status = CASE WHEN ? IS NULL THEN 'submitted' WHEN attempts >= 4 THEN 'failed' ELSE 'pending' END,
-      attempts = attempts + 1, next_at = ? + min(3600000, 60000 * (1 << (attempts + 1))),
+      attempts = attempts + 1, next_at = ? + ${leastOf('3600000', '60000 * (1 << (attempts + 1))')},
       http_status = ?, error = ?, updated_at = ? WHERE engine = ? AND next_at = ?
-      AND EXISTS (SELECT 1 FROM json_each(?) WHERE json_extract(value, '$[0]') = texture_id AND json_extract(value, '$[1]') = revision)`)
+      AND EXISTS (SELECT 1 FROM ${jsonArrayPairRows('?', '', '')} WHERE (ord = 0 AND value0 = CAST(texture_id AS TEXT)) OR (ord = 1 AND value1 = revision))`)
       .bind(error, Date.now(), response?.status ?? null, error, Date.now(), engine, lease, JSON.stringify(active.map(job => [job.texture_id, job.revision]))).run();
   }
 }
@@ -166,4 +191,12 @@ export async function searchSubmissionStatus(env: Env) {
   const counts = await env.DB.prepare('SELECT engine, status, count(*) AS count FROM search_submissions GROUP BY engine, status').all<{ engine: string; status: string; count: number }>();
   const recent = await env.DB.prepare('SELECT engine, texture_id AS textureId, status, attempts, http_status AS httpStatus, error, updated_at AS updatedAt FROM search_submissions ORDER BY updated_at DESC LIMIT 30').all();
   return { root, queueConfigured: !!env.SEARCH_SUBMISSIONS, sitemapUrl: root ? `${root}/sitemap.xml` : '', enabled: Object.fromEntries(searchEngines.map(engine => [engine, enabled(values, engine)])), counts: counts.results, recent: recent.results };
+}
+
+/** 管理员重试：把某引擎的 failed/submitted 记录重置回 pending 立即到期。 */
+export async function resetSearchSubmissions(env: Env, engine: Engine): Promise<number> {
+  const result = await env.DB.prepare(
+    "UPDATE search_submissions SET status = 'pending', next_at = ?, attempts = 0 WHERE engine = ? AND status != 'pending'",
+  ).bind(Date.now(), engine).run();
+  return result.meta.changes ?? 0;
 }

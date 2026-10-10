@@ -14,8 +14,15 @@
 
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { createDb, players, textures, users } from '@pigeon-skin/db';
-import { eq, sql } from 'drizzle-orm';
+import { createDb, players, textures, users, noCaseEq } from '@pigeon-skin/db';
+import { eq, sql, type SQL } from 'drizzle-orm';
+
+/** 把 helper 产出的含 {COL} 列占位与单个 ? 值占位的 SQL 片段嵌入 drizzle 模板。 */
+function embedFrag(frag: string, column: SQL, value: unknown) {
+  const [lhs = '', rhs = ''] = frag.split('{COL}');
+  const q = rhs.indexOf('?');
+  return sql`${sql.raw(lhs)}${column}${sql.raw(rhs.slice(0, q))}${value}${sql.raw(rhs.slice(q + 1))}`;
+}
 import { TEXTURE_CACHE_CONTROL, TEXTURE_OBJECT_MISSING_STATUS, textureObjectKey, textureEtag } from '@pigeon-skin/minecraft';
 import type { AppEnv } from '../lib.ts';
 import { texturePubliclyReachable } from '../services/texture-access.ts';
@@ -43,7 +50,7 @@ async function loadPlayer(c: Ctx, name: string): Promise<LoadedPlayer | 'banned'
     })
     .from(players)
     .innerJoin(users, eq(users.id, players.userId))
-    .where(sql`${players.name} = ${name} COLLATE NOCASE`)
+    .where(embedFrag(noCaseEq('{COL}', '?'), sql`${players.name}`, name))
     .limit(1);
   if (!row) return null;
   if (row.role === 'banned') return 'banned';

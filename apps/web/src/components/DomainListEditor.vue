@@ -57,7 +57,7 @@ function remove(domain: string) {
       >
         <span>{{ domain }}</span>
         <AppButton
-          class="btn-icon btn-sm !border-0 !bg-transparent !p-0"
+          class="btn-icon btn-sm"
           :aria-label="i18n.t('integration.domains.remove', { domain })"
           @click="remove(domain)"
         >

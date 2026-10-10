@@ -27,10 +27,19 @@ async function rotate() {
 onMounted(load);
 </script>
 <template>
-  <PageHeader :title="i18n.t('oauth.server_title')"><router-link to="/admin/integrations?module=oauth" class="btn">{{ i18n.t('integration.title') }}</router-link></PageHeader>
+  <PageHeader :title="i18n.t('oauth.server_title')">
+    <template #breadcrumb>
+      <nav class="page-breadcrumb">
+        <router-link to="/admin/integrations?module=oauth" class="page-back">
+          <AppIcon name="arrow_back" class="!text-sm" />
+          <span>{{ i18n.t('integration.title') }}</span>
+        </router-link>
+      </nav>
+    </template>
+  </PageHeader>
   <p v-if="error" class="alert alert-danger" role="alert">{{ error }} <AppButton class="btn-sm" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
   <AppSkeleton v-if="busy && !data" :count="2" />
-  <div v-if="data" class="space-y-5 max-w-5xl">
+  <div v-if="data" class="space-y-5">
     <section class="panel space-y-3">
       <CopyField :label="i18n.t('oauth.issuer')" :value="data.issuer" />
       <div class="flex items-center justify-between gap-3"><h2 class="font-semibold">{{ i18n.t('connect.keys') }}</h2><AppButton v-if="session.user.value?.role === 'super_admin'" class="btn-sm" :disabled="busy" @click="rotate">{{ i18n.t('connect.rotate') }}</AppButton></div>

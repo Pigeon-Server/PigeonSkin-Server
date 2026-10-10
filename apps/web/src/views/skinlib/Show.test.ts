@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { mount, flushPromises } from '@vue/test-utils';
 import { ref } from 'vue';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import AppInput from '@/components/ui/AppInput.vue';
@@ -9,7 +9,7 @@ import AppSelect from '@/components/ui/AppSelect.vue';
 import AppDialog from '@/components/ui/AppDialog.vue';
 import AppForm from '@/components/ui/AppForm.vue';
 
-const { mockTexture } = vi.hoisted(() => ({
+const { mockTexture, sessionState } = vi.hoisted(() => ({
   mockTexture: {
     id: 42,
     hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
@@ -29,6 +29,10 @@ const { mockTexture } = vi.hoisted(() => ({
     sourceResourceName: null,
     createdAt: 1710000000,
   },
+  sessionState: {
+    user: { value: { id: 10, role: 'user' } as { id: number; role: string } | null },
+    isAdmin: { value: false },
+  },
 }));
 
 vi.mock('vue-router', () => ({
@@ -45,8 +49,8 @@ vi.mock('vue-router', () => ({
 
 vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({
-    user: { value: { id: 10, role: 'user' } },
-    isAdmin: { value: false },
+    user: sessionState.user,
+    isAdmin: sessionState.isAdmin,
     loaded: { value: true },
     fetchSession: vi.fn(),
   }),
@@ -54,14 +58,15 @@ vi.mock('@/stores/session', () => ({
 
 const siteSettings = ref({});
 const siteLocale = ref('zh_CN');
+const siteValues: Record<string, string> = {
+  comments_enabled: 'true',
+  allow_texture_download: 'true',
+  allow_anonymous_download: 'true',
+};
 
 vi.mock('@/stores/site', () => ({
   useSiteSettings: () => ({
-    get: (key: string) => {
-      if (key === 'comments_enabled') return 'true';
-      if (key === 'allow_texture_download') return 'true';
-      return '';
-    },
+    get: (key: string) => siteValues[key] ?? '',
     settings: siteSettings,
     fetch: vi.fn().mockResolvedValue(undefined),
   }),
@@ -215,6 +220,13 @@ function createShowWrapper() {
 }
 
 describe('Skinlib Show View', () => {
+  afterEach(() => {
+    sessionState.isAdmin.value = false;
+    sessionState.user.value = { id: 10, role: 'user' };
+    siteValues.allow_texture_download = 'true';
+    siteValues.allow_anonymous_download = 'true';
+  });
+
   it('renders texture title, badges, and action buttons', async () => {
     const wrapper = createShowWrapper();
     await flushPromises();
@@ -236,11 +248,59 @@ describe('Skinlib Show View', () => {
     expect(text).toContain('保存');
   });
 
-  it('renders SHA256 hash and copy trigger', async () => {
+  it('hides the SHA256 hash from visitors', async () => {
+    sessionState.user.value = { id: 777, role: 'user' };
     const wrapper = createShowWrapper();
     await flushPromises();
     const text = wrapper.text();
-    expect(text).toContain('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    expect(text).not.toContain(mockTexture.hash);
+    expect(text).not.toContain('哈希值');
+  });
+
+  it('hides the SHA256 hash from the uploader', async () => {
+    const wrapper = createShowWrapper();
+    await flushPromises();
+    const text = wrapper.text();
+    expect(text).not.toContain(mockTexture.hash);
+    expect(text).not.toContain('哈希值');
+  });
+
+  it('keeps the original texture available through the download link', async () => {
+    sessionState.user.value = { id: 777, role: 'user' };
+    const wrapper = createShowWrapper();
+    await flushPromises();
+    expect(wrapper.find('a[href="/raw/42"]').exists()).toBe(true);
+  });
+
+  it('hides the download link from anonymous visitors when anonymous downloads are off', async () => {
+    sessionState.user.value = null;
+    siteValues.allow_anonymous_download = 'false';
+    const wrapper = createShowWrapper();
+    await flushPromises();
+    expect(wrapper.find('a[href="/raw/42"]').exists()).toBe(false);
+  });
+
+  it('keeps the download link for signed-in users when anonymous downloads are off', async () => {
+    siteValues.allow_anonymous_download = 'false';
+    const wrapper = createShowWrapper();
+    await flushPromises();
+    expect(wrapper.find('a[href="/raw/42"]').exists()).toBe(true);
+  });
+
+  it('hides the download link for everyone when downloads are disabled', async () => {
+    sessionState.isAdmin.value = true;
+    siteValues.allow_texture_download = 'false';
+    const wrapper = createShowWrapper();
+    await flushPromises();
+    expect(wrapper.find('a[href="/raw/42"]').exists()).toBe(false);
+  });
+
+  it('shows the SHA256 hash and copy trigger to administrators', async () => {
+    sessionState.isAdmin.value = true;
+    const wrapper = createShowWrapper();
+    await flushPromises();
+    const text = wrapper.text();
+    expect(text).toContain(mockTexture.hash);
     expect(text).toContain('复制');
   });
 });

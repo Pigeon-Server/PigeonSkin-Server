@@ -31,22 +31,20 @@ function handleStartCreate() {
 </script>
 
 <template>
-  <div class="resource-page">
-    <!-- 面包屑与顶部导航 -->
-    <nav class="flex items-center gap-2 text-sm pb-4" :aria-label="i18n.t('skinlib.create.title')">
-      <router-link
-        to="/skinlib"
-        class="flex items-center gap-1 font-medium text-muted hover:text-brand-600"
-      >
-        <AppIcon name="arrow_back" class="!text-base" />
-        <span>{{ i18n.t('general.skinlib') }}</span>
-      </router-link>
-      <span class="text-muted/60">/</span>
-      <span class="font-semibold text-ink">{{ i18n.t('skinlib.create.title') }}</span>
-    </nav>
+  <div class="page">
+    <PageHeader :title="i18n.t('skinlib.create.title')">
+      <template #breadcrumb>
+        <nav class="page-breadcrumb">
+          <router-link to="/skinlib" class="page-back">
+            <AppIcon name="arrow_back" class="!text-sm" />
+            <span>{{ i18n.t('general.skinlib') }}</span>
+          </router-link>
+        </nav>
+      </template>
+    </PageHeader>
 
     <!-- 主展示区 -->
-    <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] max-w-[1160px] mx-auto">
+    <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]">
       <!-- 左侧：基础模板展示台 -->
       <section class="rounded-xl border border-line bg-surface p-6 shadow-sm flex flex-col items-center">
         <!-- 模板标题与规格徽章 -->
@@ -113,10 +111,7 @@ function handleStartCreate() {
 
       <!-- 右侧：创作配置卡片 -->
       <AppForm class="rounded-xl border border-line bg-surface p-6 shadow-sm space-y-5" @submit="handleStartCreate">
-        <div>
-          <h1 class="text-lg font-bold text-ink">{{ i18n.t('skinlib.create.title') }}</h1>
-          <p class="mt-1 text-xs text-muted">{{ i18n.t('skinlib.create.description') }}</p>
-        </div>
+        <p class="text-xs text-muted">{{ i18n.t('skinlib.create.description') }}</p>
 
         <!-- 材质预设名称 -->
         <div>

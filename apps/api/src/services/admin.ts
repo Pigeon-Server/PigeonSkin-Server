@@ -4,20 +4,24 @@
 //   • 管理员不能操作自己，也不能操作同级或更高级别的用户
 //   • super_admin **不能通过界面授予**（只能由迁移工具或直接改库设置）
 //   • 封禁要连带撤销该用户全部会话，否则被封的人拿着旧 Cookie 还能继续用
-import { createDb } from '@pigeon-skin/db';
+import { createDb, notificationTranslations } from '@pigeon-skin/db';
 import { hashPassword } from '@pigeon-skin/auth';
 import { ASSIGNABLE_ROLES, canModifyUser, isSuperAdmin, type Role } from '@pigeon-skin/shared';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 import { fail, type Pagination } from '../framework.ts';
-import { revokeAllSessions } from '../lib.ts';
+import { getSetting, readSettings, revokeAllSessions } from '../lib.ts';
 import { audit } from './audit.ts';
 import { bumpSitemap } from './sitemap-cache.ts';
 import { queueTextureSubmission } from './search-submissions.ts';
+import { renderNotificationTemplate } from './notification-template.ts';
+import { contentHash } from './notifications.ts';
+import { enqueueAiJob } from './ai-jobs.ts';
 import * as repo from '../repositories/admin.ts';
 import * as authRepo from '../repositories/auth.ts';
 import * as playerRepo from '../repositories/players.ts';
 import type { Bindings } from '../env.ts';
 import { checkEmailDomain } from './email-policy.ts';
+import type { SqlFragment } from '../search/compile.ts';
 import { revokePendingTokens } from './tokens.ts';
 
 export interface AdminEnv {
@@ -39,7 +43,7 @@ export async function stats(env: AdminEnv) {
 
 export async function listUsers(
   env: AdminEnv,
-  filter: { keyword?: string | undefined },
+  filter: { search?: SqlFragment | null | undefined },
   page: Pagination,
 ) {
   return repo.listAdminUsers(db(env), filter, page);
@@ -51,6 +55,8 @@ export interface PatchUserInput {
   score?: number | undefined;
   role?: 'banned' | 'normal' | 'admin' | undefined;
   emailVerified?: boolean | undefined;
+  reportingDisabled?: boolean | undefined;
+  commentsDisabled?: boolean | undefined;
 }
 
 export async function patchUser(
@@ -80,6 +86,8 @@ export async function patchUser(
     emailChanged = true;
   }
   if (input.score !== undefined) patch.score = input.score;
+  if (input.reportingDisabled !== undefined) patch.reportingDisabled = input.reportingDisabled;
+  if (input.commentsDisabled !== undefined) patch.commentsDisabled = input.commentsDisabled;
   if (input.emailVerified !== undefined) {
     patch.emailVerifiedAt = input.emailVerified ? Date.now() : null;
   }
@@ -158,7 +166,7 @@ export async function deleteUser(
 
 export async function listTextures(
   env: AdminEnv,
-  filter: { keyword?: string | undefined },
+  filter: { search?: SqlFragment | null | undefined },
   page: Pagination,
 ) {
   return repo.listAdminTextures(db(env), filter, page);
@@ -198,7 +206,7 @@ export async function deleteUserClosetEntry(
 
 export async function listPlayers(
   env: AdminEnv,
-  filter: { keyword?: string | undefined },
+  filter: { search?: SqlFragment | null | undefined },
   page: Pagination,
 ) {
   return repo.listAdminPlayers(db(env), filter, page);
@@ -332,16 +340,59 @@ export async function broadcast(
   input: { title: string; content?: string | undefined; receiver: 'all' | 'normal' | number | string },
 ): Promise<{ sent: number }> {
   const database = db(env);
-  const sent = await repo.countRecipients(database, input.receiver);
-  if (sent === 0) return { sent: 0 };
+  const recipients = await repo.listBroadcastRecipients(database, input.receiver);
+  if (recipients.length === 0) return { sent: 0 };
 
-  await repo.broadcastStatement(env.DB, input.receiver, {
-    title: input.title,
-    body: input.content ?? '',
-    createdAt: Date.now(),
-  }).run();
+  // 模板变量按收件人逐个渲染（{{player}}/{{email}}/{{uid}}/{{score}} 因人而异），
+  // 因此必须逐行插入而不能一条 INSERT…SELECT。站点名/地址是全局值，取一次。
+  // site_url 是 EXTRA_SETTINGS 键（不在 SETTING_DEFAULTS），走 readSettings 取。
+  const [siteName, settingsValues] = await Promise.all([getSetting(env, 'site_name'), readSettings(env)]);
+  const siteContext = { siteName: siteName || 'Pigeon Skin Server', siteUrl: settingsValues.site_url ?? '' };
+  const playerNames = await repo.listBroadcastPlayerNames(database, input.receiver);
+  const now = Date.now();
+  // 骨架哈希在写入时就落到行上（渲染后的文本无法反推骨架），读取端直接匹配
+  const templateHash = String(contentHash(input.title, input.content ?? ''));
+  const rendered = recipients.map((r) => ({
+    userId: r.id,
+    title: renderNotificationTemplate(input.title, { ...siteContext, player: playerNames.get(r.id) ?? '', email: r.email, uid: r.id, score: r.score }, now),
+    body: renderNotificationTemplate(input.content ?? '', { ...siteContext, player: playerNames.get(r.id) ?? '', email: r.email, uid: r.id, score: r.score }, now),
+    createdAt: now,
+    templateHash,
+  }));
+  // 大群体（全体群发可达数万行）分批插入：D1 单语句绑定上限 100,每行 6 列
+  // → 每条语句最多 16 行;再以 batch() 打包,一次往返提交、子请求数只按 1 计
+  const BATCH = 16;
+  for (let i = 0; i < rendered.length; i += BATCH * 10) {
+    const chunk = rendered.slice(i, i + BATCH * 10);
+    const statements: D1PreparedStatement[] = [];
+    for (let j = 0; j < chunk.length; j += BATCH) {
+      const rows = chunk.slice(j, j + BATCH);
+      const values = rows.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
+      statements.push(env.DB.prepare(`INSERT INTO notifications (user_id, type, title, body, created_at, template_hash) VALUES ${values}`)
+        .bind(...rows.flatMap(row => [row.userId, 'site_message', row.title, row.body, row.createdAt, row.templateHash])));
+    }
+    await env.DB.batch(statements);
+  }
 
-  return { sent };
+  // AI 翻译以「模板骨架」（变量未渲染的管理员原文）为键：无论发给多少人，
+  // 一个模板只翻译一次。先写骨架源行（译文列为空，locale='' 哨兵），执行器
+  // 据此调用 AI 并按 locale 写译文。入队失败不阻塞发送 —— 译文缺失只是回退原文。
+  try {
+    const aiEnabled = (await getSetting(env, 'notification_ai_translation')) === 'true';
+    await database.insert(notificationTranslations).values({
+      locale: '', contentHash: templateHash,
+      sourceTitle: input.title, sourceBody: input.content ?? '',
+      title: '', body: '', createdAt: now, updatedAt: now,
+    }).onConflictDoUpdate({
+      target: [notificationTranslations.contentHash, notificationTranslations.locale],
+      set: { sourceTitle: input.title, sourceBody: input.content ?? '', updatedAt: now },
+    });
+    await enqueueAiJob(env, 'translate_notification', Number(templateHash), { enabled: aiEnabled });
+  } catch (e) {
+    console.error('通知翻译任务入队失败（不影响发送）', e);
+  }
+
+  return { sent: rendered.length };
 }
 
 export async function broadcastRecipients(env: AdminEnv, receiver: 'all' | 'normal' | number | string) {
@@ -451,13 +502,14 @@ export async function patchAnyTexture(
 /** 审计日志查询（分页 + action/actor 过滤） */
 export async function listAuditLog(
   env: AdminEnv,
-  filter: { action?: string; actorId?: number },
+  filter: { action?: string; actorId?: number; search?: SqlFragment | null },
   page: import('../framework.ts').Pagination,
 ): Promise<{ items: unknown[]; total: number }> {
   const conditions: string[] = [];
   const binds: unknown[] = [];
   if (filter.action) { conditions.push('a.action = ?'); binds.push(filter.action); }
   if (filter.actorId !== undefined) { conditions.push('a.actor_id = ?'); binds.push(filter.actorId); }
+  if (filter.search) { conditions.push(filter.search.sql); binds.push(...filter.search.params); }
   const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const rows = await env.DB
     .prepare(`SELECT a.id, a.actor_id AS actorId, a.action, a.target_type AS targetType,
@@ -466,8 +518,9 @@ export async function listAuditLog(
               FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
               ${whereSql} ORDER BY a.id DESC LIMIT ? OFFSET ?`)
     .bind(...binds, page.perPage, page.offset).all();
+  // 计数与列表共用同一套 join：表达式可能引用 u.email
   const countRows = await env.DB
-    .prepare(`SELECT COUNT(*) AS n FROM audit_log a ${whereSql}`)
+    .prepare(`SELECT COUNT(*) AS n FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id ${whereSql}`)
     .bind(...binds).first<{ n: number }>();
   return { items: rows.results ?? [], total: countRows?.n ?? 0 };
 }

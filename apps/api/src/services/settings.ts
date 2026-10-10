@@ -66,6 +66,7 @@ export const SETTING_REGISTRY: Readonly<Record<SettingKey, SettingSpec>> = {
   max_upload_size_kb: { kind: 'integer', min: 1, max: 100_000 },
   max_texture_width: { kind: 'integer', min: 64, max: 65_536 },
   allow_texture_download: { kind: 'boolean' },
+  allow_anonymous_download: { kind: 'boolean' },
   official_resources_auto_update: { kind: 'boolean' },
   private_texture_status: { kind: 'enum', values: ['403', '404'] },
   sign_score_min: { kind: 'integer', min: 0, max: 1_000_000 },
@@ -101,6 +102,22 @@ export const SETTING_REGISTRY: Readonly<Record<SettingKey, SettingSpec>> = {
   ygg_private_key: { kind: 'string', max: 8_000, secret: true, superAdminOnly: true },
   comments_enabled: { kind: 'boolean' },
   comments_ai_moderation: { kind: 'boolean' },
+  // AI 网关：全局并发上限 + 材质翻译/审核开关 + 每任务模型/提示词覆盖
+  ai_max_concurrency: { kind: 'integer', min: 1, max: 10 },
+  ai_timeout_seconds: { kind: 'integer', min: 5, max: 300 },
+  ai_reasoning: { kind: 'enum', values: ['default', 'disabled', 'enabled'] },
+  texture_ai_translation: { kind: 'boolean' },
+  texture_ai_moderation: { kind: 'boolean' },
+  notification_ai_translation: { kind: 'boolean' },
+  ai_comments_moderation_model: { kind: 'string', max: 100 },
+  ai_comments_moderation_prompt: { kind: 'string', max: 8_000 },
+  ai_comments_moderation_mode: { kind: 'enum', values: ['', 'generative', 'discriminative'] },
+  ai_texture_translate_model: { kind: 'string', max: 100 },
+  ai_texture_translate_prompt: { kind: 'string', max: 8_000 },
+  ai_texture_moderate_model: { kind: 'string', max: 100 },
+  ai_texture_moderate_prompt: { kind: 'string', max: 8_000 },
+  ai_texture_moderate_mode: { kind: 'enum', values: ['', 'generative', 'discriminative'] },
+  ai_discriminative_threshold: { kind: 'integer', min: 10, max: 90 },
   restricted_email_allow: { kind: 'string', max: 10_000 },
   restricted_email_deny: { kind: 'string', max: 10_000 },
   sitemap_max_urls: { kind: 'integer', min: 100, max: 50_000 },
@@ -117,11 +134,25 @@ export const EXTRA_SETTINGS: Readonly<Record<string, SettingSpec>> = {
   search_baidu_token: { kind: 'string', max: 500, secret: true, superAdminOnly: true },
   site_url: { kind: 'string', max: 500, superAdminOnly: true },
   mail_from: { kind: 'string', max: 320, superAdminOnly: true },
-  turnstile_enabled: { kind: 'boolean', superAdminOnly: true },
-  turnstile_site_key: { kind: 'string', max: 500, superAdminOnly: true },
-  turnstile_secret: { kind: 'string', max: 1000, secret: true, superAdminOnly: true },
+  mail_driver: { kind: 'enum', values: ['resend', 'smtp'], superAdminOnly: true },
+  smtp_host: { kind: 'string', max: 255, superAdminOnly: true },
+  smtp_port: { kind: 'integer', min: 0, max: 65_535, superAdminOnly: true },
+  smtp_encryption: { kind: 'enum', values: ['starttls', 'ssl', 'none'], superAdminOnly: true },
+  smtp_username: { kind: 'string', max: 320, superAdminOnly: true },
+  smtp_password: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
+  // 人机验证凭据。site_key 语义随 driver 变化：Turnstile site key /
+  // reCAPTCHA site key / 腾讯 CaptchaAppId / 阿里 SceneId。secret 同理：
+  // 各驱动的服务端密钥；阿里驱动下存 AccessKeySecret。image（自绘图案）
+  // 用 SESSION_SECRET 签题，无凭据可配。
+  captcha_driver: { kind: 'enum', values: ['', 'turnstile', 'recaptcha_v2', 'recaptcha_v3', 'tencent', 'aliyun', 'image'], superAdminOnly: true },
+  captcha_site_key: { kind: 'string', max: 500, superAdminOnly: true },
+  captcha_secret: { kind: 'string', max: 1000, secret: true, superAdminOnly: true },
+  aliyun_captcha_access_key_id: { kind: 'string', max: 200, superAdminOnly: true },
+  recaptcha_v3_threshold: { kind: 'integer', min: 0, max: 100, superAdminOnly: true },
   resend_api_key: { kind: 'string', max: 1000, secret: true, superAdminOnly: true },
   rate_limit_enabled: { kind: 'boolean', superAdminOnly: true },
+  // 皮肤库反爬守卫：匿名访客按 IP 紧桶计数并渐进式人机验证（默认开启）
+  skinlib_guard_enabled: { kind: 'boolean', superAdminOnly: true },
   github_client_id: { kind: 'string', max: 500, superAdminOnly: true },
   github_client_secret: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
   littleskin_client_id: { kind: 'string', max: 500, superAdminOnly: true },
@@ -131,6 +162,15 @@ export const EXTRA_SETTINGS: Readonly<Record<string, SettingSpec>> = {
   microsoft_client_secret: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
   mojang_client_id: { kind: 'string', max: 500, superAdminOnly: true },
   mojang_client_secret: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
+  // AI 网关驱动（空 = 跟随部署 env；openai = 任意 OpenAI 兼容端点；anthropic；systemone = 判别模型）
+  ai_driver: { kind: 'enum', values: ['', 'openai', 'anthropic', 'systemone'], superAdminOnly: true },
+  // 通用 API Key：按所选驱动作为 OpenAI/Anthropic 的 Bearer 凭据
+  ai_api_key: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
+  openai_base_url: { kind: 'string', max: 500, superAdminOnly: true },
+  // 判别模型凭据：TypeSafe System One（Jev）Key，及自托管经 REST 调 Cloudflare Clef 的凭据
+  ai_systemone_api_key: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
+  ai_cloudflare_account_id: { kind: 'string', max: 200, superAdminOnly: true },
+  ai_cloudflare_api_token: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
   custom_css: { kind: 'string', max: 100_000 },
   custom_js: { kind: 'string', max: 100_000, superAdminOnly: true },
   announcement: { kind: 'markdown', max: 20_000, localizable: true },
@@ -153,6 +193,8 @@ export const EXTRA_SETTINGS: Readonly<Record<string, SettingSpec>> = {
   // 首页展示项。旧版 hide_intro 反转成 show（否定式键名容易写反逻辑）
   home_show_intro: { kind: 'boolean' },
   home_fixed_background: { kind: 'boolean' },
+  // 首页风格：modern=新版（hero+精选画廊）；classic=旧版 Blessing Skin 欢迎页（splash+特性介绍）
+  home_style: { kind: 'enum', values: ['modern', 'classic'] },
   meta_keywords: { kind: 'string', max: 500 },
   meta_description: { kind: 'string', max: 500 },
 };
@@ -164,16 +206,23 @@ function specOf(key: string): SettingSpec | undefined {
 /** 本地化设置的默认语言。与 SETTING_DEFAULTS 的语言保持一致。 */
 export const DEFAULT_LOCALE = '';
 
-const EXTRA_DEFAULTS: Record<string, string> = {
+export const EXTRA_DEFAULTS: Record<string, string> = {
   search_google_enabled: 'false', search_google_property: '', search_google_credentials: '',
   search_bing_enabled: 'false', search_bing_key: '', search_baidu_enabled: 'false', search_baidu_token: '',
+  captcha_driver: '', captcha_site_key: '', captcha_secret: '',
+  aliyun_captcha_access_key_id: '', recaptcha_v3_threshold: '50',
+  skinlib_guard_enabled: 'true',
+  site_url: '', mail_from: '', mail_driver: 'resend',
+  ai_driver: '', ai_api_key: '', openai_base_url: '',
+  ai_systemone_api_key: '', ai_cloudflare_account_id: '', ai_cloudflare_api_token: '',
+  smtp_host: '', smtp_port: '0', smtp_encryption: 'starttls', smtp_username: '', smtp_password: '',
   config_generator_intro: '',
   custom_css: '', custom_js: '', announcement: '', content_policy: '',
   copyright_text: '', copyright_preset: '0', home_background_url: '', home_background_tablet_url: '', home_background_mobile_url: '',
   login_background_url: '', login_background_tablet_url: '', login_background_mobile_url: '', favicon_url: '',
   icp_beian: '', public_security_beian: '',
   navbar_color: '', sidebar_color: '', transparent_navbar: 'false',
-  home_show_intro: 'true', home_fixed_background: 'false', meta_keywords: '', meta_description: '',
+  home_show_intro: 'true', home_fixed_background: 'false', home_style: 'modern', meta_keywords: '', meta_description: '',
 };
 
 // ── 读 ───────────────────────────────────────────────────────────────────────
@@ -224,13 +273,13 @@ const PUBLIC_KEYS = [
   'require_email_verification', 'player_name_rule', 'player_name_length_min',
   'player_name_length_max', 'initial_score', 'score_per_player', 'score_per_kb_public',
   'score_per_kb_private', 'score_per_closet_item', 'max_upload_size_kb',
-  'max_texture_width', 'allow_texture_download', 'sign_score_min', 'sign_score_max',
+  'max_texture_width', 'allow_texture_download', 'allow_anonymous_download', 'sign_score_min', 'sign_score_max',
   'sign_gap_hours', 'announcement', 'content_policy', 'copyright_text',
   'copyright_preset', 'home_background_url', 'home_background_tablet_url', 'home_background_mobile_url',
   'login_background_url', 'login_background_tablet_url', 'login_background_mobile_url', 'favicon_url', 'navbar_color',
   'icp_beian', 'public_security_beian',
   'sidebar_color', 'transparent_navbar', 'meta_keywords', 'meta_description',
-  'sign_reset_mode', 'home_show_intro', 'home_fixed_background', 'custom_css',
+  'sign_reset_mode', 'home_show_intro', 'home_fixed_background', 'home_style', 'custom_css',
   'meta_extras', 'adsense_client_id', 'gtag_id', 'ygg_show_config_section',
   'ygg_skin_domain', 'ygg_enable_ali', 'comments_enabled',
   'textures_description_limit',
@@ -363,13 +412,26 @@ export async function writeMany(
         await importPKCS8(account.private_key, 'RS256');
       } catch { throw fail.invalid(undefined, { [row.key]: 'invalid_credentials' }); }
     }
-    if (['site_url', 'littleskin_api_root', 'favicon_url', 'home_background_url', 'home_background_tablet_url', 'home_background_mobile_url', 'login_background_url', 'login_background_tablet_url', 'login_background_mobile_url'].includes(row.key) && row.value) {
+    if (['site_url', 'littleskin_api_root', 'openai_base_url', 'favicon_url', 'home_background_url', 'home_background_tablet_url', 'home_background_mobile_url', 'login_background_url', 'login_background_tablet_url', 'login_background_mobile_url'].includes(row.key) && row.value) {
       let url: URL;
       try { url = new URL(row.value); } catch { throw fail.invalid('common.invalid_request', { [row.key]: 'invalid_url' }); }
       const local = env.ENVIRONMENT === 'development' && url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-      if ((!local && url.protocol !== 'https:') || url.username || url.password || url.hash || (row.key === 'site_url' && (url.pathname !== '/' || url.search))) throw fail.invalid('common.invalid_request', { [row.key]: 'invalid_url' });
+      if (row.key === 'openai_base_url') {
+        // LLM 网关常跑在本地（Ollama/vLLM），允许任意 http(s) 地址
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') throw fail.invalid('common.invalid_request', { [row.key]: 'invalid_url' });
+      } else if ((!local && url.protocol !== 'https:') || url.username || url.password || url.hash || (row.key === 'site_url' && (url.pathname !== '/' || url.search))) throw fail.invalid('common.invalid_request', { [row.key]: 'invalid_url' });
     }
-    if (row.key === 'mail_from' && !/^(?:[^<>\r\n]+ <)?[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+>?$/.test(row.value)) throw fail.invalid('common.invalid_request', { mail_from: 'invalid_email' });
+    // mail_from 允许完整 `名称 <邮箱>`、纯邮箱，或只写显示名（smtp 驱动下
+    // 发送时自动用 SMTP 账号补全邮箱，见 email.ts resolveMailFrom）。
+    // 换行可注入邮件头，任何写法都禁止；含尖括号时必须是完整地址形式。
+    if (row.key === 'mail_from' && row.value) {
+      const trimmed = row.value.trim();
+      if (/[\r\n]/.test(trimmed) || (trimmed.includes('<') && !/^(?:[^<>\r\n]+ <)?[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+>?$/.test(trimmed))) {
+        throw fail.invalid('common.invalid_request', { mail_from: 'invalid_email' });
+      }
+    }
+    // 主机名/IPv4/带方括号的 IPv6 字面量；裸 IPv6 要求写 [::1] 形式，避免与端口拼接歧义
+    if (row.key === 'smtp_host' && row.value && !/^(?:[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?|\[[0-9a-fA-F:.]+\])$/.test(row.value)) throw fail.invalid('common.invalid_request', { smtp_host: 'invalid_host' });
     if (row.key === 'ygg_private_key' && row.value && !(await inspectSigningKey(row.value)).valid) {
       throw fail.invalid('integration.invalid_key', { ygg_private_key: 'invalid_key' });
     }
@@ -392,7 +454,17 @@ export async function writeMany(
     const property = prospective.search_google_property;
     if (property !== `${root.origin}/` && !(property.startsWith('sc-domain:') && (root.hostname === property.slice(10) || root.hostname.endsWith(`.${property.slice(10)}`)))) throw fail.invalid(undefined, { search_google_property: 'invalid_property' });
   }
-  if (prospective.turnstile_enabled === 'true' && (!prospective.turnstile_site_key || !prospective.turnstile_secret)) throw fail.invalid('common.invalid_request', { turnstile_enabled: 'not_configured' });
+  // 每个驱动所需的凭据不同：阿里用 AccessKey 对（secret 存 AccessKeySecret），
+  // 其余用 site_key + secret。驱动关着时不校验凭据，允许提前只填一半。
+  const captchaDriver = prospective.captcha_driver ?? '';
+  if (captchaDriver && captchaDriver !== 'image') {
+    const missing: string[] = [];
+    if (!prospective.captcha_site_key) missing.push('captcha_site_key');
+    if (!prospective.captcha_secret) missing.push('captcha_secret');
+    if (captchaDriver === 'aliyun' && !prospective.aliyun_captcha_access_key_id) missing.push('aliyun_captcha_access_key_id');
+    if (missing.length) throw fail.invalid('common.invalid_request', { [missing[0]!]: 'not_configured' });
+  }
+  if (prospective.mail_driver === 'smtp' && !prospective.smtp_host) throw fail.invalid('common.invalid_request', { smtp_host: 'not_configured' });
   if (prospective.ygg_connect_enabled === 'true') {
     const key = await env.DB.prepare('SELECT kid FROM connect_keys WHERE retired_at IS NULL').first();
     const client = await env.DB.prepare('SELECT id FROM connect_clients WHERE enabled = 1').first();
@@ -433,6 +505,10 @@ function assertConsistent(values: Record<string, string>): void {
   }
   if (Number(values['player_name_length_min']) > Number(values['player_name_length_max'])) {
     throw fail.invalid('common.invalid_request', { player_name_length_max: 'below_minimum' });
+  }
+  // resend 没有 SMTP 账号可供自动补全：纯显示名的 mail_from 无法投递，写入时拦下
+  if (values.mail_driver === 'resend' && values.mail_from && !values.mail_from.includes('<') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.mail_from.trim())) {
+    throw fail.invalid('common.invalid_request', { mail_from: 'invalid_email' });
   }
 }
 

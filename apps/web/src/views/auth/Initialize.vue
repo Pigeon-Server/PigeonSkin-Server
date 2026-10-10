@@ -60,8 +60,8 @@ async function submit() {
 onMounted(load);
 </script>
 <template>
-  <div class="auth-fields space-y-4">
-    <h1 class="text-2xl font-bold">{{ i18n.t('auth.initialize.title') }}</h1>
+  <div class="space-y-4">
+    <h1>{{ i18n.t('auth.initialize.title') }}</h1>
     <AppSkeleton v-if="loading || redirecting" :count="3" />
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}<AppButton v-if="retryable" class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
     <AppForm v-if="!loading && !redirecting && status?.needsInitialization" class="space-y-4" @submit.prevent="submit">

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   AUTH_RATE_LIMIT_PREFIXES,
+  BLOCKED_CRAWLER_AGENTS,
   CSRF_EXEMPT_PREFIXES,
   ROBOTS_API_RULES,
   ROBOTS_PROTOCOL_DISALLOW,
+  ROBOTS_RULES_REVISION,
   delegatedScopesForRoute,
   isAuthRateLimitedPath,
+  isBlockedCrawler,
   isOAuthProtocolPath,
   isProtocolPath,
 } from '../src/route-metadata.ts';
@@ -39,5 +42,26 @@ describe('shared route metadata', () => {
     expect(isAuthRateLimitedPath('/api/v1/admin/users')).toBe(false);
     expect(ROBOTS_API_RULES).toContain('Disallow: /api/');
     expect(ROBOTS_PROTOCOL_DISALLOW).toEqual(['Disallow: /raw/', 'Disallow: /textures/']);
+  });
+
+  it('blocks Claude crawler agents by case-insensitive user-agent substring', () => {
+    expect(BLOCKED_CRAWLER_AGENTS).toEqual(['ClaudeBot', 'Claude-SearchBot', 'Claude-Web', 'anthropic-ai']);
+    // 精确断言：改动清单时必须同时确认修订号已递增，否则缓存里的旧 robots.txt 不会失效
+    expect(ROBOTS_RULES_REVISION).toBe(3);
+    for (const ua of [
+      'Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)',
+      'Claude-SearchBot/1.0; +claudesearchbot@anthropic.com',
+      'Claude-Web/1.0',
+      'anthropic-ai',
+    ]) expect(isBlockedCrawler(ua), ua).toBe(true);
+    // 用户主动让 Claude 读取页面（Claude-User）与正常浏览器、搜索引擎都不拦
+    for (const ua of [
+      'claude-user/1.0; +claude-user@anthropic.com',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+      'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+      'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',
+    ]) expect(isBlockedCrawler(ua), ua).toBe(false);
+    expect(isBlockedCrawler(undefined)).toBe(false);
+    expect(isBlockedCrawler('')).toBe(false);
   });
 });

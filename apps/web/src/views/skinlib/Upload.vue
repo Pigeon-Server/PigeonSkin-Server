@@ -235,22 +235,20 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="resource-page">
-    <!-- 面包屑与顶部导航 -->
-    <nav class="flex items-center gap-2 text-sm pb-4" :aria-label="i18n.t('skinlib.upload.title')">
-      <router-link
-        to="/skinlib"
-        class="flex items-center gap-1 font-medium text-muted hover:text-brand-600"
-      >
-        <AppIcon name="arrow_back" class="!text-base" />
-        <span>{{ i18n.t('general.skinlib') }}</span>
-      </router-link>
-      <span class="text-muted/60">/</span>
-      <span class="font-semibold text-ink">{{ i18n.t('skinlib.upload.title') }}</span>
-    </nav>
+  <div class="page">
+    <PageHeader :title="i18n.t('skinlib.upload.title')">
+      <template #breadcrumb>
+        <nav class="page-breadcrumb">
+          <router-link to="/skinlib" class="page-back">
+            <AppIcon name="arrow_back" class="!text-sm" />
+            <span>{{ i18n.t('general.skinlib') }}</span>
+          </router-link>
+        </nav>
+      </template>
+    </PageHeader>
 
     <!-- 主展示网格 -->
-    <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,1fr)] max-w-[1360px] mx-auto">
+    <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,1fr)]">
       <!-- 左侧：贴图选择与实时 3D 检验 -->
       <section class="space-y-5 min-w-0">
         <!-- 未选择文件时的拖放选择框 -->

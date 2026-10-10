@@ -7,6 +7,7 @@ import AppIcon from '@/components/ui/AppIcon.vue';
 import AppInput from '@/components/ui/AppInput.vue';
 import AppSelect from '@/components/ui/AppSelect.vue';
 import AppForm from '@/components/ui/AppForm.vue';
+import PageHeader from '@/components/ui/PageHeader.vue';
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -91,6 +92,7 @@ function createUploadWrapper() {
         AppInput,
         AppSelect,
         AppForm,
+        PageHeader,
         MarkdownContent: {
           props: ['content'],
           template: '<div class="mock-markdown-content">{{ content }}</div>',

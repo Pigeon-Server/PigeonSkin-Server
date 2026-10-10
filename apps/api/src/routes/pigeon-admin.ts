@@ -12,6 +12,7 @@ import {
 import { requirePigeonKey } from '../services/pigeon-api.ts';
 import * as admin from '../services/admin.ts';
 import * as settingsSvc from '../services/settings.ts';
+import * as aiJobs from '../services/ai-jobs.ts';
 import { enqueueBroadcastEmail, isEmailConfigured } from '../services/email.ts';
 import { audit } from '../services/audit.ts';
 import { fail, paginate, readJson, readJsonOptional, readPagination, readQuery } from '../framework.ts';
@@ -206,6 +207,8 @@ export function registerPigeonAdminApi(app: Hono<AppEnv>) {
     const content = body.content || '';
     if (body.sendEmail && (!isEmailConfigured(c.env) || !c.env.EMAIL_NOTIFICATIONS)) throw fail.invalid('common.invalid_request', { sendEmail: isEmailConfigured(c.env) ? 'queue_unavailable' : 'email_not_configured' });
     const result = await admin.broadcast(c.env, { ...body, title, content });
+    // 翻译任务刚入队：立即触发一次派发（失败不影响响应，cron 兜底）
+    if (result.sent > 0) c.executionCtx.waitUntil(aiJobs.processDueJobs(c.env).catch(() => {}));
     let emailQueued = !body.sendEmail;
     if (body.sendEmail && result.sent) try { emailQueued = await enqueueBroadcastEmail(c.env, { broadcastId: crypto.randomUUID(), receiver: body.receiver, title, content, afterId: 0 }); } catch { emailQueued = false; }
     await audit(c.env, {

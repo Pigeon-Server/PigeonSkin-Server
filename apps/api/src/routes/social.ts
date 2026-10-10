@@ -11,9 +11,12 @@ import {
   reportResolveInputSchema,
   reportSubmitInputSchema,
 } from '@pigeon-skin/shared/schemas';
-import { currentAdmin, currentUser, readJson, readQuery } from '../framework.ts';
+import { currentAdmin, currentUser, fail, readJson, readQuery } from '../framework.ts';
+import { clientIp } from '../lib.ts';
 import * as social from '../services/social.ts';
+import { compileSearchInput } from '../search/index.ts';
 import { getSettingBool, getSettingInt, type AppEnv } from '../lib.ts';
+import { captchaAllows, verifyCaptcha } from '../services/captcha.ts';
 
 export const closetRoutes = new Hono<AppEnv>();
 export const reportRoutes = new Hono<AppEnv>();
@@ -34,7 +37,8 @@ async function readRates(env: AppEnv['Bindings']): Promise<social.SocialRates> {
 closetRoutes.get('/', async (c) => {
   const user = currentUser(c);
   const query = readQuery(c, closetListQuerySchema);
-  return c.json(await social.listCloset(c.env, user.id, query));
+  const { keyword, ...rest } = query;
+  return c.json(await social.listCloset(c.env, user.id, { ...rest, search: compileSearchInput(keyword, 'closet') }));
 });
 
 closetRoutes.post('/', async (c) => {
@@ -66,6 +70,9 @@ closetRoutes.delete('/:textureId', async (c) => {
 reportRoutes.post('/', async (c) => {
   const user = currentUser(c);
   const body = await readJson(c, reportSubmitInputSchema);
+  // 举报接受人工审核，防刷靠验证码；验证码未启用时 verifyCaptcha 返回 disabled，放行
+  const verdict = await verifyCaptcha(c.env, { token: body.captchaToken, randstr: body.captchaRandstr }, clientIp(c));
+  if (!captchaAllows(verdict, false)) throw fail.forbidden('auth.captcha_failed');
   const result = await social.submitReport(
     c.env, user, body.textureId, body.reason, await readRates(c.env),
   );

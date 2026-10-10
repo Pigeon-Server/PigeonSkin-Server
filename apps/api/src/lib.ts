@@ -6,6 +6,7 @@ import { LIMITS, type Role } from '@pigeon-skin/shared';
 import { createDb, settings, users, sessions } from '@pigeon-skin/db';
 import { and, eq, isNull, gt } from 'drizzle-orm';
 import { flag, SETTING_DEFAULTS, type Bindings, type SettingKey } from './env.ts';
+import { EXTRA_DEFAULTS } from './services/settings.ts';
 export { isAdmin } from './services/authorization.ts';
 
 export interface AppEnv {
@@ -30,6 +31,10 @@ export interface AuthedUser {
   readonly avatarTextureId: number | null;
   readonly signature: string;
   readonly needsInitialization: boolean;
+  /** 管理员禁用其提交举报（防滥用风控） */
+  readonly reportingDisabled: boolean;
+  /** 管理员禁用其发表评论（防滥用风控） */
+  readonly commentsDisabled: boolean;
 }
 
 export type AppContext = Context<AppEnv>;
@@ -92,6 +97,8 @@ export async function resolveSession(
       isDarkMode: users.isDarkMode,
       avatarTextureId: users.avatarTextureId,
       signature: users.signature,
+      reportingDisabled: users.reportingDisabled,
+      commentsDisabled: users.commentsDisabled,
       lastSeenAt: sessions.lastSeenAt,
     })
     .from(sessions)
@@ -128,6 +135,8 @@ export async function resolveSession(
       isDarkMode: row.isDarkMode,
       avatarTextureId: row.avatarTextureId,
       signature: row.signature,
+      reportingDisabled: !!row.reportingDisabled,
+      commentsDisabled: !!row.commentsDisabled,
       needsInitialization: needsAccountInitialization(row.email, row.passwordHash, row.storedNeedsInitialization),
     },
     sessionId,
@@ -211,7 +220,10 @@ export async function readSettings(env: Pick<Bindings, 'DB'>): Promise<Record<st
     .from(settings)
     .where(eq(settings.locale, ''));
 
-  const values: Record<string, string> = { ...SETTING_DEFAULTS };
+  // EXTRA_DEFAULTS（settings.ts 里仅超管可见项的默认值）也要兜底：
+  // 网关等直接走 readSettings 的读取方拿不到 settings.ts 的合并结果，
+  // 缺了它 ai_driver 这类 EXTRA 键会变 undefined 而不是 ''。
+  const values: Record<string, string> = { ...SETTING_DEFAULTS, ...EXTRA_DEFAULTS };
   for (const r of rows) values[r.key] = r.value;
 
   settingsCache = { values, expiresAt: now + 60_000 };
@@ -234,8 +246,12 @@ export async function getSettingBool(env: Pick<Bindings, 'DB'>, key: SettingKey)
 
 // ── 权限 ─────────────────────────────────────────────────────────────────────
 
-/** 取客户端 IP。Cloudflare 会设置 cf-connecting-ip。 */
+/** 取客户端 IP。Cloudflare 设 cf-connecting-ip；Node 部署在反代后面取
+ *  x-forwarded-for 的第一跳（自行直连时二者都没有，回落 unknown——
+ *  与 Worker 上非 Cloudflare 请求的行为一致）。 */
 export function clientIp(c: AppContext): string {
+  const forwarded = c.req.header('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0]!.trim();
   return c.req.header('cf-connecting-ip') ?? 'unknown';
 }
 

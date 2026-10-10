@@ -40,6 +40,10 @@ function publicUser(user: AuthedUser): Record<string, unknown> {
     avatarTextureId: user.avatarTextureId,
     signature: user.signature,
     needsInitialization: user.needsInitialization,
+    // 与 /auth/session 的序列化保持一致：OAuth User.Read 等消费方
+    // 也能拿到禁用状态，不必额外查询
+    reportingDisabled: user.reportingDisabled,
+    commentsDisabled: user.commentsDisabled,
   };
 }
 
@@ -129,6 +133,10 @@ meRoutes.get('/notifications', async (c) => {
   const user = currentUser(c);
   return c.json(await notifications.list(c.env, user.id, {
     unreadOnly: c.req.query('unread') === 'true',
+    // 公告译文按用户语言取：优先账号语言设置，其次 ?lang（与站点界面语言一致）
+    locale: user.locale ?? c.req.query('lang'),
+    // 译文骨架按收件人渲染变量（{{player}} 等）；上下文与群发渲染共用一套
+    templateContext: await notifications.recipientContext(c.env, user),
   }));
 });
 

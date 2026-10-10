@@ -14,8 +14,15 @@ import {
   PLAYER_BANNED_MESSAGE, TEXTURE_OBJECT_MISSING_STATUS,
   textureEtag, playerProfileEtag,
 } from '@pigeon-skin/minecraft';
-import { createDb, players, textures, users } from '@pigeon-skin/db';
-import { eq, sql } from 'drizzle-orm';
+import { createDb, players, textures, users, noCaseEq } from '@pigeon-skin/db';
+import { eq, sql, type SQL } from 'drizzle-orm';
+
+/** 把 helper 产出的含 {COL} 列占位与单个 ? 值占位的 SQL 片段嵌入 drizzle 模板。 */
+function embedFrag(frag: string, column: SQL, value: unknown) {
+  const [lhs = '', rhs = ''] = frag.split('{COL}');
+  const q = rhs.indexOf('?');
+  return sql`${sql.raw(lhs)}${column}${sql.raw(rhs.slice(0, q))}${value}${sql.raw(rhs.slice(q + 1))}`;
+}
 import type { Role, TextureModel } from '@pigeon-skin/shared';
 import { getSettingBool } from '../lib.ts';
 import { getSettingInt } from '../lib.ts';
@@ -50,7 +57,7 @@ async function playerProfileHandler(c: Ctx, name: string) {
     })
     .from(players)
     .innerJoin(users, eq(users.id, players.userId))
-    .where(sql`${players.name} = ${name} COLLATE NOCASE`)
+    .where(embedFrag(noCaseEq('{COL}', '?'), sql`${players.name}`, name))
     .limit(1);
 
   const row = rows[0];
@@ -202,6 +209,9 @@ app.get('/csl/textures/:hash', textureHandler);
 app.get('/raw/:tid', async (c) => {
   if (!(await getSettingBool(c.env, 'allow_texture_download'))) {
     return c.body(null, 403);
+  }
+  if (!c.get('user') && !(await getSettingBool(c.env, 'allow_anonymous_download'))) {
+    return c.body(null, 401);
   }
   const tid = Number(c.req.param('tid'));
   if (!Number.isInteger(tid) || tid <= 0) return c.notFound();

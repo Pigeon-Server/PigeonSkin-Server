@@ -11,6 +11,7 @@ export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
+      '**/dist-node/**',
       '**/node_modules/**',
       '**/.wrangler/**',
       '**/.mimosa/**',
@@ -29,7 +30,7 @@ export default tseslint.config(
     files: ['**/*.ts'],
   })),
   {
-    files: ['tools/**/*.mjs', 'apps/web/scripts/**/*.mjs'],
+    files: ['tools/**/*.mjs', 'apps/web/scripts/**/*.mjs', 'apps/api/scripts/**/*.mjs'],
     languageOptions: {
       globals: globals.node,
     },

@@ -10,8 +10,8 @@ async function complete(redirect: string) {
 }
 </script>
 <template>
-  <div class="auth-fields">
-    <h1 class="mb-6 text-2xl font-bold">{{ i18n.t('security.two_factor') }}</h1>
+  <div>
+    <h1 class="mb-6">{{ i18n.t('security.two_factor') }}</h1>
     <SecondFactorForm @complete="complete" />
   </div>
 </template>

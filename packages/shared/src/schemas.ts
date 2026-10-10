@@ -54,20 +54,25 @@ export const textureListQuerySchema = paginationQuerySchema.extend({
   model: z.enum(['default', 'slim']).optional(),
   uploader: idSchema.optional(),
   official: z.enum(['true', 'false']).optional(),
-  keyword: z.string().trim().max(100).optional(),
+  /** 搜索表达式（见 packages/shared/src/search）：普通词、字段限定、布尔条件 */
+  keyword: z.string().trim().max(500).optional(),
   sort: z.enum(['created', 'likes']).optional(),
   mine: z.enum(['true', 'false']).optional(),
+  /** 展示语言：传入时材质名按 AI 译文覆盖（无译文回退原文） */
+  locale: z.string().trim().max(10).optional(),
 });
 
 export const closetListQuerySchema = z.object({
   category: textureKindSchema.optional(),
-  keyword: z.string().trim().max(100).optional(),
+  /** 搜索表达式（见 packages/shared/src/search）：普通词、字段限定、布尔条件 */
+  keyword: z.string().trim().max(500).optional(),
   page: z.coerce.number().int().min(1).default(1),
   perPage: z.coerce.number().int().min(1).max(60).default(24),
 });
 
 export const adminListQuerySchema = paginationQuerySchema.extend({
-  q: z.string().trim().max(100).optional(),
+  /** 搜索表达式（见 packages/shared/src/search） */
+  q: z.string().trim().max(500).optional(),
 });
 
 export const reportListQuerySchema = z.object({
@@ -83,7 +88,9 @@ export const registerInputSchema = z.object({
   playerName: playerNameSchema.optional(),
   /** 当设置不要求玩家名时必填 */
   nickname: nicknameSchema.optional(),
-  turnstileToken: z.string().optional(),
+  captchaToken: z.string().max(4096).optional(),
+  /** 腾讯云验证码与 ticket 配对的 Randstr；其他驱动不传 */
+  captchaRandstr: z.string().max(200).optional(),
 });
 
 export const loginInputSchema = z.object({
@@ -92,14 +99,16 @@ export const loginInputSchema = z.object({
   identifier: z.string().trim().min(1),
   password: z.string().min(1),
   keep: z.boolean().optional(),
-  turnstileToken: z.string().optional(),
+  captchaToken: z.string().max(4096).optional(),
+  captchaRandstr: z.string().max(200).optional(),
   retainUserId: idSchema.optional(),
   conflictPasswords: z.array(z.object({ userId: idSchema, password: z.string().min(1).max(256) })).max(8).optional(),
 });
 
 export const forgotPasswordInputSchema = z.object({
   email: emailSchema,
-  turnstileToken: z.string().optional(),
+  captchaToken: z.string().max(4096).optional(),
+  captchaRandstr: z.string().max(200).optional(),
 });
 
 export const resetPasswordInputSchema = z.object({
@@ -170,6 +179,9 @@ export const closetRenameInputSchema = z.object({
 export const reportSubmitInputSchema = z.object({
   textureId: idSchema,
   reason: z.string().trim().min(1).max(1000),
+  captchaToken: z.string().max(4096).optional(),
+  /** 腾讯云验证码与 ticket 配对的 Randstr；其他驱动不传 */
+  captchaRandstr: z.string().max(200).optional(),
 });
 
 export const reportResolveInputSchema = z.object({
@@ -184,6 +196,10 @@ export const adminPatchUserInputSchema = z.object({
   score: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
   role: assignableRoleSchema.optional(),
   emailVerified: z.boolean().optional(),
+  /** 禁用其提交举报（防滥用） */
+  reportingDisabled: z.boolean().optional(),
+  /** 禁用其发表评论（防滥用） */
+  commentsDisabled: z.boolean().optional(),
 }).refine((v) => Object.keys(v).length > 0, { message: '至少要改一个字段' });
 
 /** 管理员创建用户 */

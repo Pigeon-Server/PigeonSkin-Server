@@ -5,7 +5,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { SqliteD1 } from '../../src/node/d1/sqlite.ts';
 import { runMigrationsForNode } from '../../src/node/migrate.ts';
 import { invalidateSettingsCache } from '../../src/lib.ts';
-import { enqueueAiJob, processDueJobs, retryAiJob, cancelAiJob } from '../../src/services/ai-jobs.ts';
+import { enqueueAiJob, processDueJobs, retryAiJob, cancelAiJob, backfillAiJobs } from '../../src/services/ai-jobs.ts';
 import type { Bindings } from '../../src/env.ts';
 
 const AI = {
@@ -86,6 +86,56 @@ describe('ai jobs queue', () => {
     const status = await d1.prepare('SELECT status FROM ai_jobs').first<{ status: string }>();
     expect(status!.status).toBe('cancelled');
     expect(await cancelAiJob(bindings(d1), row!.id)).toBe(false);
+  });
+});
+
+describe('ai jobs backfill', () => {
+  it('开关全关时补跑为空', async () => {
+    expect(await backfillAiJobs(bindings(d1))).toEqual([]);
+  });
+
+  it('只开审核开关时只补审核任务', async () => {
+    await d1.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES ('texture_ai_moderation', '', 'true', 0)").run();
+    invalidateSettingsCache();
+    const db = createDb(d1 as never);
+    const { textures } = await import('@pigeon-skin/db');
+    await db.insert(textures).values(
+      { hash: `bf-solo-${Date.now()}`, kind: 'skin', name: 'S', uploaderId: null, sizeBytes: 1, visibility: 'public', width: 64, height: 64, createdAt: 1, updatedAt: 1 },
+    );
+    const results = await backfillAiJobs(bindings(d1));
+    expect(results.map((r) => r.kind).sort()).toEqual(['moderate_texture_description', 'moderate_texture_name']);
+    const rows = await d1.prepare('SELECT kind FROM ai_jobs').all<{ kind: string }>();
+    expect(rows.results!.length).toBe(2);
+  });
+
+  it('为存量材质补齐缺失任务，已有任务不重置', async () => {
+    await d1.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES ('texture_ai_translation', '', 'true', 0), ('texture_ai_moderation', '', 'true', 0)").run();
+    invalidateSettingsCache();
+    const db = createDb(d1 as never);
+    const { textures } = await import('@pigeon-skin/db');
+    const base = Date.now();
+    // 材质 A 名称为空：翻译任务执行时直接成功置 done，验证补跑不重置它
+    await db.insert(textures).values([
+      { hash: `bf-a-${base}`, kind: 'skin', name: '', uploaderId: null, sizeBytes: 1, visibility: 'public', width: 64, height: 64, createdAt: 1, updatedAt: 1 },
+      { hash: `bf-b-${base}`, kind: 'skin', name: 'B', uploaderId: null, sizeBytes: 1, visibility: 'public', width: 64, height: 64, createdAt: 2, updatedAt: 2 },
+    ]);
+    // 材质 A 已有（已完成的）翻译任务，补跑不得重置它
+    await enqueueAiJob(bindings(d1), 'translate_texture', 1);
+    await processDueJobs(bindings(d1));
+
+    const results = await backfillAiJobs(bindings(d1));
+    const byKind = new Map(results.map((r) => [r.kind, r.queued]));
+    expect(byKind.get('moderate_texture_name')).toBe(2);
+    expect(byKind.get('moderate_texture_description')).toBe(2);
+    // 材质 B 补了翻译任务，材质 A 的已完成任务保持 done
+    expect(byKind.get('translate_texture')).toBe(1);
+    const rows = await d1.prepare("SELECT tid, status FROM ai_jobs WHERE kind = 'translate_texture' ORDER BY tid").all<{ tid: number; status: string }>();
+    expect(rows.results!.length).toBe(2);
+    expect(rows.results![0]).toEqual({ tid: 1, status: 'done' });
+    expect(rows.results![1]).toEqual({ tid: 2, status: 'pending' });
+    // 再跑一次：无新增
+    const again = await backfillAiJobs(bindings(d1));
+    expect(again.every((r) => r.queued === 0)).toBe(true);
   });
 });
 

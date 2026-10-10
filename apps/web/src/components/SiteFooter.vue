@@ -50,7 +50,7 @@ const copyright = computed(() => {
         </div>
       </div>
       <span class="footer-credit">
-        <a :aria-describedby="creditId" href="https://github.com/bs-community/blessing-skin-server" target="_blank" rel="noopener noreferrer">
+        <a :aria-describedby="creditId" href="https://github.com/Pigeon-Server/PigeonSkin-Server" target="_blank" rel="noopener noreferrer">
           <I18nT scope="global" :keypath="`common.copyright_presets.${preset}`" tag="span">
             <template #product>{{ i18n.t('common.product_name') }}</template>
             <template #love><AppIcon name="favorite" class="!text-xs text-red-500" /><span class="sr-only">{{ i18n.t('common.care') }}</span></template>

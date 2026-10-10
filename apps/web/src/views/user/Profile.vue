@@ -22,6 +22,9 @@ import { useTheme } from '@/composables/theme';
 import AvatarPreview from '@/components/AvatarPreview.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { apiErrorMessage } from '@/lib/api-error';
+import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
+import { useSearchExpression } from '@/lib/search-expression';
+import { matchSearch, searchSchema } from '@pigeon-skin/shared/search';
 
 const session = useSessionStore();
 const i18n = useI18n();
@@ -41,11 +44,10 @@ const newPassword2 = ref('');
 const myTextures = ref<Array<Pick<TextureSummary, 'id' | 'hash' | 'name'>>>([]);
 const avatarPage = ref(1);
 const avatarKeyword = ref('');
-const filteredAvatars = computed(() =>
-  myTextures.value.filter((item) =>
-    item.name.toLowerCase().includes(avatarKeyword.value.toLowerCase()),
-  ),
-);
+const avatarSearch = useSearchExpression(avatarKeyword, 'avatars');
+const avatarSchema = searchSchema('avatars');
+const filteredAvatars = computed(() => myTextures.value.filter(item =>
+  matchSearch(avatarSearch.value, avatarSchema, { name: item.name, id: item.id })));
 const avatarPages = computed(() => Math.ceil(filteredAvatars.value.length / 18));
 const visibleAvatars = computed(() =>
   filteredAvatars.value.slice((avatarPage.value - 1) * 18, avatarPage.value * 18),
@@ -277,7 +279,7 @@ async function deleteAccount() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl space-y-4" v-if="user">
+  <div class="page" v-if="user">
     <PageHeader :title="i18n.t('general.profile')" />
 
     <AppForm class="panel" @submit.prevent="saveProfile">
@@ -491,10 +493,10 @@ async function deleteAccount() {
         </AppButton>
       </div>
       <p class="mt-1 text-sm text-muted">{{ i18n.t('settings.avatar_pick') }}</p>
-      <AppInput
+      <SearchExpressionField
         v-if="myTextures.length > 18"
         v-model="avatarKeyword"
-        type="search"
+        schema-key="avatars"
         class="mt-3"
         :aria-label="i18n.t('settings.avatar')"
         :placeholder="i18n.t('general.search')"
@@ -526,7 +528,7 @@ async function deleteAccount() {
       </div>
     </div>
     <AppPagination v-model="avatarPage" :total-pages="avatarPages" />
-    <section v-if="!session.isAdmin.value" class="panel !border-red-200">
+    <section v-if="!session.isAdmin.value" class="panel border-danger/40">
       <h2 class="font-semibold text-danger">{{ i18n.t('user.delete_account') }}</h2>
       <p class="mt-2 text-sm text-muted">{{ i18n.t('user.delete_warning') }}</p>
       <AppButton class="btn-danger mt-4" :loading="profileBusy" @click="deleteAccount">
