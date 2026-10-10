@@ -333,7 +333,7 @@ describe('判别模型（systemone）驱动', () => {
       AI: undefined,
       AI_MODERATION_DRIVER: 'systemone',
       CLOUDFLARE_ACCOUNT_ID: 'acct123',
-      CLOUDFLARE_API_TOKEN: 'cf-token',
+      CLOUDFLARE_API_TOKEN: 'dev-cf-token',
     }), 'spam text');
     expect(result).toEqual({ action: 'reject', reason: 'flagged' });
     expect(captured!.url).toBe('https://api.cloudflare.com/client/v4/accounts/acct123/ai/run/%40cf%2Fcloudflare%2Fclef-flash');
