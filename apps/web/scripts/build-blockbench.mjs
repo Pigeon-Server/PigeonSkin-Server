@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { spawnNpm } from '../../../tools/npm.mjs';
+import { spawnNpm } from '../../../../tools/scripts/npm.mjs';
 
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const siteRoot = path.resolve(webRoot, '../..');
@@ -93,7 +93,7 @@ withSkinOnlyBuild(() => {
     writeFileSync(path.join(sourceDirectory, 'index.html'), html);
     for (const entry of ['skin-editor.css', 'editor-bridge.js', 'editor-language.js']) cpSync(path.join(webRoot, 'public', entry), path.join(sourceDirectory, entry));
     cpSync(fileURLToPath(import.meta.url), path.join(sourceDirectory, 'pigeon-build-blockbench.mjs'));
-    cpSync(path.join(siteRoot, 'tools/npm.mjs'), path.join(sourceDirectory, 'pigeon-npm.mjs'));
+    cpSync(path.join(siteRoot, 'tools/scripts/npm.mjs'), path.join(sourceDirectory, 'pigeon-npm.mjs'));
     writeFileSync(path.join(sourceDirectory, 'SOURCE_NOTICE.txt'), `Blockbench upstream: ${pinnedCommit}\nGPL-3.0-or-later. Copyright JannisX11 and contributors.\nPigeon Skin Server disables installed plugin autoload and adds its skin-editor stylesheet, language adapter and bridge.\nThe complete upstream source, modified files and package-lock.json are included.\nBuild the modified upstream with npm ci --ignore-scripts && npm run build-web.\nPigeon integration recipe: apps/web/scripts/build-blockbench.mjs in https://github.com/Pigeon-Server/PigeonSkin-Server\n`);
     run('tar', ['-czf', path.join(destination, 'source.tar.gz'), '-C', temporary, 'source'], source);
   } finally {

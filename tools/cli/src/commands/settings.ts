@@ -1,6 +1,6 @@
 // settings 命令组：list / get / set。
-// 键白名单来自 apps/api/src/env.ts 的 SETTING_DEFAULTS（复制为字面量列表，
-// 因为 CLI 不能 import apps/api 的 env.ts —— 那会拖入 Worker 类型依赖）。
+// 键白名单来自 apps/server/src/env.ts 的 SETTING_DEFAULTS（复制为字面量列表，
+// 因为 CLI 不能 import apps/server 的 env.ts —— 那会拖入 Worker 类型依赖）。
 // 值语义由 API 侧解释；CLI 只做字符串读写，不猜测布尔/数字类型。
 
 import type { TargetEnv } from '../lib/env.ts';
@@ -107,7 +107,7 @@ function settingsGet(env: TargetEnv, key: string): number {
 
 function settingsSet(env: TargetEnv, key: string, value: string): number {
   if (!key) throw new Error('需要 --key <键名>');
-  if (!SETTING_KEYS.includes(key)) throw new Error(`未知设置键: ${key}（可用键见 apps/api/src/env.ts SETTING_DEFAULTS）`);
+  if (!SETTING_KEYS.includes(key)) throw new Error(`未知设置键: ${key}（可用键见 apps/server/src/env.ts SETTING_DEFAULTS）`);
   const ts = Date.now();
   d1ExecuteFile(env, [
     `INSERT INTO settings (key, locale, value, updated_at) VALUES (${sqlText(key)}, '', ${sqlText(value)}, ${ts}) `

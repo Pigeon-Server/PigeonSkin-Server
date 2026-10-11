@@ -66,7 +66,7 @@ function visibilityScope(
 }
 
 /**
- * 搜索条件由 apps/api/src/search 把表达式编译成片段后传进来。
+ * 搜索条件由 apps/server/src/search 把表达式编译成片段后传进来。
  * 仓储不解释表达式语法，只把片段嵌进查询 —— 语法与表结构各归其位。
  */
 function searchFilter(search: SqlFragment | null | undefined): SQL {

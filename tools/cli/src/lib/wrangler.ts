@@ -1,7 +1,7 @@
 // wrangler 调用封装 —— 全部 D1/R2 读写经由 spawn npm exec wrangler 完成，
 // CLI 自身不持 CF 凭据（与 seed-local.mjs、docs/rewrite/09 的既定原则一致）。
 //
-//   D1 读：wrangler d1 execute <db> <scope> --config wrangler.jsonc --json --command "..."
+//   D1 读：wrangler d1 execute <db> <scope> --config ../../wrangler.jsonc --json --command "..."
 //   D1 写：临时 SQL 文件 + --file（绕开 shell 参数长度与引号限制）
 //   R2：  wrangler r2 object put/get <bucket>/<key> <scope>
 
@@ -41,7 +41,7 @@ function failWrangler(what: string, result: ReturnType<typeof spawnSync>): never
 export function d1Query(env: TargetEnv, sql: string): D1Row[] {
   const result = spawnNpm(
     [...wranglerArgs(env, 'd1', 'execute', env.d1Database),
-      '--config', 'wrangler.jsonc', '--json', '--command', sql],
+      '--config', '../../wrangler.jsonc', '--json', '--command', sql],
     { cwd: apiWorkingDir(), encoding: 'utf8', maxBuffer: MAX_BUFFER },
   );
   if (result.error) throw result.error;
@@ -67,7 +67,7 @@ export function d1ExecuteFile(env: TargetEnv, statements: readonly string[]): Ex
     writeFileSync(file, statements.join(';\n') + ';\n', { mode: 0o600 });
     const result = spawnNpm(
       [...wranglerArgs(env, 'd1', 'execute', env.d1Database),
-        '--config', 'wrangler.jsonc', '--json', '--file', file],
+        '--config', '../../wrangler.jsonc', '--json', '--file', file],
       { cwd: apiWorkingDir(), encoding: 'utf8', maxBuffer: MAX_BUFFER },
     );
     if (result.error) throw result.error;
@@ -89,7 +89,7 @@ export function d1ExecuteFile(env: TargetEnv, statements: readonly string[]): Ex
 export function r2Put(env: TargetEnv, key: string, filePath: string): void {
   const result = spawnNpm(
     [...wranglerArgs(env, 'r2', 'object', 'put', `${env.r2Bucket}/${key}`),
-      '--config', 'wrangler.jsonc', '--file', filePath],
+      '--config', '../../wrangler.jsonc', '--file', filePath],
     { cwd: apiWorkingDir(), encoding: 'utf8', maxBuffer: MAX_BUFFER },
   );
   if (result.error) throw result.error;
@@ -103,7 +103,7 @@ export async function r2PutAsync(env: TargetEnv, key: string, filePath: string):
   const attempt = async (): Promise<{ status: number | null; stdout: string; stderr: string }> =>
     spawnNpmCliAsync(
       ['exec', '--offline', '--', 'wrangler', 'r2', 'object', 'put', `${env.r2Bucket}/${key}`,
-        env.scopeFlag, '--config', 'wrangler.jsonc', '--file', filePath,
+        env.scopeFlag, '--config', '../../wrangler.jsonc', '--file', filePath,
         ...(env.persistTo ? ['--persist-to', env.persistTo] : [])],
       { cwd: apiWorkingDir(), encoding: 'utf8', maxBuffer: MAX_BUFFER },
     );
@@ -118,7 +118,7 @@ export async function r2PutAsync(env: TargetEnv, key: string, filePath: string):
 export function r2Get(env: TargetEnv, key: string, destPath: string): boolean {
   const result = spawnNpm(
     [...wranglerArgs(env, 'r2', 'object', 'get', `${env.r2Bucket}/${key}`),
-      '--config', 'wrangler.jsonc', '--file', destPath],
+      '--config', '../../wrangler.jsonc', '--file', destPath],
     { cwd: apiWorkingDir(), encoding: 'utf8', maxBuffer: MAX_BUFFER },
   );
   if (result.status === 0) return true;

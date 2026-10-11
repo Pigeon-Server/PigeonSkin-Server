@@ -1,6 +1,6 @@
 // @pigeon-skin/minecraft —— Minecraft 纹理与协议。
 //
-// 这个包被 apps/api 与 tools/migrate **同时**引用，这是有意的：
+// 这个包被 apps/server 与 tools/migrate **同时**引用，这是有意的：
 // 上传时与导入时的校验逻辑必须完全一致，否则会出现"迁移能过、上传不过"
 // 或反过来的诡异情况，而两边的实现一旦分开就必然漂移。
 export {

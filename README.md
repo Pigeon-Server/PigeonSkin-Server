@@ -104,7 +104,7 @@ npm run dev
 
 除基础环境变量外，站点名称、备案号、注册策略、默认角色等业务设置均可在搭建完成后直接在**管理后台**进行可视化配置。
 
-如需使用自动化发布脚本，可参考 `.env.example` 配置部署参数，并通过 `node --env-file=.env tools/cloudflare.mjs <preview|production> configure` 绑定资源。
+如需使用自动化发布脚本，可参考 `.env.example` 配置部署参数，并通过 `node --env-file=.env tools/scripts/cloudflare.mjs <preview|production> configure` 绑定资源。
 
 ## 部署上线
 

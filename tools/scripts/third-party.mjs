@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
+import { repoRoot, serverDir, wranglerConfig } from './paths.mjs';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const root = fileURLToPath(new URL('../../', import.meta.url));
+const root = repoRoot;
 const destination = path.join(root, 'apps/web/public/third-party');
 const lockfile = readFileSync(path.join(root, 'package-lock.json'));
 const lock = JSON.parse(lockfile.toString('utf8'));

@@ -7,7 +7,7 @@
   "scripts": {
     "predev": "node scripts/build-blockbench.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/build-blockbench.mjs && node ../../tools/release/third-party.mjs",
+    "prebuild": "node scripts/build-blockbench.mjs && node tools/scripts/third-party.mjs",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",

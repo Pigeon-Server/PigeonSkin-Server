@@ -81,7 +81,7 @@ settings:
   settings list [--json] [--api-key <密钥>]
   settings get --key <键名> [--api-key <密钥>]
   settings set --key <键名> --value <值> [--api-key <密钥>]
-      可用键见 apps/api/src/env.ts 的 SETTING_DEFAULTS。
+      可用键见 apps/server/src/env.ts 的 SETTING_DEFAULTS。
       --api-key 通道读写的是站点生效值（secret 键只显示占位符，
       superAdminOnly 键不可见不可写；CONFIGURATION 类键如 smtp/mail 的
       env 绑定值不经此通道反映）。wrangler 通道直写 settings 表。

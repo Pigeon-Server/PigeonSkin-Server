@@ -1,5 +1,5 @@
 // 环境解析：--env local（默认）/ --env production。
-// 与 seed-local.mjs 一致，wrangler 以 apps/api 为 cwd、--config wrangler.jsonc 运行，
+// 与 seed-local.mjs 一致，wrangler 以 apps/server 为 cwd、--config 指向根配置运行，
 // 数据库/bucket 名与 wrangler.jsonc 中的 d1_databases / r2_buckets 对应：
 //   local  → bs-dev / bs-dev-textures（--local）
 //   remote → bs-prod / bs-prod-textures（--remote）
@@ -49,9 +49,9 @@ export function resolveEnv(flags: ReadonlyMap<string, string | true>): TargetEnv
   return base;
 }
 
-/** wrangler 的运行目录：仓库内 apps/api（wrangler.jsonc 所在处） */
+/** wrangler 的运行目录：仓库内 apps/server（应用所在处，配置经 --config 指向仓库根） */
 export function apiWorkingDir(): string {
   // 本文件位于 tools/cli/src/lib/，上溯四级到仓库根
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
-  return join(root, 'apps', 'api');
+  return join(root, 'apps', 'server');
 }

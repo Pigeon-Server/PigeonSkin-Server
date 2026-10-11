@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { repoRoot, serverDir, wranglerConfig } from './paths.mjs';
 import { publicFiles, unsafePath, scanText, symlinkPath } from './public-files.mjs';
 
-const root = fileURLToPath(new URL('../../', import.meta.url));
+const root = repoRoot;
 if (process.argv.slice(2).some(argument => argument !== '--content-only')) throw new Error('仅支持 --content-only 参数');
 const files = publicFiles(root);
 const findings = [];

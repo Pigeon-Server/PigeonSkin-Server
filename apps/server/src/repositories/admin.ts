@@ -6,7 +6,7 @@ import type { SQL } from 'drizzle-orm';
 import { fragmentToSql, type SqlFragment } from '../search/compile.ts';
 
 /**
- * 搜索条件由 apps/api/src/search 编译成语义片段后传入，仓储只负责嵌入。
+ * 搜索条件由 apps/server/src/search 编译成语义片段后传入，仓储只负责嵌入。
  * 空片段（无搜索）返回恒真条件，便于 and() 组装。
  */
 function searchFilter(search: SqlFragment | null | undefined): SQL {

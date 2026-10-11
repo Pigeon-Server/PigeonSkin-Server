@@ -24,7 +24,7 @@ function migrationsDir(dialect: 'sqlite' | 'postgres' | 'mysql'): string {
   const relative = dialect === 'sqlite' ? 'packages/db/migrations' : dialect === 'postgres' ? 'packages/db/migrations-pg' : 'packages/db/migrations-mysql';
   const candidates = [
     process.env.PIGEON_ROOT ? join(process.env.PIGEON_ROOT, relative) : undefined,
-    // 源码路径：apps/api/src/node → 仓库根上三级
+    // 源码路径：apps/server/src/node → 仓库根上三级
     join(dirname(fileURLToPath(import.meta.url)), '../../../..', relative),
     join(process.cwd(), relative),
     join(process.cwd(), '../..', relative),
