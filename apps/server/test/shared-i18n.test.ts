@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { LOCALES, LOCALE_OPTIONS, UI_MESSAGES, normalizeLocale, isLocale, localeTag, translate, createT } from '../src/i18n.ts';
-import { getMessage, flattenMessages, parseTranslationOverrides, withTranslations } from '../src/messages.ts';
+import { LOCALES, LOCALE_OPTIONS, UI_MESSAGES, normalizeLocale, isLocale, localeTag, translate, createT } from '../src/core/i18n.ts';
+import { getMessage, flattenMessages, parseTranslationOverrides, withTranslations } from '@pigeon-skin/shared/messages';
 
 describe('shared locale messages', () => {
   it('supports the six locales and normalizes browser tags', () => {
