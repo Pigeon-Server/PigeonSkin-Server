@@ -15,19 +15,15 @@
     "./seo": "./src/seo.ts",
     "./live2d": "./src/live2d.ts",
     ".": "./src/index.ts",
-    "./schemas": "./src/schemas.ts",
     "./search": "./src/search/index.ts",
     "./skin-config": "./src/skin-config.ts",
-    "./default-skins": "./src/default-skins.ts",
-    "./official-textures": "./src/official-textures.ts",
-    "./i18n": "./src/i18n.ts"
+    "./default-skins": "./src/default-skins.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@intlify/core-base": "^11.4.12",
     "zod": "^3.24.1"
   },
   "devDependencies": {

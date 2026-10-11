@@ -4,7 +4,7 @@ import { getSetting, getSettingBool, getSettingInt } from './../core/settings-re
 import { needsAccountInitialization } from './../core/user.ts';
 import { hashPassword, hashToken } from '@pigeon-skin/auth';
 import { isValidPlayerName, type PlayerNameRule } from '@pigeon-skin/shared';
-import { emailSchema, nicknameSchema, passwordSchema, playerNameSchema } from '@pigeon-skin/shared/schemas';
+import { emailSchema, nicknameSchema, passwordSchema, playerNameSchema } from './../core/schemas.ts';
 import { z } from 'zod';
 import { noCaseEq } from '@pigeon-skin/db';
 

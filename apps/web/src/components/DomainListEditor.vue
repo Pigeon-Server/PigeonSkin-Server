@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { restrictedEmailListSchema } from '@pigeon-skin/shared/schemas';
+import { restrictedEmailListSchema } from '@/lib/restricted-email-schema';
 import { useI18n } from '@/stores/i18n';
 const value = defineModel<string | undefined>({ default: '[]' });
 defineProps<{ id?: string }>();

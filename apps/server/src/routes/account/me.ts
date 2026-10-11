@@ -4,10 +4,10 @@ import { getSetting, getSettingInt } from '../../core/settings-reader.ts';
 import { type AppEnv, type AuthedUser } from '../../core/user.ts';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { isLocale } from '@pigeon-skin/shared/i18n';
+import { isLocale } from './../../core/i18n.ts';
 import {
   changePasswordInputSchema, setAvatarInputSchema, updateProfileInputSchema,
-} from '@pigeon-skin/shared/schemas';
+} from './../../core/schemas.ts';
 
 import * as users from '../../services/users.ts';
 import * as notifications from '../../services/notifications.ts';

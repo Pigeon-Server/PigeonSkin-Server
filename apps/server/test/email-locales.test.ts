@@ -1,7 +1,7 @@
 import { invalidateSettingsCache } from './../src/core/settings-reader.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { env } from 'cloudflare:test';
-import { LOCALES, translate } from '@pigeon-skin/shared/i18n';
+import { LOCALES, translate } from './../src/core/i18n.ts';
 import { processBroadcastEmail, renderEmail, type EmailQueueMessage } from '../src/services/email.ts';
 import { sendEmail } from '../src/services/email.ts';
 

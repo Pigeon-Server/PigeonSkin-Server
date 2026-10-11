@@ -11,9 +11,9 @@ import { invalidateSettingsCache, readSettings } from './../core/settings-reader
 import { createDb, settings } from '@pigeon-skin/db';
 import { and, eq } from 'drizzle-orm';
 
-import { restrictedEmailListSchema } from '@pigeon-skin/shared/schemas';
+import { restrictedEmailListSchema } from './../core/schemas.ts';
 
-import { isLocale, normalizeLocale } from '@pigeon-skin/shared/i18n';
+import { isLocale, normalizeLocale } from './../core/i18n.ts';
 import { inspectSigningKey } from './ygg-key.ts';
 import { configurationValues, SECRET_PLACEHOLDER } from './configuration.ts';
 import { importPKCS8 } from 'jose';

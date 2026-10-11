@@ -1,6 +1,6 @@
 
 import { type Bindings } from './../core/env.ts';
-import { createT, type Locale } from '@pigeon-skin/shared/i18n';
+import { createT, type Locale } from './../core/i18n.ts';
 import type { TranslationOverride } from '@pigeon-skin/shared/messages';
 
 let cache = new WeakMap<Bindings['DB'], Map<Locale, { expiresAt: number; entries: TranslationOverride[] }>>();

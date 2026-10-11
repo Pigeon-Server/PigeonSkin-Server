@@ -2,11 +2,11 @@
 import { type Bindings } from './../core/env.ts';
 import { scalarMax } from '@pigeon-skin/db';
 import { textureObjectKey } from '@pigeon-skin/minecraft';
-import { OFFICIAL_CATALOG_REVISION as revision } from '@pigeon-skin/shared/official-textures';
+import { OFFICIAL_CATALOG_REVISION as revision } from './../core/official-textures.ts';
 
 async function initialize(env: Pick<Bindings, 'DB' | 'BUCKET'>) {
   const current = await env.DB.prepare('SELECT revision FROM official_catalog_state WHERE id = 1').first<{ revision: number }>();
-  const { officialTextures } = await import('@pigeon-skin/shared/official-textures');
+  const { officialTextures } = await import('../core/official-textures.ts');
   // 状态表声称已导入还不够：整库重导等运维操作可能只保留状态行而丢掉官方材质行，
   // 这里按 key 集合兜底，缺行时重建（INSERT OR IGNORE 只补缺失行，已有行不受影响）。
   if (current && current.revision >= revision) {

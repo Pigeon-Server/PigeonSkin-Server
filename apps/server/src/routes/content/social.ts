@@ -14,7 +14,7 @@ import {
   reportListQuerySchema,
   reportResolveInputSchema,
   reportSubmitInputSchema,
-} from '@pigeon-skin/shared/schemas';
+} from './../../core/schemas.ts';
 
 import * as social from '../../services/social.ts';
 import { compileSearchInput } from '../../search/index.ts';

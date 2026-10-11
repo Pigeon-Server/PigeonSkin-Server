@@ -8,7 +8,7 @@ import { currentAdmin, readJson } from '../../core/framework.ts';
 import { type AppEnv } from '../../core/user.ts';
 import { Hono } from 'hono';
 
-import { restrictedEmailListSchema } from '@pigeon-skin/shared/schemas';
+import { restrictedEmailListSchema } from './../../core/schemas.ts';
 import { writeSetting } from '../../services/settings.ts';
 import { readEmailDomainList } from '../../services/email-policy.ts';
 

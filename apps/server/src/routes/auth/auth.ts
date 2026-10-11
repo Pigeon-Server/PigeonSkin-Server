@@ -11,7 +11,7 @@ import { z } from 'zod';
 import {
   forgotPasswordInputSchema, loginInputSchema, registerInputSchema,
   resetPasswordInputSchema, verifyEmailInputSchema,
-} from '@pigeon-skin/shared/schemas';
+} from './../../core/schemas.ts';
 import { LIMITS, type PlayerNameRule } from '@pigeon-skin/shared';
 import { normalizeLocale } from '@pigeon-skin/shared/locales';
 import { hashPassword, hashToken } from '@pigeon-skin/auth';

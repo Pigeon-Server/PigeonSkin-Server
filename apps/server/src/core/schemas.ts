@@ -9,7 +9,7 @@
 import { z } from 'zod';
 import {
   LIMITS, PLAYER_NAME_RULES, TEXTURE_KINDS, TEXTURE_MODELS, TEXTURE_VISIBILITIES, ROLES,
-} from './index.ts';
+} from '@pigeon-skin/shared';
 
 // ── 基础字段 ─────────────────────────────────────────────────────────────────
 

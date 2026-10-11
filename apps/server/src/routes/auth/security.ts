@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
 
-import { emailSchema } from '@pigeon-skin/shared/schemas';
+import { emailSchema } from './../../core/schemas.ts';
 
 import * as security from '../../services/security.ts';
 import * as repo from '../../repositories/security.ts';

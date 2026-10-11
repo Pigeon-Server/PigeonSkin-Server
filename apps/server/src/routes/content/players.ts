@@ -9,7 +9,7 @@ import {
   playerCreateInputSchema,
   playerRenameInputSchema,
   playerTexturesInputSchema,
-} from '@pigeon-skin/shared/schemas';
+} from './../../core/schemas.ts';
 import type { PlayerNameRule } from '@pigeon-skin/shared';
 
 import * as players from '../../services/players.ts';

@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { env, fetchMock } from 'cloudflare:test';
 import { Buffer } from 'node:buffer';
 import { inflateRawSync } from 'node:zlib';
-import { officialTextures } from '@pigeon-skin/shared/official-textures';
+import { officialTextures } from './../src/core/official-textures.ts';
 import { encodePng, sha256Hex } from '@pigeon-skin/minecraft';
 
 import { runMigrations } from './setup.ts';

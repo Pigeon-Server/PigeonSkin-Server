@@ -1,7 +1,7 @@
 import { type Bindings } from './../src/core/env.ts';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
-import { officialTextures } from '@pigeon-skin/shared/official-textures';
+import { officialTextures } from './../src/core/official-textures.ts';
 import { textureObjectKey, validateTexture } from '@pigeon-skin/minecraft';
 import { createApp } from '../src/app.ts';
 

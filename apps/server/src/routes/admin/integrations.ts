@@ -12,7 +12,7 @@ import { configurationValues } from '../../services/configuration.ts';
 import { inspectSigningKey } from '../../services/ygg-key.ts';
 import { audit } from '../../services/audit.ts';
 import { officialResourceStatus, syncOfficialResources } from '../../services/official-updates.ts';
-import { normalizeLocale } from '@pigeon-skin/shared/i18n';
+import { normalizeLocale } from './../../core/i18n.ts';
 
 export const integrationRoutes = new Hono<AppEnv>();
 integrationRoutes.get('/admin/official-resources', async c => {

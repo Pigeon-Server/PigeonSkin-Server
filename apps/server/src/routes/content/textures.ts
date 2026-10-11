@@ -8,7 +8,7 @@ import { getSetting, getSettingBool, getSettingInt, readSettings } from '../../c
 import { type AppEnv } from '../../core/user.ts';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { textureListQuerySchema, texturePatchInputSchema } from '@pigeon-skin/shared/schemas';
+import { textureListQuerySchema, texturePatchInputSchema } from './../../core/schemas.ts';
 
 import * as textures from '../../services/textures.ts';
 import { compileSearchInput } from '../../search/index.ts';

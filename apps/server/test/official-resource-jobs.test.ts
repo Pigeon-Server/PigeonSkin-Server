@@ -2,7 +2,7 @@ import { type Bindings } from './../src/core/env.ts';
 import { beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { env, fetchMock, runInDurableObject, runDurableObjectAlarm } from 'cloudflare:test';
 import { encodePng, sha256Hex } from '@pigeon-skin/minecraft';
-import { officialTextures } from '@pigeon-skin/shared/official-textures';
+import { officialTextures } from './../src/core/official-textures.ts';
 import { Buffer } from 'node:buffer';
 
 import { OfficialResourceUpdater } from '../src/do/official-resources.ts';

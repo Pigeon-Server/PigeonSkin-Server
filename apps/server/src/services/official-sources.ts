@@ -1,6 +1,6 @@
 import { inflateRawSync } from 'node:zlib';
 import { sha256Hex, validateTexture } from '@pigeon-skin/minecraft';
-import type { OfficialTextureAsset } from '@pigeon-skin/shared/official-textures';
+import type { OfficialTextureAsset } from './../core/official-textures.ts';
 
 export type ResourceCandidate = Omit<OfficialTextureAsset, 'png' | 'width' | 'height' | 'sizeBytes' | 'hash'> & { hash?: string; bytes?: Uint8Array<ArrayBuffer> };
 const wiki = 'https://minecraft.wiki/api.php';

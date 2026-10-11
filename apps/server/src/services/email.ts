@@ -1,4 +1,4 @@
-import { createT, normalizeLocale } from '@pigeon-skin/shared/i18n';
+import { createT, normalizeLocale } from './../core/i18n.ts';
 import { noCaseEq } from '@pigeon-skin/db';
 import { translationOverrides } from './translations.ts';
 import type { TranslationOverride } from '@pigeon-skin/shared/messages';

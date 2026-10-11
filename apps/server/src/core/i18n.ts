@@ -1,14 +1,14 @@
 import { compile, createCoreContext, fallbackWithLocaleChain, registerMessageCompiler, resolveValue, translate as translateMessage } from '@intlify/core-base';
-import zh_CN from './locales/zh_CN.json' with { type: 'json' };
-import zh_TW from './locales/zh_TW.json' with { type: 'json' };
-import en from './locales/en.json' with { type: 'json' };
-import es_ES from './locales/es_ES.json' with { type: 'json' };
-import ru_RU from './locales/ru_RU.json' with { type: 'json' };
-import ja_JP from './locales/ja_JP.json' with { type: 'json' };
-import { FALLBACK_LOCALE, russianPluralRule, type Locale } from './locale.ts';
-import { withTranslations, type LocaleMessages, type TranslationOverride } from './messages.ts';
+import zh_CN from '@pigeon-skin/shared/locales/zh_CN.json' with { type: 'json' };
+import zh_TW from '@pigeon-skin/shared/locales/zh_TW.json' with { type: 'json' };
+import en from '@pigeon-skin/shared/locales/en.json' with { type: 'json' };
+import es_ES from '@pigeon-skin/shared/locales/es_ES.json' with { type: 'json' };
+import ru_RU from '@pigeon-skin/shared/locales/ru_RU.json' with { type: 'json' };
+import ja_JP from '@pigeon-skin/shared/locales/ja_JP.json' with { type: 'json' };
+import { FALLBACK_LOCALE, russianPluralRule, type Locale } from '@pigeon-skin/shared/locale';
+import { withTranslations, type LocaleMessages, type TranslationOverride } from '@pigeon-skin/shared/messages';
 
-export * from './locale.ts';
+export * from '@pigeon-skin/shared/locale';
 export const UI_MESSAGES: Record<Locale, LocaleMessages> = { zh_CN, zh_TW, en, es_ES, ru_RU, ja_JP };
 export type TranslateKey = string;
 registerMessageCompiler(compile);

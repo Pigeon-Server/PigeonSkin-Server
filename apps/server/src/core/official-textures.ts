@@ -1,4 +1,4 @@
-import type { TextureKind, TextureModel } from './index.ts';
+import type { TextureKind, TextureModel } from '@pigeon-skin/shared';
 
 export interface OfficialTextureAsset {
   readonly key: string;

@@ -15,7 +15,7 @@ import {
   adminSettingsInputSchema,
   emailSchema,
   texturePatchInputSchema,
-} from '@pigeon-skin/shared/schemas';
+} from './../../core/schemas.ts';
 
 import { canModifyUser, isValidPlayerName, type PlayerNameRule, type Role } from '@pigeon-skin/shared';
 import * as admin from '../../services/admin.ts';
@@ -24,7 +24,7 @@ import { audit } from '../../services/audit.ts';
 import * as settingsSvc from '../../services/settings.ts';
 import { configurationValues, SECRET_PLACEHOLDER } from '../../services/configuration.ts';
 import * as notifications from '../../services/notifications.ts';
-import { closetAddInputSchema } from '@pigeon-skin/shared/schemas';
+import { closetAddInputSchema } from './../../core/schemas.ts';
 
 import * as social from '../../services/social.ts';
 

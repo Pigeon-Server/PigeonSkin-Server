@@ -21,7 +21,7 @@ function files(dir: string): string[] {
 }
 describe('translations', () => {
   it('labels and filters every recorded audit action', () => {
-    const source = readFileSync(fileURLToPath(new URL('../../../api/src/services/audit.ts', import.meta.url)), 'utf8');
+    const source = readFileSync(fileURLToPath(new URL('../../../server/src/services/audit.ts', import.meta.url)), 'utf8');
     const view = readFileSync(fileURLToPath(new URL('../views/admin/AuditLog.vue', import.meta.url)), 'utf8');
     const actions = [...source.matchAll(/\| '(admin\.[\w.]+)'/g)].map(match => match[1]!);
     for (const action of actions) {
@@ -69,7 +69,7 @@ describe('translations', () => {
     for (const language of Object.values(dictionaries)) for (const key of keys) expect(language[key], key).toBeDefined();
   });
   it('translates every setting label, enum option, and route title', () => {
-    const registry = readFileSync(fileURLToPath(new URL('../../../api/src/services/settings.ts', import.meta.url)), 'utf8');
+    const registry = readFileSync(fileURLToPath(new URL('../../../server/src/services/settings.ts', import.meta.url)), 'utf8');
     const settingKeys = [...registry.matchAll(/\n {2}([\w]+): \{ kind:/g)].map(match => `admin.setting.${match[1]}`);
     const enumOptions = [...registry.matchAll(/kind: 'enum',\s*values:\s*\[([^\]]+)\]/g)]
       .flatMap(match => match[1]!.split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '')))

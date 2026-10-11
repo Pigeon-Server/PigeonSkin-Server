@@ -10,7 +10,7 @@ import { Hono } from 'hono';
 import {
   adminBroadcastInputSchema, adminCreateUserInputSchema, adminListQuerySchema,
   adminPatchUserInputSchema, adminSettingsInputSchema, texturePatchInputSchema,
-} from '@pigeon-skin/shared/schemas';
+} from './../../core/schemas.ts';
 import { requirePigeonKey } from '../../services/pigeon-api.ts';
 import * as admin from '../../services/admin.ts';
 import * as settingsSvc from '../../services/settings.ts';

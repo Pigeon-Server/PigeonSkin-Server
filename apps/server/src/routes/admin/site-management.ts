@@ -8,8 +8,8 @@ import { dayOfMs } from '@pigeon-skin/db';
 
 import { audit } from '../../services/audit.ts';
 
-import { adminCreateUserInputSchema } from '@pigeon-skin/shared/schemas';
-import { LOCALES, UI_MESSAGES, validateMessage } from '@pigeon-skin/shared/i18n';
+import { adminCreateUserInputSchema } from './../../core/schemas.ts';
+import { LOCALES, UI_MESSAGES, validateMessage } from './../../core/i18n.ts';
 import { getMessage, messageParameters, normalizeTranslation } from '@pigeon-skin/shared/messages';
 import { invalidateTranslationCache } from '../../services/translations.ts';
 import { readAll } from '../../services/settings.ts';
