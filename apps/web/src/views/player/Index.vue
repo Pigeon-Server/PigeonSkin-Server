@@ -653,9 +653,11 @@ onMounted(() => {
       </section>
     </div>
 
-    <!-- 右侧：材质装扮选择区（衣柜收藏 + 官方材质） -->
+    <!-- 右侧：材质装扮选择区（衣柜收藏 + 官方材质）。
+         列表是定高滚动区，面板高度由内容决定；h-full 会被 grid 拉到与左列等高，
+         在列表下方留出大块无内容空白 -->
     <div class="lg:col-span-7">
-      <section class="panel !p-4 flex flex-col h-full">
+      <section class="panel !p-4 flex flex-col">
         <!-- 材质类型切换与快捷清除 -->
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
           <div class="filter-tabs">
@@ -774,13 +776,10 @@ onMounted(() => {
                 />
               </div>
 
-              <!-- 材质名称与模型说明 -->
+              <!-- 材质名称（模型已在顶部标签行展示，不再重复） -->
               <div class="p-2 w-full border-t border-line/60 bg-surface">
                 <span class="block truncate text-xs font-semibold text-center" :title="t.name">
                   {{ t.name }}
-                </span>
-                <span v-if="t.kind === 'skin' && t.model" class="block truncate text-[11px] text-muted text-center mt-0.5">
-                  {{ t.model === 'slim' ? i18n.t('skinlib.filter.alex') : i18n.t('skinlib.filter.steve') }}
                 </span>
               </div>
             </button>
