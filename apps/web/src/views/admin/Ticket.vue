@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { adminApi, type TicketDetail, type TicketStatus } from '@/api';
+import { adminApi, requestBlob, type TicketDetail, type TicketStatus } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { apiErrorMessage } from '@/lib/api-error';
@@ -90,16 +90,31 @@ const timelineItems = computed(() => {
   return [...msgs, ...evts].sort((a, b) => a.time - b.time);
 });
 
+const attachmentUrls = ref<Record<number, string>>({});
+
 async function load() {
   loading.value = true;
   error.value = '';
   try {
     data.value = await adminApi.ticket(Number(route.params.id));
     status.value = data.value.ticket.status;
+    void loadAttachments();
   } catch (e) {
     error.value = apiErrorMessage(e);
   } finally {
     loading.value = false;
+  }
+}
+
+// 附件内容需要 Bearer 认证（img/a 直链带不上头）：逐个取 blob object URL
+async function loadAttachments() {
+  const ticketId = data.value?.ticket.id;
+  for (const file of data.value?.attachments ?? []) {
+    if (attachmentUrls.value[file.id]) continue;
+    try {
+      const blob = await requestBlob(`/api/v1/tickets/${ticketId}/attachments/${file.id}`);
+      attachmentUrls.value[file.id] = URL.createObjectURL(blob);
+    } catch { /* 单个附件失败不阻塞其余附件，位置上显示为加载失败占位 */ }
   }
 }
 
@@ -191,6 +206,7 @@ onMounted(load);
 
 onBeforeUnmount(() => {
   for (const url of filePreviewUrls.value) if (url) URL.revokeObjectURL(url);
+  for (const url of Object.values(attachmentUrls.value)) URL.revokeObjectURL(url);
 });
 </script>
 
@@ -390,13 +406,15 @@ onBeforeUnmount(() => {
                   <a
                     v-for="file in data.attachments.filter(a => a.messageId === item.data.id && isImage(a.mimeType))"
                     :key="file.id"
-                    :href="adminApi.ticketAttachmentUrl(data.ticket.id, file.id)"
+                    :href="attachmentUrls[file.id]"
+                    :download="file.fileName"
                     target="_blank"
                     class="block rounded-lg overflow-hidden border border-line bg-surface-2/60 hover:border-brand-400"
                     :title="file.fileName"
                   >
                     <img
-                      :src="adminApi.ticketAttachmentUrl(data.ticket.id, file.id)"
+                      v-if="attachmentUrls[file.id]"
+                      :src="attachmentUrls[file.id]"
                       :alt="file.fileName"
                       class="max-h-48 max-w-[240px] w-auto object-contain"
                       loading="lazy"
@@ -417,7 +435,8 @@ onBeforeUnmount(() => {
                     <span class="text-muted font-mono text-[11px] shrink-0">({{ formatBytes(file.sizeBytes) }})</span>
                   </div>
                   <a
-                    :href="adminApi.ticketAttachmentUrl(data.ticket.id, file.id)"
+                    v-if="attachmentUrls[file.id]"
+                    :href="attachmentUrls[file.id]"
                     target="_blank"
                     class="btn btn-sm btn-icon text-muted hover:text-brand-600 shrink-0"
                     :download="file.fileName"

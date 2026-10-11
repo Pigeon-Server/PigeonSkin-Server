@@ -40,7 +40,9 @@ function failRendering(error: unknown) {
   if (failed.value) return;
   failed.value = true;
   loading.value = false;
-  app?.stop();
+  // destroy 会把 ticker 置 null：stop/start 前必须确认应用还活着，
+  // 否则销毁竞态下会抛 "Cannot read properties of null (reading 'stop')"
+  if (app?.ticker) app.stop();
   stopVoice();
   console.error('Live2D rendering failed', props.model.url, error);
   emit('error', error);
@@ -62,7 +64,14 @@ function validateTextures(model: Live2DModel, instance: Application, uploaded = 
 
 function renderFrame() {
   if (!app || !currentModel || failed.value) return;
-  try { validateTextures(currentModel, app); app.render(); validateTextures(currentModel, app, true); }
+  try {
+    // Cubism 核心要求 draw 前必须调过 update（拖动/缩放/截图走这条即时渲染路径，
+    // 不经过 ticker 回调），否则每次渲染都刷 "call update() before draw()"
+    currentModel.update(0);
+    validateTextures(currentModel, app);
+    app.render();
+    validateTextures(currentModel, app, true);
+  }
   catch (error) { failRendering(error); }
 }
 
@@ -79,8 +88,11 @@ function disposeModel(model: Live2DModel | null) {
 
 function visibility() {
   if (document.hidden) stopVoice();
-  if (document.hidden || reducedMotion.matches) app?.stop();
-  else app?.start();
+  // app 被 destroy 后 ticker 为 null（悬挂引用），stop/start 前必须确认存活
+  if (app?.ticker) {
+    if (document.hidden || reducedMotion.matches) app.stop();
+    else app.start();
+  }
   renderFrame();
 }
 
@@ -180,7 +192,8 @@ async function build() {
   stopVoice();
   const previousApp = app;
   app = null;
-  previousApp?.destroy(false, { children: true, texture: true, baseTexture: true });
+  // destroy 会清掉 ticker 与插件闭包：已被竞态路径销毁过的应用不能再 destroy
+  if (previousApp?.ticker) previousApp.destroy(false, { children: true, texture: true, baseTexture: true });
   releaseCurrentTextures?.();
   releaseCurrentTextures = null;
   app = null;
@@ -227,7 +240,14 @@ async function build() {
       if (!blob.size) throw new Error(`Live2D texture is empty: ${url}`);
       return blob;
     }));
-    if (id !== generation) { if (instance.renderer) instance.destroy(false); return; }
+    if (id !== generation) {
+      // 竞态退出必须连同 app 引用一起清理：destroy 后 ticker/插件被拆除，
+      // 悬挂的引用会让后续 visibility() 调 start/stop、unmount 时二次 destroy
+      // （pixi 插件二次 teardown 抛 cancelResize is not a function）
+      instance.destroy(false);
+      if (app === instance) app = null;
+      return;
+    }
     const textureUrls = textureBlobs.map(blob => URL.createObjectURL(blob));
     releaseTextures = () => {
       for (const url of textureUrls) {
@@ -249,7 +269,8 @@ async function build() {
     const loadedModel: Live2DModel = pending;
     if (id !== generation) {
       disposeModel(loadedModel);
-      if (instance.renderer) instance.destroy(false);
+      instance.destroy(false);
+      if (app === instance) app = null;
       releaseTextures();
       return;
     }
@@ -278,7 +299,11 @@ async function build() {
     emit('ready', { hasVoice: hasVoice.value });
   } catch (error) {
     disposeModel(pending);
-    if (instance?.renderer) instance.destroy(false);
+    if (instance) {
+      instance.destroy(false);
+      // 无论退出原因，销毁后都不能留下指向已拆除实例的 app 引用
+      if (app === instance) app = null;
+    }
     releaseTextures?.();
     controller?.abort();
     // 路由切换/重建触发的取消是预期行为（requestController 或 motion 队列 abort），
@@ -418,7 +443,8 @@ onBeforeUnmount(() => {
   retiringApp?.stop();
   function release() {
     if (retiringCanvas?.isConnected) { window.setTimeout(release, 50); return; }
-    retiringApp?.destroy(false, { children: true, texture: true, baseTexture: true });
+    // in-flight build 的竞态退出可能已销毁同一实例（ticker 已清空），跳过二次 destroy
+    if (retiringApp?.ticker) retiringApp.destroy(false, { children: true, texture: true, baseTexture: true });
     releaseTextures?.();
   }
   release();

@@ -21,7 +21,9 @@ export async function renderPreviewFromUrl(
   const c = document.createElement('canvas');
   c.width = img.naturalWidth;
   c.height = img.naturalHeight;
-  c.getContext('2d')!.drawImage(img, 0, 0);
+  // 该画布随后会被 getImageData 读像素（canvasToImage）：context 必须在
+  // 首次获取时就带 willReadFrequently，后续再带属性获取同一 context 不生效
+  c.getContext('2d', { willReadFrequently: true })!.drawImage(img, 0, 0);
   return renderSkinDual(c, isAlex);
 }
 

@@ -24,9 +24,15 @@ function embedFrag(frag: string, column: SQL, value: unknown) {
   return sql`${sql.raw(lhs)}${column}${sql.raw(rhs.slice(0, q))}${value}${sql.raw(rhs.slice(q + 1))}`;
 }
 import { AppError, currentUser, toErrorResponse } from '../framework.ts';
-import { getSettingInt, type AppEnv } from '../lib.ts';
+import { actorFromWebToken, getSettingInt, loadAuthedUser, type AppEnv } from '../lib.ts';
+import { hashToken } from '@pigeon-skin/auth';
 
 type Ctx = Context<AppEnv>;
+
+/** 正版验证回调地址：MOJANG_REDIRECT_URI 设置/部署 env 覆盖优先，留空回落 APP_URL 拼接。CONFIGURATION 已在请求入口把 DB 设置解析进绑定。 */
+function mojangCallbackUri(c: Ctx): string {
+  return c.env.MOJANG_REDIRECT_URI || `${c.env.APP_URL}/mojang/callback`;
+}
 
 function creds(c: Ctx): { id: string; secret: string } | null {
   const independent = !!(c.env.MOJANG_CLIENT_ID || c.env.MOJANG_CLIENT_SECRET);
@@ -43,7 +49,7 @@ interface McProfile {
 /** Microsoft → Xbox Live → XSTS → Minecraft 登录链（照搬原 MicrosoftProvider.php） */
 async function minecraftProfileFromCode(c: Ctx, code: string): Promise<McProfile> {
   const cred = creds(c)!;
-  const redirectUri = `${c.env.APP_URL}/mojang/callback`;
+  const redirectUri = mojangCallbackUri(c);
 
   // 1. Microsoft token
   const tokenRes = await fetch('https://login.live.com/oauth20_token.srf', {
@@ -57,9 +63,9 @@ async function minecraftProfileFromCode(c: Ctx, code: string): Promise<McProfile
       grant_type: 'authorization_code',
     }),
   });
-  if (!tokenRes.ok) throw new AppError('auth.oauth_failed', 502);
+  if (!tokenRes.ok) throw new AppError('auth.mojang_microsoft_unavailable', 502);
   const { access_token: msToken } = await tokenRes.json<{ access_token?: string }>();
-  if (!msToken) throw new AppError('auth.oauth_failed', 502);
+  if (!msToken) throw new AppError('auth.mojang_microsoft_unavailable', 502);
 
   // 2. Xbox Live (XBL)
   const xblRes = await fetch('https://user.auth.xboxlive.com/user/authenticate', {
@@ -71,11 +77,11 @@ async function minecraftProfileFromCode(c: Ctx, code: string): Promise<McProfile
       TokenType: 'JWT',
     }),
   });
-  if (!xblRes.ok) throw new AppError('auth.oauth_failed', 502);
+  if (!xblRes.ok) throw new AppError('auth.mojang_xbox_unavailable', 502);
   const xbl = await xblRes.json<{ Token?: string; DisplayClaims?: { xui?: Array<{ uhs?: string }> } }>();
   const xblToken = xbl.Token;
   const uhs = xbl.DisplayClaims?.xui?.[0]?.uhs;
-  if (!xblToken || !uhs) throw new AppError('auth.oauth_failed', 502);
+  if (!xblToken || !uhs) throw new AppError('auth.mojang_xbox_unavailable', 502);
 
   // 3. XSTS
   const xstsRes = await fetch('https://xsts.auth.xboxlive.com/xsts/authorize', {
@@ -91,10 +97,10 @@ async function minecraftProfileFromCode(c: Ctx, code: string): Promise<McProfile
     // XErr 2148916233 等表示无 Minecraft 授权/区域限制
     const body = await xstsRes.text();
     console.error('XSTS 失败', xstsRes.status, body.slice(0, 200));
-    throw new AppError('auth.oauth_failed', 502);
+    throw new AppError('auth.mojang_xsts_denied', 403);
   }
   const xsts = await xstsRes.json<{ Token?: string }>();
-  if (!xsts.Token) throw new AppError('auth.oauth_failed', 502);
+  if (!xsts.Token) throw new AppError('auth.mojang_xsts_denied', 502);
 
   // 4. Minecraft 登录
   const mcRes = await fetch('https://api.minecraftservices.com/authentication/login_with_xbox', {
@@ -102,9 +108,9 @@ async function minecraftProfileFromCode(c: Ctx, code: string): Promise<McProfile
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ identityToken: `XBL3.0 x=${uhs};${xsts.Token}` }),
   });
-  if (!mcRes.ok) throw new AppError('auth.oauth_failed', 502);
+  if (!mcRes.ok) throw new AppError('auth.mojang_profile_unavailable', 502);
   const mc = await mcRes.json<{ access_token?: string }>();
-  if (!mc.access_token) throw new AppError('auth.oauth_failed', 502);
+  if (!mc.access_token) throw new AppError('auth.mojang_profile_unavailable', 502);
 
   // 5. MC profile（未购买/无 profile 时 404 → 按"未拥有"处理）
   const profileRes = await fetch('https://api.minecraftservices.com/minecraft/profile', {
@@ -123,7 +129,12 @@ export function registerMojangRoutes(app: Hono<AppEnv>): void {
     : toErrorResponse(error, c));
   // 发起验证
   mojang.get('/verify', async (c) => {
-    const user = currentUser(c);
+    // 整页导航不带 Authorization 头；发起链接以 web_token 携带当前身份（与社交登录同机制）
+    const resolved = c.get('user')
+      ? { user: c.get('user')!, sessionId: c.get('sessionId') ?? '' }
+      : await actorFromWebToken(c.env, c.req.query('web_token') ?? undefined);
+    if (!resolved) throw new AppError('common.unauthorized', 401);
+    const user = resolved.user;
     const cred = creds(c);
     if (!cred) throw new AppError('auth.oauth_unavailable', 404);
 
@@ -133,9 +144,13 @@ export function registerMojangRoutes(app: Hono<AppEnv>): void {
 
     const state = crypto.randomUUID();
     c.header('set-cookie', `mojang_state=${state}; Path=/; Max-Age=600; HttpOnly; SameSite=Lax`);
+    // 发起者身份绑进服务端 state 行：回调是整页导航，凭 state 行恢复身份
+    // （消费即删；Cookie 比对继续承担浏览器绑定）
+    await c.env.DB.prepare("INSERT INTO oauth_login_states (id, provider, browser_hash, user_id, session_id, verifier, destination, expires_at) VALUES (?, 'mojang', '', ?, ?, '', '/user', ?)")
+      .bind(await hashToken(state), user.id, resolved.sessionId, Date.now() + 600000).run();
     const params = new URLSearchParams({
       client_id: cred.id,
-      redirect_uri: `${c.env.APP_URL}/mojang/callback`,
+      redirect_uri: mojangCallbackUri(c),
       response_type: 'code',
       scope: 'XboxLive.signin offline_access',
       state,
@@ -145,7 +160,6 @@ export function registerMojangRoutes(app: Hono<AppEnv>): void {
 
   // 回调：验证链 + 绑定
   mojang.get('/callback', async (c) => {
-    const user = currentUser(c);
     if (!creds(c)) throw new AppError('auth.oauth_unavailable', 404);
 
     const url = new URL(c.req.url);
@@ -153,6 +167,12 @@ export function registerMojangRoutes(app: Hono<AppEnv>): void {
     const state = url.searchParams.get('state');
     const cookieState = c.req.header('cookie')?.match(/mojang_state=([^;]+)/)?.[1];
     if (!code || !state || state !== cookieState) throw new AppError('auth.oauth_failed', 400);
+    const stateRow = await c.env.DB.prepare("DELETE FROM oauth_login_states WHERE id = ? AND provider = 'mojang' AND expires_at > ? RETURNING session_id")
+      .bind(await hashToken(state), Date.now()).first<{ session_id: string | null }>();
+    if (!stateRow) throw new AppError('auth.oauth_failed', 400);
+    const record = stateRow.session_id ? await loadAuthedUser(c.env, stateRow.session_id) : null;
+    if (!record) throw new AppError('common.unauthorized', 401);
+    const user = record.user;
 
     const profile = await minecraftProfileFromCode(c, code);
     const db = createDb(c.env.DB);
@@ -244,7 +264,7 @@ export function registerMojangRoutes(app: Hono<AppEnv>): void {
         .where(eq(uuidMap.uuid, v.uuid)).limit(1);
       current = row?.name;
     }
-    if (!current) throw new AppError('auth.oauth_failed', 502);
+    if (!current) throw new AppError('auth.mojang_profile_unavailable', 502);
 
     const db = createDb(c.env.DB);
     const [existing] = await db.select({ name: uuidMap.name })
