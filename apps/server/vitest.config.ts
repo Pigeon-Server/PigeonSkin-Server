@@ -42,8 +42,10 @@ export default defineWorkersConfig({
     exclude: ['**/node_modules/**', 'test/node/**'],
     setupFiles: ['./test/setup.ts'],
     // CI runner 上 workerd 池的集成测试偶发超过默认 5s（上传/手册/多语言
-    // 等多请求用例），余量放宽到 30s，本地不受影响。
+    // 等多请求用例），余量放宽到 30s，本地不受影响。beforeAll（runMigrations
+    // 等）在慢 runner 上也会超默认 10s，同步放宽。
     testTimeout: 30_000,
+    hookTimeout: 60_000,
     poolOptions: {
       workers: {
         // 测试只用本地模拟器（miniflare bindings 覆盖 + 本地 D1），
