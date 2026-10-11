@@ -179,7 +179,10 @@ describe('User Ticket Detail View (Ticket.vue)', () => {
     expect(wrapper.text()).toContain('处理中');
     expect(wrapper.text()).toContain('进入游戏后皮肤显示为默认 Steve');
     expect(wrapper.text()).toContain('请提供一下游戏客户端日志');
-    expect(wrapper.text()).toContain('screenshot.png');
+    // 图片附件渲染为缩略图 <img>，文件名进 alt/title 不再出现在文本里
+    const thumbnail = wrapper.find('img[alt="screenshot.png"]');
+    expect(thumbnail.exists()).toBe(true);
+    expect(thumbnail.attributes('src')).toContain('/tickets/10/attachments/501');
     expect(wrapper.text()).toContain('提交了工单');
     expect(wrapper.text()).toContain('工单状态变更为 处理中');
   });

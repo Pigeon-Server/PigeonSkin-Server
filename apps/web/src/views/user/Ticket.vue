@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ticketApi, type TicketDetail } from '@/api';
 import { useI18n } from '@/stores/i18n';
@@ -19,6 +19,18 @@ const body = ref('');
 const files = ref<File[]>([]);
 const busy = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
+
+// 与后端 services/tickets.ts 的 MAX_FILE_BYTES 保持一致；前端拦截避免整包上传后才被 422
+const TICKET_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const TICKET_MAX_FILES = 5;
+
+// 图片附件的本地预览 URL：files 变化时重建并释放旧的，避免 objectURL 泄漏
+const filePreviewUrls = ref<Array<string | null>>([]);
+
+watch(files, value => {
+  for (const url of filePreviewUrls.value) if (url) URL.revokeObjectURL(url);
+  filePreviewUrls.value = value.map(file => isImage(file.type) ? URL.createObjectURL(file) : null);
+}, { deep: true });
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -97,14 +109,29 @@ async function load() {
 function onFileChange(e: Event) {
   const target = e.target as HTMLInputElement;
   if (!target.files) return;
-  const newFiles = Array.from(target.files);
+  addFiles(Array.from(target.files));
+  if (fileInput.value) fileInput.value.value = '';
+}
+
+function addFiles(newFiles: File[]) {
+  if (newFiles.some(file => file.size > TICKET_FILE_MAX_BYTES)) {
+    error.value = i18n.t('ticket.file_too_large');
+    return false;
+  }
   const combined = [...files.value, ...newFiles];
-  if (combined.length > 5) {
-    error.value = '最多上传 5 个附件';
-    return;
+  if (combined.length > TICKET_MAX_FILES) {
+    error.value = i18n.t('ticket.too_many_files', { n: TICKET_MAX_FILES });
+    return false;
   }
   files.value = combined;
-  if (fileInput.value) fileInput.value.value = '';
+  return true;
+}
+
+/** 截图/复制图片后直接在输入框 Ctrl+V 上传（clipboardData 里的文件走同一套校验） */
+function onPaste(event: ClipboardEvent) {
+  const pasted = Array.from(event.clipboardData?.files ?? []);
+  if (!pasted.length) return;
+  if (addFiles(pasted)) event.preventDefault();
 }
 
 function removeFile(index: number) {
@@ -129,6 +156,10 @@ async function reply() {
 }
 
 onMounted(load);
+
+onBeforeUnmount(() => {
+  for (const url of filePreviewUrls.value) if (url) URL.revokeObjectURL(url);
+});
 </script>
 
 <template>
@@ -168,7 +199,7 @@ onMounted(load);
     </div>
   </AppAlert>
 
-  <AppSkeleton v-if="loading && !data" :count="4" />
+  <AppSkeleton v-if="loading && !data" variant="detail" :count="4" />
 
   <div v-if="data" class="space-y-6">
     <!-- 工单标题与基础概要卡片 -->
@@ -262,19 +293,39 @@ onMounted(load);
                 {{ item.data.body }}
               </p>
 
-              <!-- 该条消息下的附件列表 -->
+              <!-- 该条消息下的附件列表：图片渲染缩略图（点击原图），其余保持文件条 -->
               <div
                 v-if="data.attachments.filter(a => a.messageId === item.data.id).length"
                 class="mt-3 pt-2.5 border-t border-line/60 space-y-2"
               >
                 <div
-                  v-for="file in data.attachments.filter(a => a.messageId === item.data.id)"
+                  v-if="data.attachments.filter(a => a.messageId === item.data.id && isImage(a.mimeType)).length"
+                  class="flex flex-wrap gap-2"
+                >
+                  <a
+                    v-for="file in data.attachments.filter(a => a.messageId === item.data.id && isImage(a.mimeType))"
+                    :key="file.id"
+                    :href="ticketApi.attachmentUrl(data.ticket.id, file.id)"
+                    target="_blank"
+                    class="block rounded-lg overflow-hidden border border-line bg-surface-2/60 hover:border-brand-400"
+                    :title="file.fileName"
+                  >
+                    <img
+                      :src="ticketApi.attachmentUrl(data.ticket.id, file.id)"
+                      :alt="file.fileName"
+                      class="max-h-48 max-w-[240px] w-auto object-contain"
+                      loading="lazy"
+                    />
+                  </a>
+                </div>
+                <div
+                  v-for="file in data.attachments.filter(a => a.messageId === item.data.id && !isImage(a.mimeType))"
                   :key="file.id"
                   class="flex items-center justify-between gap-3 rounded-lg bg-surface-2/80 p-2 text-xs border border-line"
                 >
                   <div class="flex items-center gap-2 min-w-0">
                     <AppIcon
-                      :name="isImage(file.mimeType) ? 'image' : 'description'"
+                      name="description"
                       class="text-brand-600 !text-base shrink-0"
                     />
                     <span class="font-medium truncate">{{ file.fileName }}</span>
@@ -308,7 +359,7 @@ onMounted(load);
         </span>
       </header>
 
-      <div class="p-4 sm:p-5 space-y-3">
+      <div class="p-4 sm:p-5 space-y-3" @paste="onPaste">
         <AppInput
           v-model="body"
           multiline
@@ -348,7 +399,13 @@ onMounted(load);
               :key="idx"
               class="flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-xs border border-line"
             >
-              <AppIcon name="attach_file" class="!text-xs text-muted" />
+              <img
+                v-if="filePreviewUrls[idx]"
+                :src="filePreviewUrls[idx]!"
+                :alt="file.name"
+                class="h-5 w-5 rounded object-cover"
+              />
+              <AppIcon v-else name="attach_file" class="!text-xs text-muted" />
               <span class="max-w-[140px] truncate font-medium">{{ file.name }}</span>
               <span class="text-muted text-[10px]">({{ formatBytes(file.size) }})</span>
               <button

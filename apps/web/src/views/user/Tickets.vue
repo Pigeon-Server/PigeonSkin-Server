@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ticketApi, type TicketCategory, type TicketSummary } from '@/api';
 import { useI18n } from '@/stores/i18n';
@@ -94,21 +94,44 @@ async function load() {
 const TICKET_FILE_MAX_BYTES = 5 * 1024 * 1024;
 const TICKET_MAX_FILES = 5;
 
-function onFileChange(e: Event) {
-  const target = e.target as HTMLInputElement;
-  if (!target.files) return;
-  const newFiles = Array.from(target.files);
+// 图片附件的本地预览 URL：files 变化时重建并释放旧的，避免 objectURL 泄漏
+const filePreviewUrls = ref<Array<string | null>>([]);
+
+watch(files, value => {
+  for (const url of filePreviewUrls.value) if (url) URL.revokeObjectURL(url);
+  filePreviewUrls.value = value.map(file => isImage(file.type) ? URL.createObjectURL(file) : null);
+}, { deep: true });
+
+function isImage(mimeType: string) {
+  return mimeType.startsWith('image/');
+}
+
+function addFiles(newFiles: File[]) {
   if (newFiles.some(file => file.size > TICKET_FILE_MAX_BYTES)) {
     error.value = i18n.t('ticket.file_too_large');
-    return;
+    return false;
   }
   const combined = [...files.value, ...newFiles];
   if (combined.length > TICKET_MAX_FILES) {
     error.value = i18n.t('ticket.too_many_files', { n: TICKET_MAX_FILES });
-    return;
+    return false;
   }
   files.value = combined;
+  return true;
+}
+
+function onFileChange(e: Event) {
+  const target = e.target as HTMLInputElement;
+  if (!target.files) return;
+  addFiles(Array.from(target.files));
   if (fileInput.value) fileInput.value.value = '';
+}
+
+/** 截图/复制图片后直接在输入框 Ctrl+V 上传（clipboardData 里的文件走同一套校验） */
+function onPaste(event: ClipboardEvent) {
+  const pasted = Array.from(event.clipboardData?.files ?? []);
+  if (!pasted.length) return;
+  if (addFiles(pasted)) event.preventDefault();
 }
 
 function removeFile(index: number) {
@@ -139,6 +162,10 @@ async function create() {
 }
 
 onMounted(load);
+
+onBeforeUnmount(() => {
+  for (const url of filePreviewUrls.value) if (url) URL.revokeObjectURL(url);
+});
 </script>
 
 <template>
@@ -273,6 +300,7 @@ onMounted(load);
             class="w-full min-h-36"
             :placeholder="i18n.t('ticket.description')"
             maxlength="20000"
+            @paste="onPaste"
           />
         </div>
 
@@ -308,7 +336,7 @@ onMounted(load);
             />
           </div>
 
-          <!-- 已选择文件列表 -->
+          <!-- 已选择文件列表：图片附件带缩略图预览 -->
           <div v-if="files.length" class="space-y-1.5 pt-1">
             <div
               v-for="(file, idx) in files"
@@ -316,7 +344,13 @@ onMounted(load);
               class="flex items-center justify-between gap-2 rounded bg-surface-2 px-2.5 py-1.5 text-xs border border-line"
             >
               <div class="flex items-center gap-1.5 min-w-0">
-                <AppIcon name="attach_file" class="text-muted !text-sm shrink-0" />
+                <img
+                  v-if="filePreviewUrls[idx]"
+                  :src="filePreviewUrls[idx]!"
+                  :alt="file.name"
+                  class="h-5 w-5 rounded object-cover shrink-0"
+                />
+                <AppIcon v-else name="attach_file" class="text-muted !text-sm shrink-0" />
                 <span class="truncate font-medium">{{ file.name }}</span>
                 <span class="text-muted text-[11px] shrink-0 font-mono">({{ formatBytes(file.size) }})</span>
               </div>
