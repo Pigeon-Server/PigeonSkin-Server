@@ -1055,7 +1055,11 @@
       "ai_cloudflare_api_token": "Token de API de Cloudflare",
       "ai_discriminative_threshold": "Umbral de infracción del modelo discriminativo",
       "notification_ai_translation": "Traducción IA de anuncios del sitio",
-      "ai_systemone_base_url": "URL base de la API de System One"
+      "ai_systemone_base_url": "URL base de la API de System One",
+      "ai_comments_moderation_reasoning": "Razonamiento de moderación de comentarios (vacío = seguir lo global)",
+      "ai_texture_moderate_reasoning": "Razonamiento de moderación de texturas (vacío = seguir lo global)",
+      "ai_texture_translate_reasoning": "Razonamiento de traducción (vacío = seguir lo global)",
+      "ai_notification_translate_reasoning": "Razonamiento de traducción de anuncios (vacío = seguir lo global)"
     },
     "setting_hint": {
       "mail_from": "Nombre del remitente mostrado en el correo saliente. Con SMTP la dirección se toma de la cuenta automáticamente; con Resend se requiere la forma completa de nombre más dirección",
@@ -1069,7 +1073,8 @@
       "notification_ai_translation": "Al activarlo, los anuncios del sitio se traducen automáticamente por IA a todos los idiomas soportados al enviarlos; las traducciones ausentes revierten al texto original",
       "ai_notification_translate_model": "Modelo para la traducción IA de anuncios del sitio (difusión); los modelos discriminativos no generan texto, así que la traducción no está disponible con un controlador discriminativo",
       "ai_notification_translate_prompt": "Sustituye el prompt del sistema para la traducción de anuncios; la entrada del usuario se envuelve con el delimitador anti-inyección y la salida se fuerza a JSON",
-      "ai_systemone_base_url": "URL base de la API de un endpoint de System One autoalojado o proxy; déjala vacía para usar api.typesafe.ai"
+      "ai_systemone_base_url": "URL base de la API de un endpoint de System One autoalojado o proxy; déjala vacía para usar api.typesafe.ai",
+      "ai_reasoning_per_job": "Los tokens de razonamiento cuentan dentro del presupuesto de salida: desactivado es lo más rápido y barato (el contenido es la conclusión directa); low/high se asignan a reasoning_effort (los modelos no compatibles lo ignoran); vacío = seguir el «esfuerzo de razonamiento de IA» global"
     },
     "action": {
       "user_reset_password": "Restablezca su contraseña",
@@ -1255,7 +1260,18 @@
       "ai_driver_systemone": "Discriminativo de TypeSafe (Jev)",
       "generative": "Modelo de texto generativo",
       "discriminative": "Modelo discriminativo",
-      "systemone": "Discriminativo de TypeSafe (Jev)"
+      "systemone": "Discriminativo de TypeSafe (Jev)",
+      "ai_reasoning_disabled": "Desactivar razonamiento",
+      "ai_reasoning_enabled": "Predeterminado (lo decide el modelo)",
+      "ai_reasoning_low": "Esfuerzo bajo",
+      "ai_reasoning_high": "Esfuerzo alto",
+      "ai_reasoning_default": "Seguir lo global",
+      "ai_comments_moderation_reasoning_default": "Seguir lo global",
+      "ai_texture_moderate_reasoning_default": "Seguir lo global",
+      "ai_texture_translate_reasoning_default": "Seguir lo global",
+      "ai_notification_translate_reasoning_default": "Seguir lo global",
+      "low": "Bajo",
+      "high": "Alto"
     },
     "delete_user_confirm": "¿Eliminar usuario {name}?",
     "chart_point": "{date} · Usuarios {users} · Cargas {textures}",

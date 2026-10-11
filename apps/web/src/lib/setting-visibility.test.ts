@@ -24,7 +24,8 @@ describe('setting visibility rules', () => {
   it('shows ai_reasoning only for the OpenAI-compatible driver', () => {
     expect(visible('ai_reasoning', { ai_driver: 'openai' })).toBe(true);
     expect(visible('ai_reasoning', { ai_driver: 'anthropic' })).toBe(false);
-    expect(visible('ai_reasoning', {}, 'workers')).toBe(false);
+    // Workers AI 驱动也消费思考模式（Gemma 4 等推理模型经模板参数/effort 控制）
+    expect(visible('ai_reasoning', {}, 'workers')).toBe(true);
   });
 
   it('shows mode selectors with their feature switch and keeps model/prompt fields visible in both modes', () => {

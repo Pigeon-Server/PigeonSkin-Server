@@ -1055,7 +1055,11 @@
       "ai_cloudflare_api_token": "Cloudflare API token",
       "ai_discriminative_threshold": "Discriminative model violation threshold",
       "notification_ai_translation": "AI translation for site announcements",
-      "ai_systemone_base_url": "System One API base URL"
+      "ai_systemone_base_url": "System One API base URL",
+      "ai_comments_moderation_reasoning": "Comment moderation reasoning (empty = follow global)",
+      "ai_texture_moderate_reasoning": "Texture moderation reasoning (empty = follow global)",
+      "ai_texture_translate_reasoning": "Translation reasoning (empty = follow global)",
+      "ai_notification_translate_reasoning": "Announcement translation reasoning (empty = follow global)"
     },
     "setting_hint": {
       "mail_from": "Sender name shown on outgoing mail. With SMTP the address comes from the mail account automatically; Resend requires the full name-plus-address form",
@@ -1069,7 +1073,8 @@
       "notification_ai_translation": "When enabled, site announcements are automatically translated by AI into all supported locales on broadcast; missing translations fall back to the original text",
       "ai_notification_translate_model": "Model for AI translation of site announcements (broadcast); discriminative models cannot generate, so translation is unavailable under a discriminative driver",
       "ai_notification_translate_prompt": "Overrides the system prompt for announcement translation; user input is wrapped by the injection-guard delimiter and output is forced to JSON",
-      "ai_systemone_base_url": "API base URL of a self-hosted or proxied System One endpoint; leave empty for the official api.typesafe.ai"
+      "ai_systemone_base_url": "API base URL of a self-hosted or proxied System One endpoint; leave empty for the official api.typesafe.ai",
+      "ai_reasoning_per_job": "Reasoning tokens count against the output budget: disabled is fastest and cheapest (content is the conclusion directly); low/high map to reasoning_effort (ignored by unsupported models); empty = follow the global \"AI reasoning effort\""
     },
     "action": {
       "user_reset_password": "Reset password",
@@ -1255,7 +1260,18 @@
       "ai_driver_systemone": "TypeSafe discriminative (Jev)",
       "generative": "Generative text model",
       "discriminative": "Discriminative model",
-      "systemone": "TypeSafe discriminative (Jev)"
+      "systemone": "TypeSafe discriminative (Jev)",
+      "ai_reasoning_disabled": "Disable thinking",
+      "ai_reasoning_enabled": "Default (model decides)",
+      "ai_reasoning_low": "Low effort",
+      "ai_reasoning_high": "High effort",
+      "ai_reasoning_default": "Follow global",
+      "ai_comments_moderation_reasoning_default": "Follow global",
+      "ai_texture_moderate_reasoning_default": "Follow global",
+      "ai_texture_translate_reasoning_default": "Follow global",
+      "ai_notification_translate_reasoning_default": "Follow global",
+      "low": "Low",
+      "high": "High"
     },
     "delete_user_confirm": "Delete user {name}?",
     "chart_point": "{date} · Users {users} · Uploads {textures}",

@@ -73,12 +73,16 @@ const aiModelsLoading = ref(false);
 const effectiveAiDriver = computed(() =>
   (edits.value.ai_driver || data.value?.aiEffectiveDriver || '') as 'workers' | 'openai' | 'anthropic' | 'systemone' | '',
 );
-const aiTesting = ref(false);
-const aiTestResult = ref('');
+// 连通性测试按字段隔离：结果与加载态都以模型字段的设置键为索引，
+// 否则点一个字段的测试，所有模型字段都会显示同一条结果。
+const aiTesting = ref('');
+const aiTestResults = ref<Record<string, string>>({});
 async function testAiConnection(model?: string, modelField?: string) {
   if (aiTesting.value) return;
-  aiTesting.value = true;
-  aiTestResult.value = '';
+  const field = modelField ?? '';
+  aiTesting.value = field;
+  delete aiTestResults.value[field];
+  aiTestResults.value = { ...aiTestResults.value };
   error.value = '';
   try {
     const result = await adminApi.aiTest(model, {
@@ -89,17 +93,21 @@ async function testAiConnection(model?: string, modelField?: string) {
         openai_base_url: edits.value.openai_base_url,
         ai_timeout_seconds: edits.value.ai_timeout_seconds,
         ai_systemone_api_key: edits.value.ai_systemone_api_key,
+        ai_systemone_base_url: edits.value.ai_systemone_base_url,
         ai_cloudflare_account_id: edits.value.ai_cloudflare_account_id,
         ai_cloudflare_api_token: edits.value.ai_cloudflare_api_token,
       },
     });
-    aiTestResult.value = result.ok
-      ? i18n.t('admin.ai_test_ok', { model: result.model ?? '' })
-      : i18n.t('admin.ai_test_fail', { model: result.model ?? '' });
+    aiTestResults.value = {
+      ...aiTestResults.value,
+      [field]: result.ok
+        ? i18n.t('admin.ai_test_ok', { model: result.model ?? '' })
+        : i18n.t('admin.ai_test_fail', { model: result.model ?? '' }),
+    };
   } catch (e) {
     error.value = apiErrorMessage(e);
   } finally {
-    aiTesting.value = false;
+    aiTesting.value = '';
   }
 }
 async function fetchAiModels() {
@@ -113,6 +121,7 @@ async function fetchAiModels() {
       ai_api_key: edits.value.ai_api_key,
       openai_base_url: edits.value.openai_base_url,
       ai_systemone_api_key: edits.value.ai_systemone_api_key,
+      ai_systemone_base_url: edits.value.ai_systemone_base_url,
       ai_cloudflare_account_id: edits.value.ai_cloudflare_account_id,
       ai_cloudflare_api_token: edits.value.ai_cloudflare_api_token,
     });
@@ -202,6 +211,7 @@ const groups = [
       'openai_base_url',
       'ai_api_key',
       'ai_systemone_api_key',
+      'ai_systemone_base_url',
       'ai_cloudflare_account_id',
       'ai_cloudflare_api_token',
       'ai_max_concurrency',
@@ -210,12 +220,18 @@ const groups = [
       'ai_discriminative_threshold',
       'ai_texture_translate_model',
       'ai_texture_translate_prompt',
+      'ai_texture_translate_reasoning',
+      'ai_notification_translate_model',
+      'ai_notification_translate_prompt',
+      'ai_notification_translate_reasoning',
       'ai_texture_moderate_mode',
       'ai_texture_moderate_model',
       'ai_texture_moderate_prompt',
+      'ai_texture_moderate_reasoning',
       'ai_comments_moderation_mode',
       'ai_comments_moderation_model',
       'ai_comments_moderation_prompt',
+      'ai_comments_moderation_reasoning',
     ],
   },
   {
@@ -429,7 +445,7 @@ onMounted(load);
           <AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton>
         </p>
         <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-        <AppSkeleton v-if="loading" :count="3" />
+        <AppSkeleton v-if="loading" variant="form" :count="4" />
         <section
           v-else-if="data && tab === 'integrations'"
           class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"
@@ -471,8 +487,8 @@ onMounted(load);
                 :model-options="aiModelOptions"
                 :models-loading="aiModelsLoading"
                 :effective-driver="effectiveAiDriver"
-                :test-result="aiTestResult"
-                :test-loading="aiTesting"
+                :test-result="aiTestResults[key]"
+                :test-loading="aiTesting === key"
                 @fetch-models="fetchAiModels"
                 @test-connection="testAiConnection(edits[key], key)"
               />

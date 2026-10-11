@@ -1055,7 +1055,11 @@
       "ai_cloudflare_api_token": "Cloudflare API Token",
       "ai_discriminative_threshold": "判別模型違規閾值",
       "notification_ai_translation": "站台公告自動翻譯",
-      "ai_systemone_base_url": "System One API 位址"
+      "ai_systemone_base_url": "System One API 位址",
+      "ai_comments_moderation_reasoning": "評論審核思考模式（空 = 跟隨全域）",
+      "ai_texture_moderate_reasoning": "材質審核思考模式（空 = 跟隨全域）",
+      "ai_texture_translate_reasoning": "翻譯思考模式（空 = 跟隨全域）",
+      "ai_notification_translate_reasoning": "公告翻譯思考模式（空 = 跟隨全域）"
     },
     "setting_hint": {
       "mail_from": "寄信時顯示的寄件人名稱。SMTP 直連下信箱自動取自寄信帳號；用 Resend 時需寫完整「名稱〈信箱〉」形式",
@@ -1069,7 +1073,8 @@
       "notification_ai_translation": "開啟後站台公告（site_message）群發時自動經 AI 翻譯成各支援語言；譯文缺失時回退原文",
       "ai_notification_translate_model": "站台公告（通知群發）AI 翻譯使用的模型；判別模型不做生成，翻譯任務在判別驅動下不可用",
       "ai_notification_translate_prompt": "覆蓋站台公告翻譯的系統提示詞；使用者輸入由注入防護界定符包裹並強制 JSON 輸出",
-      "ai_systemone_base_url": "自架或代理閘道的 System One 判別模型 API 根位址；留空使用官方 api.typesafe.ai"
+      "ai_systemone_base_url": "自架或代理閘道的 System One 判別模型 API 根位址；留空使用官方 api.typesafe.ai",
+      "ai_reasoning_per_job": "推理模型的思考過程計入輸出預算：禁思考最快最省（content 直出結論）；low/high 映射 reasoning_effort（不支援的模型忽略）；空 = 跟隨全域「AI 推理強度」"
     },
     "action": {
       "user_reset_password": "重設您的密碼",
@@ -1255,7 +1260,18 @@
       "ai_driver_systemone": "TypeSafe 判別模型（Jev）",
       "generative": "生成式文字模型",
       "discriminative": "判別模型",
-      "systemone": "TypeSafe 判別模型（Jev）"
+      "systemone": "TypeSafe 判別模型（Jev）",
+      "ai_reasoning_disabled": "停用思考",
+      "ai_reasoning_enabled": "預設（模型自行決定）",
+      "ai_reasoning_low": "低強度",
+      "ai_reasoning_high": "高強度",
+      "ai_reasoning_default": "跟隨全域",
+      "ai_comments_moderation_reasoning_default": "跟隨全域",
+      "ai_texture_moderate_reasoning_default": "跟隨全域",
+      "ai_texture_translate_reasoning_default": "跟隨全域",
+      "ai_notification_translate_reasoning_default": "跟隨全域",
+      "low": "低",
+      "high": "高"
     },
     "delete_user_confirm": "確認刪除用戶 {name}？",
     "chart_point": "{date} · 註冊 {users} · 上傳 {textures}",

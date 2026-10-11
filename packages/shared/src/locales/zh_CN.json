@@ -1055,7 +1055,11 @@
       "ai_cloudflare_api_token": "Cloudflare API Token",
       "ai_discriminative_threshold": "判别模型违规阈值",
       "notification_ai_translation": "站点公告自动翻译",
-      "ai_systemone_base_url": "System One API 地址"
+      "ai_systemone_base_url": "System One API 地址",
+      "ai_comments_moderation_reasoning": "评论审核思考模式（空 = 跟随全局）",
+      "ai_texture_moderate_reasoning": "材质审核思考模式（空 = 跟随全局）",
+      "ai_texture_translate_reasoning": "翻译思考模式（空 = 跟随全局）",
+      "ai_notification_translate_reasoning": "公告翻译思考模式（空 = 跟随全局）"
     },
     "setting_hint": {
       "mail_from": "发信时显示的发件人名称。SMTP 直连下邮箱自动取自发信账户；用 Resend 时需写完整「名称〈邮箱〉」形式",
@@ -1069,7 +1073,8 @@
       "notification_ai_translation": "开启后站点公告（site_message）群发时自动经 AI 翻译成各支持语言；译文缺失时回退原文",
       "ai_notification_translate_model": "站点公告（通知群发）AI 翻译使用的模型；判别模型不做生成，翻译任务在判别驱动下不可用",
       "ai_notification_translate_prompt": "覆盖站点公告翻译的系统提示词；用户输入由注入防护界定符包裹并强制 JSON 输出",
-      "ai_systemone_base_url": "自托管或代理网关的 System One 判别模型 API 根地址；留空使用官方 api.typesafe.ai"
+      "ai_systemone_base_url": "自托管或代理网关的 System One 判别模型 API 根地址；留空使用官方 api.typesafe.ai",
+      "ai_reasoning_per_job": "推理模型的思考过程计入输出预算：禁思考最快最省（content 直出结论）；low/high 映射 reasoning_effort（不支持的模型忽略）；空 = 跟随全局「AI 推理强度」"
     },
     "action": {
       "user_reset_password": "重置密码",
@@ -1255,7 +1260,18 @@
       "ai_driver_systemone": "TypeSafe 判别模型（Jev）",
       "generative": "生成式文本模型",
       "discriminative": "判别模型",
-      "systemone": "TypeSafe 判别模型（Jev）"
+      "systemone": "TypeSafe 判别模型（Jev）",
+      "ai_reasoning_disabled": "禁用思考",
+      "ai_reasoning_enabled": "默认（模型自行决定）",
+      "ai_reasoning_low": "低强度",
+      "ai_reasoning_high": "高强度",
+      "ai_reasoning_default": "跟随全局",
+      "ai_comments_moderation_reasoning_default": "跟随全局",
+      "ai_texture_moderate_reasoning_default": "跟随全局",
+      "ai_texture_translate_reasoning_default": "跟随全局",
+      "ai_notification_translate_reasoning_default": "跟随全局",
+      "low": "低",
+      "high": "高"
     },
     "delete_user_confirm": "确认删除用户 {name}？",
     "chart_point": "{date} · 注册 {users} · 上传 {textures}",

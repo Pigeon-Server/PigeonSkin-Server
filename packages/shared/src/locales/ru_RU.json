@@ -1055,7 +1055,11 @@
       "ai_cloudflare_api_token": "API-токен Cloudflare",
       "ai_discriminative_threshold": "Порог нарушения дискриминативной модели",
       "notification_ai_translation": "Автоперевод объявлений сайта",
-      "ai_systemone_base_url": "Базовый URL API System One"
+      "ai_systemone_base_url": "Базовый URL API System One",
+      "ai_comments_moderation_reasoning": "Режим рассуждений модерации комментариев (пусто = как глобально)",
+      "ai_texture_moderate_reasoning": "Режим рассуждений модерации текстур (пусто = как глобально)",
+      "ai_texture_translate_reasoning": "Режим рассуждений перевода (пусто = как глобально)",
+      "ai_notification_translate_reasoning": "Режим рассуждений перевода объявлений (пусто = как глобально)"
     },
     "setting_hint": {
       "mail_from": "Имя отправителя в исходящих письмах. При SMTP адрес берётся из почтового аккаунта автоматически; для Resend нужен полный вид «имя + адрес»",
@@ -1069,7 +1073,8 @@
       "notification_ai_translation": "После включения объявления сайта (site_message) при рассылке автоматически переводятся ИИ на все поддерживаемые языки; при отсутствии перевода используется исходный текст",
       "ai_notification_translate_model": "Модель ИИ-перевода объявлений сайта (рассылка); дискриминативные модели не генерируют текст, поэтому перевод недоступен при дискриминативном драйвере",
       "ai_notification_translate_prompt": "Переопределяет системный промпт перевода объявлений; вход пользователя оборачивается защитным разделителем, вывод принудительно JSON",
-      "ai_systemone_base_url": "Базовый URL API собственного или прокси-эндпоинта System One; оставьте пустым для официального api.typesafe.ai"
+      "ai_systemone_base_url": "Базовый URL API собственного или прокси-эндпоинта System One; оставьте пустым для официального api.typesafe.ai",
+      "ai_reasoning_per_job": "Токены рассуждений входят в бюджет вывода: отключение — самый быстрый и дешёвый вариант (content содержит сразу вывод); low/high отображаются в reasoning_effort (неподдерживаемые модели игнорируют); пусто = как глобальное «сила рассуждений ИИ»"
     },
     "action": {
       "user_reset_password": "Восстановление пароля",
@@ -1255,7 +1260,18 @@
       "ai_driver_systemone": "Дискриминативная TypeSafe (Jev)",
       "generative": "Генеративная текстовая модель",
       "discriminative": "Дискриминативная модель",
-      "systemone": "Дискриминативная TypeSafe (Jev)"
+      "systemone": "Дискриминативная TypeSafe (Jev)",
+      "ai_reasoning_disabled": "Отключить рассуждения",
+      "ai_reasoning_enabled": "По умолчанию (решает модель)",
+      "ai_reasoning_low": "Низкая интенсивность",
+      "ai_reasoning_high": "Высокая интенсивность",
+      "ai_reasoning_default": "Как глобально",
+      "ai_comments_moderation_reasoning_default": "Как глобально",
+      "ai_texture_moderate_reasoning_default": "Как глобально",
+      "ai_texture_translate_reasoning_default": "Как глобально",
+      "ai_notification_translate_reasoning_default": "Как глобально",
+      "low": "Низкая",
+      "high": "Высокая"
     },
     "delete_user_confirm": "Удалить пользователя {name}?",
     "chart_point": "{date} · Пользователи {users} · Загрузки {textures}",

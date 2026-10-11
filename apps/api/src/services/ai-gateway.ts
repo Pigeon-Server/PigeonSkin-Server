@@ -19,11 +19,12 @@
 import type { Bindings } from '../env.ts';
 import { getSetting, readSettings } from '../lib.ts';
 import { flag } from '../env.ts';
+import { SECRET_PLACEHOLDER } from './configuration.ts';
 
 // ── 任务定义注册表 ──────────────────────────────────────────────────────────
 
 export interface AiJobDefinition {
-  /** 注册键，同时是设置项后缀（ai_<key>_model / ai_<key>_prompt / ai_<key>_mode） */
+  /** 注册键，同时是设置项后缀（ai_<key>_model / ai_<key>_prompt / ai_<key>_mode / ai_<key>_reasoning） */
   readonly key: string;
   /** 按驱动给出的默认模型；设置项 ai_<key>_model 可整体覆盖 */
   readonly defaultModel: { workers: string; openai: string; anthropic: string; systemone: string };
@@ -36,8 +37,18 @@ export interface AiJobDefinition {
    * 这类模型（llama-guard）本身就是防注入的分类器，输入即数据。
    */
   readonly workersNative?: boolean;
-  /** 是否支持判别模型模式（判别模型只做判定不能生成，翻译任务不适用） */
+  /** 是否支持判别模型模式（判别模型不做文本生成，翻译任务不适用） */
   readonly discriminative?: boolean;
+}
+
+/** 任务级思考模式值：''=默认（跟随全局 ai_reasoning），其余与全局取值一致 */
+export type ReasoningMode = '' | 'disabled' | 'enabled' | 'low' | 'high';
+
+/** 解析某任务生效的思考模式：任务级覆盖（含显式关闭）优先，空值回落全局。 */
+export function reasoningModeFor(values: Record<string, string>, jobKey: string | null): ReasoningMode {
+  const perJob = jobKey ? (values[`ai_${jobKey}_reasoning`] ?? '').trim() : '';
+  const mode = (perJob || (values.ai_reasoning ?? '').trim()) as ReasoningMode;
+  return ['disabled', 'enabled', 'low', 'high'].includes(mode) ? mode : '';
 }
 
 export const AI_JOB_DEFINITIONS = {
@@ -193,7 +204,7 @@ export async function runAiJob(
   env: Bindings,
   def: AiJobDefinition,
   userContent: string,
-  options?: { maxChars?: number },
+  options?: { maxChars?: number; reasoningOverride?: ReasoningMode },
 ): Promise<AiTextResult> {
   const maxChars = options?.maxChars ?? 4000;
   try {
@@ -210,7 +221,7 @@ export async function runAiJob(
     const native = config.driver === workersDriver && def.workersNative === true;
     const prompt = native ? def.defaultPrompt : await buildSystemPrompt(def, env);
     const content = native ? userContent.slice(0, maxChars) : wrapUserContent(userContent, maxChars);
-    const text = await (config.driver as AiDriver).call(env, def, model, prompt, content);
+    const text = await (config.driver as AiDriver).call(env, def, model, prompt, content, await readSettings(env), options?.reasoningOverride);
     return text.length > 0 ? text : null;
   } catch (e) {
     console.error(`AI 任务 ${def.key} 失败（无结果）`, e);
@@ -219,7 +230,7 @@ export async function runAiJob(
 }
 
 interface AiDriver {
-  call(env: Bindings, def: AiJobDefinition, model: string, prompt: string, content: string): Promise<string>;
+  call(env: Bindings, def: AiJobDefinition, model: string, prompt: string, content: string, values: Record<string, string>, reasoningOverride?: ReasoningMode): Promise<string>;
 }
 
 // ── 判别模型驱动（TypeSafe System One / Cloudflare Clef）─────────────────────
@@ -232,6 +243,15 @@ export const CLEF_MODELS = ['@cf/cloudflare/clef', '@cf/cloudflare/clef-flash', 
 
 /** TypeSafe System One（Jev）判别模型的默认模型名。 */
 const JEV_DEFAULT_MODEL = 'jev-latest';
+
+/** Jev 官方 API 根地址；设置项 ai_systemone_base_url 可覆盖（自托管/代理网关）。 */
+const SYSTEMONE_DEFAULT_BASE = 'https://api.typesafe.ai/v1';
+
+/** 解析 System One API 根地址：settings 覆盖优先，末尾斜杠归一。 */
+function systemoneBaseUrl(values: Record<string, string>, env: Pick<Bindings, 'SYSTEMONE_BASE_URL'>): string {
+  const override = (values.ai_systemone_base_url ?? '').trim() || env.SYSTEMONE_BASE_URL || '';
+  return (override || SYSTEMONE_DEFAULT_BASE).replace(/\/$/, '');
+}
 
 /** 判别审核的固定问题集：noul 判违规概率 + choice 归类违规原因。 */
 interface DiscriminativeQuestions {
@@ -349,10 +369,11 @@ async function systemoneModerate(
     if (!response.ok) throw new Error(`cloudflare ${response.status}`);
     result = await response.json<SystemOneAnswers>();
   } else {
-    // TypeSafe System One（Jev）
+    // TypeSafe System One（Jev）；base URL 可自定义（自托管/代理网关），空 = 官方端点
     const apiKey = (values.ai_systemone_api_key ?? '').trim() || env.TYPESAFE_API_KEY || '';
     if (!apiKey) return null;
-    const response = await withTimeout(fetch('https://api.typesafe.ai/v1/systemone', {
+    const base = systemoneBaseUrl(values, env);
+    const response = await withTimeout(fetch(`${base}/systemone`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model, state, questions }),
@@ -385,6 +406,19 @@ export interface AiRuntimeOverrides {
   [key: string]: string | undefined;
 }
 
+/**
+ * 过滤掉不应参与运行时覆盖的表单值：
+ * - 脱敏占位符（GET /settings 把已存密钥替换成 '********'，前端 edits 原样带回；
+ *   它不是真实凭据，若参与覆盖会让"保存前拉列表/测试"拿着占位符去请求而必然失败，
+ *   库中真值应继续生效）；
+ * - 空串与 undefined（本来就表示"未填，回落库内/部署值"）。
+ */
+function liveOverrideEntries(overrides?: AiRuntimeOverrides): Array<[string, string]> {
+  return Object.entries(overrides ?? {}).filter(
+    ([, v]) => v !== undefined && v !== '' && v !== SECRET_PLACEHOLDER,
+  ) as Array<[string, string]>;
+}
+
 type DriverKind = 'workers' | 'openai' | 'anthropic' | 'systemone';
 
 /** 任务的判别/生成模式：显式选择 > 未定义（跟随驱动）。 */
@@ -412,7 +446,7 @@ async function resolveDriverConfig(env: Bindings, overrides?: AiRuntimeOverrides
   openaiBase?: string;
   timeoutMs: number;
 }> {
-  const values = { ...await readSettings(env), ...Object.fromEntries(Object.entries(overrides ?? {}).filter(([, v]) => v !== undefined && v !== '')) } as Record<string, string>;
+  const values = { ...await readSettings(env), ...Object.fromEntries(liveOverrideEntries(overrides)) } as Record<string, string>;
   // settings 显式选择优先；否则部署 env 的驱动变量同为显式选择
   // （configurationValues 把 settings.ai_driver 映射到 env.AI_MODERATION_DRIVER，
   //  但本函数直接读 settings 表，env 原始值要在这里单独兜底）
@@ -500,8 +534,18 @@ async function systemoneDefaultModel(env: Bindings, values: Record<string, strin
 }
 
 const workersDriver: AiDriver = {
-  async call(env, def, model, prompt, content) {
+  async call(env, def, model, prompt, content, values, reasoningOverride) {
     const started = Date.now();
+    // 思考模式（任务级 ai_<key>_reasoning 覆盖全局，连接测试经 reasoningOverride 强制
+    // disabled——测试只验连通，不该烧思考）：Gemma 4 等推理模型的
+    // 思考过程计入输出预算且写进 reasoning_content——禁思考（enable_thinking
+    // =false，Gemma/Qwen 通用模板参数）让 content 直出结论，小预算可用；
+    // enabled 交给模型默认行为，low/high 映射 reasoning_effort（认识的模型
+    // 按档位调节，不认识的会忽略）。原生格式模型不支持这些参数，一律不传。
+    const reasoning = def.workersNative ? '' : reasoningOverride ?? reasoningModeFor(values, def.key);
+    const extra: Record<string, unknown> = {};
+    if (reasoning === 'disabled') extra.chat_template_kwargs = { enable_thinking: false };
+    else if (reasoning === 'low' || reasoning === 'high') extra.reasoning_effort = reasoning;
     // 原生格式模型（llama-guard）只收裸内容：没有 system 提示词、没有界定符。
     // 管理员覆盖的 prompt 设置项只对 chat 格式驱动生效，这里刻意不读。
     const pending = def.workersNative
@@ -517,17 +561,26 @@ const workersDriver: AiDriver = {
           ],
           max_tokens: def.maxTokens,
           temperature: 0,
+          ...extra,
         });
-    const result = await withTimeout(pending, callTimeoutMs(env)) as { response?: string } | string;
+    const result = await withTimeout(pending, callTimeoutMs(env)) as
+      | string
+      | { response?: string; choices?: Array<{ message?: { content?: string | null; reasoning_content?: string | null } }> };
     const elapsed = Date.now() - started;
     if (elapsed > 8000) console.warn(`AI 任务 ${def.key} 耗时偏高`, elapsed);
-    return typeof result === 'string' ? result : (result.response ?? '');
+    if (typeof result === 'string') return result;
+    const contentText = result.response ?? result.choices?.[0]?.message?.content?.trim() ?? '';
+    if (contentText) return contentText;
+    // 推理模型思考过程写进 reasoning_content，content 为空时用其尾部兜底，
+    // 避免整次调用被判空（禁思考时不该走到这里，仅默认行为下的保底）
+    const reasoningFallback = result.choices?.[0]?.message?.reasoning_content?.trim();
+    if (reasoningFallback) return reasoningFallback.slice(-2000);
+    return '';
   },
 };
 
 const openaiDriver: AiDriver = {
-  async call(env, def, model, prompt, content) {
-    const values = await readSettings(env);
+  async call(env, def, model, prompt, content, values, reasoningOverride) {
     const key = (values.ai_api_key ?? '').trim() || env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY;
     const base = ((values.openai_base_url ?? '').trim() || env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
     const body: Record<string, unknown> = {
@@ -540,9 +593,10 @@ const openaiDriver: AiDriver = {
         { role: 'user', content },
       ],
     };
-    // 思考模式（Qwen3/vLLM 语义）：disabled 直接输出结论，快且省 token；
-    // 服务端不认识该参数时会忽略，不影响其他 OpenAI 兼容端点
-    const reasoningMode = (values.ai_reasoning ?? '').trim();
+    // 思考模式（任务级 ai_<key>_reasoning 覆盖全局 ai_reasoning，Qwen3/vLLM 语义）：
+    // disabled 直接输出结论，快且省 token；服务端不认识该参数时会忽略，
+    // 不影响其他 OpenAI 兼容端点
+    const reasoningMode = reasoningOverride ?? reasoningModeFor(values, def.key);
     if (reasoningMode === 'disabled' || reasoningMode === 'enabled') {
       body.chat_template_kwargs = { enable_thinking: reasoningMode === 'enabled' };
     }
@@ -688,10 +742,10 @@ export async function fetchAvailableModels(env: Bindings, overrides?: AiRuntimeO
     return ids.sort((a, b) => a.localeCompare(b));
   }
   if (config.kind === 'systemone') {
-    const values = { ...await readSettings(env), ...Object.fromEntries(Object.entries(overrides ?? {}).filter(([, v]) => v !== undefined && v !== '')) } as Record<string, string>;
+    const values = { ...await readSettings(env), ...Object.fromEntries(liveOverrideEntries(overrides)) } as Record<string, string>;
     const apiKey = (values.ai_systemone_api_key ?? '').trim() || env.TYPESAFE_API_KEY || '';
     if (apiKey) {
-      const response = await withTimeout(fetch('https://api.typesafe.ai/v1/models', {
+      const response = await withTimeout(fetch(`${systemoneBaseUrl(values, env)}/models`, {
         headers: { authorization: `Bearer ${apiKey}` },
       }), config.timeoutMs);
       if (!response.ok) throw new Error(`systemone ${response.status}`);
@@ -726,8 +780,9 @@ export async function testAiConnection(
   }
   // 模型优先级：按钮带上的当前字段值 > 各任务的模型覆盖设置（含未保存的表单值）> 驱动默认。
   // 自托管网关（llama-swap 等）只认已配置的模型名，写死默认名会 404。
-  const values = { ...await readSettings(env), ...Object.fromEntries(Object.entries(merged).filter(([, v]) => v !== undefined && v !== '')) } as Record<string, string>;
-  const configured = ['ai_texture_translate_model', 'ai_texture_moderate_model', 'ai_comments_moderation_model']
+  const values = { ...await readSettings(env), ...Object.fromEntries(liveOverrideEntries(merged)) } as Record<string, string>;
+  const configured = Object.keys(AI_JOB_DEFINITIONS)
+    .map(key => `ai_${key}_model`)
     .map(key => (values[key] ?? '').trim())
     .find(Boolean);
   const effective = model?.trim() || configured || def_defaultModel(config.kind);
@@ -751,9 +806,12 @@ export async function testAiConnection(
       systemone: effective,
     },
     defaultPrompt: 'Reply with the single word: pong',
-    maxTokens: 16,
+    // 推理模型（Gemma 4 / DeepSeek-R1 系）的思考过程计入输出预算：
+    // 16 tokens 只够写 reasoning 就被截断，content 恒为空，测试按钮会误报失败
+    maxTokens: 512,
   };
-  const text = await runAiJob(env, def, 'ping', { maxChars: 100 });
+  // 连接测试强制禁思考：测试只验连通，不烧推理预算
+  const text = await runAiJob(env, def, 'ping', { maxChars: 100, reasoningOverride: 'disabled' });
   if (text === null) return { ok: false, model: effective, reason: 'call-failed' };
   return { ok: true, model: effective };
 }
@@ -792,7 +850,7 @@ async function systemonePing(
   } else {
     const apiKey = (values.ai_systemone_api_key ?? '').trim() || env.TYPESAFE_API_KEY || '';
     if (!apiKey) return null;
-    const response = await withTimeout(fetch('https://api.typesafe.ai/v1/systemone', {
+    const response = await withTimeout(fetch(`${systemoneBaseUrl(values, env)}/systemone`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model, state: 'ping', questions }),

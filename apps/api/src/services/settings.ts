@@ -9,8 +9,8 @@ import { createDb, settings } from '@pigeon-skin/db';
 import { and, eq } from 'drizzle-orm';
 import { fail } from '../framework.ts';
 import { restrictedEmailListSchema } from '@pigeon-skin/shared/schemas';
-import { SETTING_DEFAULTS, type Bindings, type SettingKey } from '../env.ts';
-import { invalidateSettingsCache } from '../lib.ts';
+import { type Bindings, type SettingKey } from '../env.ts';
+import { invalidateSettingsCache, readSettings } from '../lib.ts';
 import { isLocale, normalizeLocale } from '@pigeon-skin/shared/i18n';
 import { inspectSigningKey } from './ygg-key.ts';
 import { configurationValues, SECRET_PLACEHOLDER } from './configuration.ts';
@@ -102,21 +102,27 @@ export const SETTING_REGISTRY: Readonly<Record<SettingKey, SettingSpec>> = {
   ygg_private_key: { kind: 'string', max: 8_000, secret: true, superAdminOnly: true },
   comments_enabled: { kind: 'boolean' },
   comments_ai_moderation: { kind: 'boolean' },
-  // AI 网关：全局并发上限 + 材质翻译/审核开关 + 每任务模型/提示词覆盖
+  // AI 网关：全局并发上限 + 材质翻译/审核开关 + 每任务模型/提示词/思考模式覆盖
   ai_max_concurrency: { kind: 'integer', min: 1, max: 10 },
   ai_timeout_seconds: { kind: 'integer', min: 5, max: 300 },
-  ai_reasoning: { kind: 'enum', values: ['default', 'disabled', 'enabled'] },
+  ai_reasoning: { kind: 'enum', values: ['default', 'disabled', 'enabled', 'low', 'high'] },
   texture_ai_translation: { kind: 'boolean' },
   texture_ai_moderation: { kind: 'boolean' },
   notification_ai_translation: { kind: 'boolean' },
   ai_comments_moderation_model: { kind: 'string', max: 100 },
   ai_comments_moderation_prompt: { kind: 'string', max: 8_000 },
   ai_comments_moderation_mode: { kind: 'enum', values: ['', 'generative', 'discriminative'] },
+  ai_comments_moderation_reasoning: { kind: 'enum', values: ['', 'default', 'disabled', 'enabled', 'low', 'high'] },
   ai_texture_translate_model: { kind: 'string', max: 100 },
   ai_texture_translate_prompt: { kind: 'string', max: 8_000 },
+  ai_texture_translate_reasoning: { kind: 'enum', values: ['', 'default', 'disabled', 'enabled', 'low', 'high'] },
+  ai_notification_translate_model: { kind: 'string', max: 100 },
+  ai_notification_translate_prompt: { kind: 'string', max: 8_000 },
+  ai_notification_translate_reasoning: { kind: 'enum', values: ['', 'default', 'disabled', 'enabled', 'low', 'high'] },
   ai_texture_moderate_model: { kind: 'string', max: 100 },
   ai_texture_moderate_prompt: { kind: 'string', max: 8_000 },
   ai_texture_moderate_mode: { kind: 'enum', values: ['', 'generative', 'discriminative'] },
+  ai_texture_moderate_reasoning: { kind: 'enum', values: ['', 'default', 'disabled', 'enabled', 'low', 'high'] },
   ai_discriminative_threshold: { kind: 'integer', min: 10, max: 90 },
   restricted_email_allow: { kind: 'string', max: 10_000 },
   restricted_email_deny: { kind: 'string', max: 10_000 },
@@ -162,6 +168,11 @@ export const EXTRA_SETTINGS: Readonly<Record<string, SettingSpec>> = {
   microsoft_client_secret: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
   mojang_client_id: { kind: 'string', max: 500, superAdminOnly: true },
   mojang_client_secret: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
+  // 授权回调地址覆盖（对应 PHP 版 .env 的 *_REDIRECT_URI）。留空 = 用 APP_URL 拼接默认值
+  github_redirect_uri: { kind: 'string', max: 500, superAdminOnly: true },
+  littleskin_redirect_uri: { kind: 'string', max: 500, superAdminOnly: true },
+  microsoft_redirect_uri: { kind: 'string', max: 500, superAdminOnly: true },
+  mojang_redirect_uri: { kind: 'string', max: 500, superAdminOnly: true },
   // AI 网关驱动（空 = 跟随部署 env；openai = 任意 OpenAI 兼容端点；anthropic；systemone = 判别模型）
   ai_driver: { kind: 'enum', values: ['', 'openai', 'anthropic', 'systemone'], superAdminOnly: true },
   // 通用 API Key：按所选驱动作为 OpenAI/Anthropic 的 Bearer 凭据
@@ -169,6 +180,8 @@ export const EXTRA_SETTINGS: Readonly<Record<string, SettingSpec>> = {
   openai_base_url: { kind: 'string', max: 500, superAdminOnly: true },
   // 判别模型凭据：TypeSafe System One（Jev）Key，及自托管经 REST 调 Cloudflare Clef 的凭据
   ai_systemone_api_key: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
+  // System One 判别模型的自定义 API 根地址（自托管/代理网关）；空 = 官方 api.typesafe.ai
+  ai_systemone_base_url: { kind: 'string', max: 500, superAdminOnly: true },
   ai_cloudflare_account_id: { kind: 'string', max: 200, superAdminOnly: true },
   ai_cloudflare_api_token: { kind: 'string', max: 2000, secret: true, superAdminOnly: true },
   custom_css: { kind: 'string', max: 100_000 },
@@ -214,7 +227,8 @@ export const EXTRA_DEFAULTS: Record<string, string> = {
   skinlib_guard_enabled: 'true',
   site_url: '', mail_from: '', mail_driver: 'resend',
   ai_driver: '', ai_api_key: '', openai_base_url: '',
-  ai_systemone_api_key: '', ai_cloudflare_account_id: '', ai_cloudflare_api_token: '',
+  ai_systemone_api_key: '', ai_systemone_base_url: '', ai_cloudflare_account_id: '', ai_cloudflare_api_token: '',
+  github_redirect_uri: '', littleskin_redirect_uri: '', microsoft_redirect_uri: '', mojang_redirect_uri: '',
   smtp_host: '', smtp_port: '0', smtp_encryption: 'starttls', smtp_username: '', smtp_password: '',
   config_generator_intro: '',
   custom_css: '', custom_js: '', announcement: '', content_policy: '',
@@ -232,37 +246,69 @@ export const EXTRA_DEFAULTS: Record<string, string> = {
  *
  * locale 用 '' 而不是 NULL：SQLite 主键里的 NULL 彼此不相等，
  * 用 NULL 的话 (key, NULL) 行不会唯一。
+ *
+ * 与 readSettings 查询与合并完全等价，直接委托共享缓存；返回浅拷贝，
+ * 调用方（如 admin 设置页的脱敏）可以放心就地修改。
  */
 export async function readAll(env: SettingsEnv): Promise<Record<string, string>> {
-  const rows = await createDb(env.DB)
-    .select({ key: settings.key, value: settings.value })
-    .from(settings)
-    .where(eq(settings.locale, DEFAULT_LOCALE));
+  return { ...await readSettings(env) };
+}
 
-  const values: Record<string, string> = { ...SETTING_DEFAULTS, ...EXTRA_DEFAULTS };
-  for (const r of rows) values[r.key] = r.value;
-  return values;
+// 语言覆盖行的读缓存（全局值缓存之外的增量部分）。
+// 失效：writeMany / clearLocalized 里直接 clear 本缓存；
+// 全局层缓存（lib.ts 的 settingsCache）失效由 invalidateSettingsCache 负责。
+const localizedSettingsCache = new Map<string, { values: Record<string, string>; expiresAt: number }>();
+// 冷缓存并发去重：同一 locale 的多个调用方同时未命中时，只有首个真正查库
+const localizedInflight = new Map<string, Promise<Record<string, string>>>();
+
+async function readLocalizedOverrides(env: SettingsEnv, locale: string): Promise<Record<string, string>> {
+  const normalized = normalizeLocale(locale);
+  const cached = localizedSettingsCache.get(normalized);
+  if (cached && cached.expiresAt > Date.now()) return cached.values;
+  const inflight = localizedInflight.get(normalized);
+  if (inflight) return inflight;
+
+  const load = (async () => {
+    const rows = await createDb(env.DB)
+      .select({ key: settings.key, value: settings.value })
+      .from(settings)
+      .where(eq(settings.locale, normalized));
+    const values: Record<string, string> = {};
+    for (const r of rows) values[r.key] = r.value;
+    localizedSettingsCache.set(normalized, { values, expiresAt: Date.now() + 60_000 });
+    return values;
+  })();
+  localizedInflight.set(normalized, load);
+  try {
+    return await load;
+  } finally {
+    localizedInflight.delete(normalized);
+  }
 }
 
 /**
  * 读某语言的设置：以全局值为底，用该语言的覆盖盖上。
- * 对应旧版的 option_localized()。
+ * 对应旧版的 option_localized()。全局层与覆盖层各带 60 秒缓存。
+ * 三层之间无依赖，未命中时并行取数而不是串行等待。
  */
 export async function readLocalized(
   env: SettingsEnv,
   locale: string,
 ): Promise<Record<string, string>> {
-  const values = locale && normalizeLocale(locale) !== 'en' ? await readLocalized(env, 'en') : await readAll(env);
-  if (locale === DEFAULT_LOCALE) return values;
-
-  const rows = await createDb(env.DB)
-    .select({ key: settings.key, value: settings.value })
-    .from(settings)
-    .where(eq(settings.locale, normalizeLocale(locale)));
-
-  for (const r of rows) values[r.key] = r.value;
-  return values;
+  // 空 locale 与全局 locale（''）都直接走全局层
+  if (!locale) return readAll(env);
+  const normalized = normalizeLocale(locale);
+  // 非英文语言以"全局 + en 覆盖行"为底，再叠目标语言行（en 是回退基准）
+  const [all, en, target] = await Promise.all([
+    readAll(env),
+    normalized !== 'en' ? readLocalizedOverrides(env, 'en') : EMPTY_OVERRIDES,
+    readLocalizedOverrides(env, normalized),
+  ]);
+  return normalized !== 'en' ? { ...all, ...en, ...target } : { ...all, ...target };
 }
+
+// en 覆盖层与目标层相同（locale = en）时的占位，避免分支里另构造空对象
+const EMPTY_OVERRIDES: Record<string, string> = {};
 
 /** 供公开接口使用的子集。绝不把 custom_js、正则等内部配置暴露出去。 */
 const PUBLIC_KEYS = [
@@ -412,13 +458,16 @@ export async function writeMany(
         await importPKCS8(account.private_key, 'RS256');
       } catch { throw fail.invalid(undefined, { [row.key]: 'invalid_credentials' }); }
     }
-    if (['site_url', 'littleskin_api_root', 'openai_base_url', 'favicon_url', 'home_background_url', 'home_background_tablet_url', 'home_background_mobile_url', 'login_background_url', 'login_background_tablet_url', 'login_background_mobile_url'].includes(row.key) && row.value) {
+    if (['site_url', 'littleskin_api_root', 'openai_base_url', 'ai_systemone_base_url', 'favicon_url', 'home_background_url', 'home_background_tablet_url', 'home_background_mobile_url', 'login_background_url', 'login_background_tablet_url', 'login_background_mobile_url', 'github_redirect_uri', 'littleskin_redirect_uri', 'microsoft_redirect_uri', 'mojang_redirect_uri'].includes(row.key) && row.value) {
       let url: URL;
       try { url = new URL(row.value); } catch { throw fail.invalid('common.invalid_request', { [row.key]: 'invalid_url' }); }
       const local = env.ENVIRONMENT === 'development' && url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-      if (row.key === 'openai_base_url') {
+      if (row.key === 'openai_base_url' || row.key === 'ai_systemone_base_url') {
         // LLM 网关常跑在本地（Ollama/vLLM），允许任意 http(s) 地址
         if (url.protocol !== 'https:' && url.protocol !== 'http:') throw fail.invalid('common.invalid_request', { [row.key]: 'invalid_url' });
+      } else if (row.key.endsWith('_redirect_uri')) {
+        // 回调地址：允许带路径（与 PHP 版 .env 的 *_REDIRECT_URI 一致），但必须是本站的 https 页面
+        if ((!local && url.protocol !== 'https:') || url.username || url.password || url.hash || url.search) throw fail.invalid('common.invalid_request', { [row.key]: 'invalid_url' });
       } else if ((!local && url.protocol !== 'https:') || url.username || url.password || url.hash || (row.key === 'site_url' && (url.pathname !== '/' || url.search))) throw fail.invalid('common.invalid_request', { [row.key]: 'invalid_url' });
     }
     // mail_from 允许完整 `名称 <邮箱>`、纯邮箱，或只写显示名（smtp 驱动下
@@ -481,8 +530,10 @@ export async function writeMany(
       });
   }
 
-  // 让本 isolate 的读缓存失效，否则"改了设置但没生效"会持续到 TTL 到期
+  // 让本 isolate 的读缓存失效（全局层在 lib，语言覆盖层在本文件），
+  // 否则"改了设置但没生效"会持续到 TTL 到期
   invalidateSettingsCache();
+  localizedSettingsCache.clear();
 
   return rows.length;
 }
@@ -519,4 +570,5 @@ export async function clearLocalized(env: SettingsEnv, key: string, locale: stri
   }
   await createDb(env.DB).delete(settings)
     .where(and(eq(settings.key, key), eq(settings.locale, locale)));
+  localizedSettingsCache.clear();
 }

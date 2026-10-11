@@ -1055,7 +1055,11 @@
       "ai_cloudflare_api_token": "Cloudflare API トークン",
       "ai_discriminative_threshold": "判別モデルの違反しきい値",
       "notification_ai_translation": "サイト告知の自動翻訳",
-      "ai_systemone_base_url": "System One API ベース URL"
+      "ai_systemone_base_url": "System One API ベース URL",
+      "ai_comments_moderation_reasoning": "コメント審査の思考モード（空 = グローバルに従う）",
+      "ai_texture_moderate_reasoning": "テクスチャ審査の思考モード（空 = グローバルに従う）",
+      "ai_texture_translate_reasoning": "翻訳の思考モード（空 = グローバルに従う）",
+      "ai_notification_translate_reasoning": "お知らせ翻訳の思考モード（空 = グローバルに従う）"
     },
     "setting_hint": {
       "mail_from": "送信メールに表示される差出人名。SMTP 直接接続ではアドレスは送信アカウントから自動取得。Resend の場合は「名前 〈アドレス〉」の完全な形式が必要です",
@@ -1069,7 +1073,8 @@
       "notification_ai_translation": "有効にすると、サイト告知（site_message）の送信時に AI が自動で各対応言語へ翻訳します。訳文がない場合は原文にフォールバックします",
       "ai_notification_translate_model": "サイトのお知らせ（一斉配信）の AI 翻訳に使うモデル。判別モデルは生成を行わないため、判別ドライバーでは翻訳不可",
       "ai_notification_translate_prompt": "お知らせ翻訳のシステムプロンプトを上書き。ユーザー入力は注入防止デリミタで囲まれ、出力は JSON に限定されます",
-      "ai_systemone_base_url": "自己ホストまたはプロキシの System One API ベース URL。空欄で公式 api.typesafe.ai を使用"
+      "ai_systemone_base_url": "自己ホストまたはプロキシの System One API ベース URL。空欄で公式 api.typesafe.ai を使用",
+      "ai_reasoning_per_job": "思考トークンは出力バジェットに含まれます：無効が最速・最安（content に結論が直接出る）；low/high は reasoning_effort に対応（未対応モデルは無視）；空 = グローバルの「AI 推論強度」に従う"
     },
     "action": {
       "user_reset_password": "パスワードをリセットする",
@@ -1255,7 +1260,18 @@
       "ai_driver_systemone": "TypeSafe 判別モデル（Jev）",
       "generative": "生成的テキストモデル",
       "discriminative": "判別モデル",
-      "systemone": "TypeSafe 判別モデル（Jev）"
+      "systemone": "TypeSafe 判別モデル（Jev）",
+      "ai_reasoning_disabled": "思考を無効化",
+      "ai_reasoning_enabled": "デフォルト（モデルに任せる）",
+      "ai_reasoning_low": "低強度",
+      "ai_reasoning_high": "高強度",
+      "ai_reasoning_default": "グローバルに従う",
+      "ai_comments_moderation_reasoning_default": "グローバルに従う",
+      "ai_texture_moderate_reasoning_default": "グローバルに従う",
+      "ai_texture_translate_reasoning_default": "グローバルに従う",
+      "ai_notification_translate_reasoning_default": "グローバルに従う",
+      "low": "低",
+      "high": "高"
     },
     "delete_user_confirm": "ユーザー {name} を削除しますか?",
     "chart_point": "{date} · ユーザー {users} · アップロード {textures}",

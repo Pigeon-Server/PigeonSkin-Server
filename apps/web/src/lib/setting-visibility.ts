@@ -27,11 +27,13 @@ export function isSettingVisible(key: string, input: SettingVisibilityInput): bo
   // 服务端算出的生效驱动为准（Workers AI 绑定下没有任何 API 字段可填）。
   if (key === 'openai_base_url') return aiDriver() === 'openai';
   if (key === 'ai_api_key') return ['openai', 'anthropic'].includes(aiDriver());
-  // 思考模式参数只被 OpenAI 兼容端点消费（Qwen3/vLLM 语义）
-  if (key === 'ai_reasoning') return aiDriver() === 'openai';
+  // 思考模式：全局项在 OpenAI 兼容端点与 Workers AI（推理模型经
+  // chat_template_kwargs/reasoning_effort 控制）下都有意义；任务级覆盖
+  // 跟随各自任务字段的显隐（_reasoning 后缀在下方按任务前缀处理）。
+  if (key === 'ai_reasoning') return ['openai', 'workers'].includes(aiDriver());
   // 判别模型凭据：TypeSafe Key 在任一审核任务走判别模式或驱动为 systemone 时显示；
   // Cloudflare REST 凭据同理，但 Workers AI 绑定可用的部署走绑定调用，不需要它们。
-  if (key === 'ai_systemone_api_key') {
+  if (key === 'ai_systemone_api_key' || key === 'ai_systemone_base_url') {
     return discriminativeModeSelected(aiDriver());
   }
   if (key === 'ai_cloudflare_account_id' || key === 'ai_cloudflare_api_token') {
