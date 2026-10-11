@@ -64,3 +64,11 @@
 - Web 代码至少运行 `npm run typecheck --workspace @pigeon-skin/web`；Web 和语言资源改动运行 `npm run test --workspace @pigeon-skin/web`；影响产物时运行 `npm run build --workspace @pigeon-skin/web`。API、数据库、共享包改动运行对应工作区测试和类型检查；跨包改动再尝试根级检查。
 - 服务不可用时核对实际进程、端口和健康接口后再恢复；不要因某个页面能打开就断言整个服务正常。
 - 执行新任务前请先制定计划并完成开发。完成后，启动一个独立审查线程，不要直接修改代码，只负责从需求完整性、逻辑正确性、边界情况、代码质量、测试覆盖和实际运行结果六个方面验证。请把发现的问题整理成修复清单交回主线程。主线程修复后，再让审查线程复验。持续循环，直到通过验证，或者明确说明还卡在哪里。
+
+## 目录约定
+
+- Monorepo 布局：`apps/server`（Cloudflare Worker + Node 自托管服务端）、`apps/web`（Vue SPA）、`packages/{shared,auth,db,minecraft}`（共享包）、`tools/`（CLI 与维护脚本）。
+- server 源码分层：`src/core/`（env/框架/会话/设置读取等横切基础）、`src/routes/{auth,content,protocol,admin,account}/`（HTTP 层按领域分组）、`src/services/` 与 `src/repositories/`（业务与查询，保持平铺）、`src/do/`（Durable Objects）、`src/node/`（Node 自托管平台适配）。
+- web 组件按领域分组：`components/{ui,texture,live2d,auth,settings,layout,manual,search}/`；API 客户端统一在 `src/api.ts` 单文件。
+- 维护脚本一律在 `tools/scripts/`，仓库路径统一从 `paths.mjs` 导入（基于 npm scripts 固定在仓库根执行的约定），不得新写 `import.meta.url` 上溯爬楼。
+- wrangler 配置在仓库根 `wrangler.jsonc`；apps/server 的 wrangler 命令必须显式 `--config ../../wrangler.jsonc`。

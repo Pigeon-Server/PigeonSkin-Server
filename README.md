@@ -32,12 +32,13 @@ Pigeon Skin Server 是专为 Minecraft 玩家、服主与创作者打造的现�
 | 模块路径 | 职责与技术选型 |
 |---|---|
 | `apps/web` | 现代化前端单页应用：Vue 3、Vite、Pinia、Vue I18n、Vuetify 组件库、Tailwind CSS、Material Design Icons |
-| `apps/server` | 边缘 API 与路由网关：Hono、Cloudflare Workers、D1 关系型数据库、R2 对象存储、消息队列 |
+| `apps/server` | 服务端应用：Hono、Cloudflare Workers（HTTP/Cron/Queue/Durable Objects）、D1 关系型数据库、R2 对象存储，兼作 Node 自托管入口 |
 | `packages/auth` | 认证与安全原语：WebCrypto 标准加密、令牌校验与旧站密码兼容支持 |
 | `packages/db` | 数据持久层：Drizzle ORM schema 定义与 D1 迁移脚本 |
 | `packages/minecraft` | Minecraft 领域逻辑：皮肤/披风 PNG 维度与透明通道校验、纹理渲染与协议组装 |
 | `packages/shared` | 前后端共享类型、校验规则、多语言词典（`locales`）与公共目录 |
 | `tools/migrate` | 旧版 Blessing Skin PHP 数据库与材质文件的分析、迁移与数据校验 CLI |
+| `tools/scripts` | 仓库维护脚本：部署/迁移/本地初始化/发布检查（路径统一经 `paths.mjs` 解析） |
 | `vendor/blockbench` | 固定版本的 Blockbench 子模块，遵循 GPL 规范独立沙箱构建与通信 |
 
 前端静态产物由 Worker 的 assets 绑定同源托管，无需单独部署 Pages 服务。D1 保存结构化元数据，R2 保存纹理与上传文件，Queues 异步处理邮件通知与搜索引擎提交。
@@ -164,7 +165,7 @@ npm run cli -- legacy migrate --dir /path/to/old-blessing-skin --env production 
   --yes --site-url https://skin.example.com                                       # → 未初始化的生产站点
 # dump 快照（如 phpMyAdmin 导出的 .sql）模式：无 .env 时需 --pwd-method 指定旧站密码算法
 
-# 站点设置读写（键白名单见 apps/server/src/env.ts 的 SETTING_DEFAULTS）
+# 站点设置读写（键白名单见 apps/server/src/core/env.ts 的 SETTING_DEFAULTS）
 npm run cli -- settings set --key site_name --value "我的皮肤站"
 ```
 
