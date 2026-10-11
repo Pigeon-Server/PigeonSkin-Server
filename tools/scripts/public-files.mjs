@@ -44,6 +44,10 @@ export function scanText(file, text) {
       if (rule === 'literal-secret' && /^(?:undefined|null|process|env|bindings|c\.env)$/.test(match[1])) continue;
       if (rule === 'literal-secret' && placeholder.test(match[1])) continue;
       if (rule === 'literal-secret' && file.endsWith('.test.ts') && /^(?:(?:test|legacy|local-test|dev)-[\w-]+|(?:github|little|microsoft)-secret|secret-must-never-be-returned|mail-test)$/.test(match[1])) continue;
+      // 测试/本地配置中的占位密钥：值本身就是明示的假值（bearer-secret、
+      // test-session-secret），以 test-/bearer- 前缀开头且位于测试文件或
+      // vitest 配置里的不视为泄漏。
+      if (rule === 'literal-secret' && /^(?:test|bearer)-[\w-]+$/.test(match[1]) && /\.(?:test\.ts|config\.ts)$/.test(file)) continue;
       if (rule === 'credential-url') {
         const parts = credentialUrl.exec(match[0]);
         if (parts && placeholder.test(parts[1]) && placeholder.test(parts[2]) && placeholder.test(parts[3])) continue;
