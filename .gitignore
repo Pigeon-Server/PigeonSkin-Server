@@ -33,7 +33,6 @@ id_rsa
 id_ed25519
 *.jks
 *.keystore
-apps/web/public/third-party/
 .cache/
 .vite/
 coverage/
@@ -84,7 +83,8 @@ backups/
 exports/
 reports/
 packages/db/seed.local.sql
-apps/web/public/blockbench/
+apps/web/public/blockbench/source.tar.gz
+apps/web/public/blockbench/lib/
 docs/rewrite/validation-*.md
 
 # 迁移工具的本地检查点与 fixture

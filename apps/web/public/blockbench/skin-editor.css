@@ -1,0 +1,26 @@
+/* Site-specific Blockbench skin editor surface. */
+:root {
+  --color-accent: #6366f1;
+  --color-accent-bright: #818cf8;
+  --color-dark: #0f172a;
+}
+html, body { background: #0f172a !important; }
+#corner_logo, #menu_bar, #web_download_button, #update_menu, #settings_profiles_header_menu,
+#mac_window_menu, #windows_window_menu, #title_bar_home_button, #tab_bar, #status_bar,
+#mode_selector, #panel_selector_bar { display: none !important; }
+header { height: 0 !important; min-height: 0 !important; overflow: visible !important; border: 0 !important; }
+#page_wrapper { top: 0 !important; height: 100vh !important; }
+#work_screen { top: 0 !important; height: 100vh !important; }
+#main_toolbar { top: 0 !important; height: 44px !important; background: #111827 !important; border-bottom: 1px solid #334155 !important; }
+#main_toolbar .toolbar_wrapper { height: 44px !important; }
+#left_bar { top: 44px !important; bottom: 0 !important; width: 300px !important; background: #111827 !important; border-right: 1px solid #334155 !important; }
+#right_bar { top: 44px !important; bottom: 0 !important; width: 300px !important; background: #111827 !important; border-left: 1px solid #334155 !important; }
+#center { top: 44px !important; bottom: 0 !important; background: #0b1220 !important; }
+#preview { background-color: #0b1220 !important; }
+.panel_handle, .panel_tab_bar { background: #172033 !important; }
+.panel_container { border-color: #334155 !important; }
+.toolbar_wrapper .tool, .toolbar_wrapper .bar_item { border-radius: 6px !important; }
+.toolbar_wrapper .tool.selected, .toolbar_wrapper .bar_item.selected { background: #4f46e5 !important; }
+#mode_screen_pose, #skin_pose, [id*="animation"], [class*="animation"] { display: none !important; }
+#start_screen { display: none !important; }
+#skin.dialog { display: none !important; }

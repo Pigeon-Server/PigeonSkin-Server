@@ -13,9 +13,11 @@ export function unsafePath(file) {
   if (/^(?:\.env|\.dev\.vars)(?:\.|$)/.test(name) && !name.endsWith('.example')) return 'environment-file';
   if (parts.some(part => ['old', 'work', '.git', 'node_modules', '.wrangler', '.cache', 'dist', 'coverage', '__pycache__', '.idea', '.vscode', 'uploads', 'backups', 'exports', 'reports', 'test-results', 'playwright-report'].includes(part))) return 'private-or-generated-directory';
   if (/\.(?:pem|key|pfx|p12|crt|cer|db|sqlite3?|log|bak|backup|dump|zip|tar|tgz|pyc|swp|swo)(?:$|[.-])/i.test(name) || /\.tar\.gz$/i.test(name)) return 'private-or-generated-file';
-  if (file.startsWith('apps/web/public/blockbench/') || /^docs\/rewrite\/validation-/.test(file)) return 'local-artifact';
+  if (/^docs\/rewrite\/validation-/.test(file)) return 'local-artifact';
   // AGENTS.md 是随库分发的协作约定（保留 secret 扫描等内容规则约束它）
-  if (/(?:^|\/)docs\/rewrite\//.test(file) || file.startsWith('tools/cpu-probe/') || file.startsWith('apps/web/public/third-party/')) return 'local-artifact';
+  if (/(?:^|\/)docs\/rewrite\//.test(file) || file.startsWith('tools/cpu-probe/')) return 'local-artifact';
+  // blockbench/third-party 运行时产物已入库（CF Builds 构建机无 submodule/构建链）
+  if (file === 'apps/web/public/blockbench/source.tar.gz' || file.startsWith('apps/web/public/blockbench/lib/')) return 'local-artifact';
   if (parts.includes('.ssh') || /^(?:\.netrc|id_rsa|id_ed25519)$/.test(name) || /\.(?:jks|keystore)$/i.test(name)) return 'private-key-store';
 }
 
