@@ -88,8 +88,10 @@ function fadeOutVoice(element: HTMLAudioElement): Promise<void> {
   const start = performance.now();
   const initialVolume = element.volume;
   return new Promise(resolve => {
-    const step = (now: number) => {
-      const progress = Math.min(1, (now - start) / voiceFadeDuration);
+    const step = () => {
+      // rAF 回调的时间戳是帧起始时间，可能早于 start（首帧/高刷屏），负差值会让
+      // 1-progress > 1 把 volume 推出 [0,1] 抛 IndexSizeError；这里自取当前时间并夹紧
+      const progress = Math.min(1, Math.max(0, (performance.now() - start) / voiceFadeDuration));
       element.volume = initialVolume * (1 - progress);
       if (progress < 1) requestAnimationFrame(step);
       else resolve();
@@ -151,7 +153,14 @@ async function performMotion(group: string) {
         if (Number.isFinite(playingAudio.duration) && playingAudio.duration - playingAudio.currentTime <= voiceFadeDuration / 1000) fadeTail();
       };
       playingAudio.onended = finishVoice;
-      playingAudio.onerror = () => console.error('Live2D voice failed to load', playingAudio.src, playingAudio.error);
+      playingAudio.onerror = () => {
+        // 音频文件损坏/解码失败（MediaError code 3）只会重复触发，清理监听并
+        // 静默放弃本次语音，不刷控制台
+        playingAudio.ontimeupdate = null;
+        playingAudio.onended = null;
+        playingAudio.onerror = null;
+        if (audioId === audioGeneration && audio === playingAudio) audio = null;
+      };
       void playingAudio.play().catch(error => {
         if (audioId === audioGeneration && error?.name !== 'AbortError') console.error('Live2D voice playback failed', playingAudio.src, error);
       });
@@ -272,7 +281,10 @@ async function build() {
     if (instance?.renderer) instance.destroy(false);
     releaseTextures?.();
     controller?.abort();
-    if (id === generation) {
+    // 路由切换/重建触发的取消是预期行为（requestController 或 motion 队列 abort），
+    // 只在"仍是当前挂载且非取消"时按失败上报，避免切换页面刷 AbortError
+    const cancelled = id !== generation || (error instanceof DOMException && (error.name === 'AbortError' || error.name === 'TimeoutError'));
+    if (!cancelled) {
       app = null;
       failed.value = true;
       console.error('Live2D model failed to load', props.model.url, error);

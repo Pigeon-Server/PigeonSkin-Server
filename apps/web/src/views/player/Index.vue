@@ -407,7 +407,7 @@ onMounted(() => {
   <p v-if="actionError" class="alert alert-danger" role="alert">{{ actionError }}</p>
 
   <!-- 加载状态 -->
-  <AppSkeleton v-if="loading" :count="4" />
+  <AppSkeleton v-if="loading" variant="list" :count="3" />
 
   <!-- 空角色状态 -->
   <EmptyState
@@ -629,11 +629,12 @@ onMounted(() => {
           />
         </div>
 
-        <!-- 材质网格列表 -->
-        <div class="flex-1 min-h-[360px]">
+        <!-- 材质网格列表：滚动容器吃满面板剩余高度（面板 h-full 与左列同高），
+             min-h 防左列过短时塌缩；外层 flex-1 就是天然的高度上限，不再用固定 max-h -->
+        <div class="flex-1 min-h-[360px] flex flex-col">
           <div
             v-if="choices.length"
-            class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-3 max-h-[580px] overflow-y-auto pr-1"
+            class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-3 content-start flex-1 overflow-y-auto pr-1"
           >
             <button
               v-for="t in choices"
