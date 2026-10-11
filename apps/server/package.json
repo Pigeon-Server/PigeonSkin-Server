@@ -1,14 +1,14 @@
 {
-  "name": "@pigeon-skin/api",
+  "name": "@pigeon-skin/server",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "description": "Cloudflare Worker：REST API + Minecraft 协议 + 纹理下发",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "types": "wrangler types",
+    "dev": "wrangler dev --config ../../wrangler.jsonc",
+    "deploy": "wrangler deploy --config ../../wrangler.jsonc",
+    "types": "wrangler types --config ../../wrangler.jsonc",
     "tail": "wrangler tail --format json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

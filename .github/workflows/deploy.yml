@@ -1,7 +1,7 @@
 name: Deploy
 
 # 手动触发部署 API + 前端（前端构建产物挂在同一个 Worker 的 assets 上，
-# 见 apps/api/wrangler.jsonc 的 assets 配置 —— 单 Origin，没有独立 Pages）。
+# 见 apps/server/wrangler.jsonc 的 assets 配置 —— 单 Origin，没有独立 Pages）。
 #
 # 需要仓库 Secrets：
 #   CLOUDFLARE_API_TOKEN  —— Workers/D1/R2 编辑权限

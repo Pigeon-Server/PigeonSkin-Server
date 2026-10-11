@@ -7,7 +7,7 @@
 // 注意 packages/* 源码以 .ts 后缀互引（allowImportingTsExtensions），
 // esbuild 原生支持解析。
 //
-// 用法：node scripts/build-node.mjs（在 apps/api 下执行）
+// 用法：node scripts/build-node.mjs（在 apps/server 下执行）
 
 import { build } from 'esbuild';
 

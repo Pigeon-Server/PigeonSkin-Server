@@ -16,7 +16,7 @@ export default tseslint.config(
       '**/.wrangler/**',
       '**/.mimosa/**',
       '**/.cache/**',
-      'apps/api/worker-configuration.d.ts',
+      'apps/server/worker-configuration.d.ts',
       'apps/web/public/blockbench/**',
       'apps/web/public/live2d/**',
       'vendor/**',        // 第三方上游源码（git submodule），不检查
@@ -31,7 +31,7 @@ export default tseslint.config(
     files: ['**/*.ts'],
   })),
   {
-    files: ['tools/**/*.mjs', 'apps/web/scripts/**/*.mjs', 'apps/api/scripts/**/*.mjs'],
+    files: ['tools/**/*.mjs', 'apps/web/scripts/**/*.mjs', 'apps/server/scripts/**/*.mjs'],
     languageOptions: {
       globals: globals.node,
     },

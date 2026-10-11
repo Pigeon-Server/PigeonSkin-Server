@@ -8,7 +8,7 @@ Pigeon Skin Server 是专为 Minecraft 玩家、服主与创作者打造的现�
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Pigeon-Server/PigeonSkin-Server)
 
-点击按钮后，Cloudflare 会将仓库克隆到你自己的 GitHub 账号，读取 `wrangler.jsonc` 引导你创建 D1、R2、Queues 等所需资源并完成首次部署。本项目为 monorepo，如果向导中预填的构建与部署命令不符合预期，请将根目录设为 `apps/api` 并按[部署上线](#部署上线)一节的命令调整。
+点击按钮后，Cloudflare 会将仓库克隆到你自己的 GitHub 账号，读取 `wrangler.jsonc` 引导你创建 D1、R2、Queues 等所需资源并完成首次部署。本项目为 monorepo，如果向导中预填的构建与部署命令不符合预期，请将根目录设为 `apps/server` 并按[部署上线](#部署上线)一节的命令调整。
 
 首次部署完成后，还需依次完成：
 
@@ -32,7 +32,7 @@ Pigeon Skin Server 是专为 Minecraft 玩家、服主与创作者打造的现�
 | 模块路径 | 职责与技术选型 |
 |---|---|
 | `apps/web` | 现代化前端单页应用：Vue 3、Vite、Pinia、Vue I18n、Vuetify 组件库、Tailwind CSS、Material Design Icons |
-| `apps/api` | 边缘 API 与路由网关：Hono、Cloudflare Workers、D1 关系型数据库、R2 对象存储、消息队列 |
+| `apps/server` | 边缘 API 与路由网关：Hono、Cloudflare Workers、D1 关系型数据库、R2 对象存储、消息队列 |
 | `packages/auth` | 认证与安全原语：WebCrypto 标准加密、令牌校验与旧站密码兼容支持 |
 | `packages/db` | 数据持久层：Drizzle ORM schema 定义与 D1 迁移脚本 |
 | `packages/minecraft` | Minecraft 领域逻辑：皮肤/披风 PNG 维度与透明通道校验、纹理渲染与协议组装 |
@@ -80,7 +80,7 @@ npm run dev
 启动完成后：
 - 前端页面：`http://localhost:5173`
 - Worker API：`http://localhost:8787`（前端开发服务器会自动将 API 和游戏接口代理至 Worker）
-- 初次初始化：访问 `http://localhost:5173/setup`，输入 `apps/api/.dev.vars` 中生成的 `SETUP_TOKEN` 即可创建首个管理员。
+- 初次初始化：访问 `http://localhost:5173/setup`，输入 `apps/server/.dev.vars` 中生成的 `SETUP_TOKEN` 即可创建首个管理员。
 - 演示数据：如需快速预览界面效果，可运行 `npm run db:seed:local` 创建演示账号与角色（仅供本地测试，切勿导入生产数据库）。
 
 本地环境下的 D1、R2、队列与 Durable Objects 均由 Wrangler 本地模拟，无需 Cloudflare 账号即可直接调试。
@@ -89,7 +89,7 @@ npm run dev
 
 ## 配置说明
 
-本地 Worker 配置可参考 `apps/api/.dev.vars.example`。生产环境建议通过 `wrangler secret put <KEY>` 写入敏感凭据，请勿将真实机密写入公开配置文件。
+本地 Worker 配置可参考 `apps/server/.dev.vars.example`。生产环境建议通过 `wrangler secret put <KEY>` 写入敏感凭据，请勿将真实机密写入公开配置文件。
 
 | 环境变量 | 必选 | 说明与建议 |
 |---|:---:|---|
@@ -164,7 +164,7 @@ npm run cli -- legacy migrate --dir /path/to/old-blessing-skin --env production 
   --yes --site-url https://skin.example.com                                       # → 未初始化的生产站点
 # dump 快照（如 phpMyAdmin 导出的 .sql）模式：无 .env 时需 --pwd-method 指定旧站密码算法
 
-# 站点设置读写（键白名单见 apps/api/src/env.ts 的 SETTING_DEFAULTS）
+# 站点设置读写（键白名单见 apps/server/src/env.ts 的 SETTING_DEFAULTS）
 npm run cli -- settings set --key site_name --value "我的皮肤站"
 ```
 

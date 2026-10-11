@@ -7,7 +7,7 @@ import { spawnNpm } from './npm.mjs';
 
 if (process.argv.length !== 2) throw new Error('本地种子命令不接受远程环境或自定义 Wrangler 参数');
 const directory = mkdtempSync(join(tmpdir(), 'pigeon-seed-'));
-const apiRoot = fileURLToPath(new URL('../apps/api/', import.meta.url));
+const apiRoot = fileURLToPath(new URL('../apps/server/', import.meta.url));
 function query(sql) {
   const result = spawnNpm(['exec', '--offline', '--', 'wrangler', 'd1', 'execute', 'bs-dev', '--local', '--config', 'wrangler.jsonc', '--command', sql, '--json'], { cwd: apiRoot, encoding: 'utf8', maxBuffer: 1024 * 1024 });
   if (result.error) throw result.error;

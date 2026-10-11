@@ -25,7 +25,7 @@ WORKDIR /src
 
 # 精确复制依赖清单，最大化利用层缓存
 COPY package.json package-lock.json ./
-COPY apps/api/package.json apps/api/
+COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY packages/auth/package.json packages/auth/
 COPY packages/db/package.json packages/db/
@@ -64,7 +64,7 @@ RUN npm init -y >/dev/null \
  && npm cache clean --force
 
 # bundle 产物、前端静态资源、迁移 SQL（migrate.ts 按 PIGEON_ROOT/packages/db/migrations* 探测）
-COPY --from=build /src/apps/api/dist-node/ dist-node/
+COPY --from=build /src/apps/server/dist-node/ dist-node/
 COPY --from=build /src/apps/web/dist/ web/dist/
 COPY --from=build /src/packages/db/migrations/ packages/db/migrations/
 COPY --from=build /src/packages/db/migrations-pg/ packages/db/migrations-pg/
@@ -95,5 +95,5 @@ EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:8787/api/v1/health').then(r => r.json()).then(j => process.exit(j.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
-# 启动时自动跑数据库迁移（apps/api/src/node/runtime.ts），再监听 HTTP
+# 启动时自动跑数据库迁移（apps/server/src/node/runtime.ts），再监听 HTTP
 CMD ["node", "dist-node/entry.mjs"]

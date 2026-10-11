@@ -1,8 +1,8 @@
 # Node 自托管部署
 
-除 Cloudflare Workers/Pages 之外，本仓库还提供 Node.js 自托管入口：同一个 Hono 应用、同一套业务代码与迁移 SQL，通过平台适配层（`apps/api/src/node/`）在 Node 上装配 D1/R2/DO/队列/限流的同形对象。本文描述该入口的 Docker 与裸机部署。
+除 Cloudflare Workers/Pages 之外，本仓库还提供 Node.js 自托管入口：同一个 Hono 应用、同一套业务代码与迁移 SQL，通过平台适配层（`apps/server/src/node/`）在 Node 上装配 D1/R2/DO/队列/限流的同形对象。本文描述该入口的 Docker 与裸机部署。
 
-与 Cloudflare 部署的关系：两者共享 `apps/api/src/app.ts` 的 `createApp()` 与 `apps/api/src/tasks.ts` 的任务执行体，Worker 路径（`apps/api/src/index.ts`、wrangler 部署）不受 Node 部署影响，数据库迁移在 Worker 侧仍由 `wrangler d1 migrations apply` 应用。
+与 Cloudflare 部署的关系：两者共享 `apps/server/src/app.ts` 的 `createApp()` 与 `apps/server/src/tasks.ts` 的任务执行体，Worker 路径（`apps/server/src/index.ts`、wrangler 部署）不受 Node 部署影响，数据库迁移在 Worker 侧仍由 `wrangler d1 migrations apply` 应用。
 
 ---
 
@@ -105,8 +105,8 @@ git clone --recurse-submodules https://github.com/Pigeon-Server/PigeonSkin-Serve
 cd PigeonSkin-Server
 npm ci
 npm run build                                        # 前端 → apps/web/dist
-npm run build:node --workspace @pigeon-skin/api      # API bundle → apps/api/dist-node/entry.mjs
-npm run start:node --workspace @pigeon-skin/api      # 监听 0.0.0.0:8787
+npm run build:node --workspace @pigeon-skin/server      # API bundle → apps/server/dist-node/entry.mjs
+npm run start:node --workspace @pigeon-skin/server      # 监听 0.0.0.0:8787
 ```
 
 环境变量与 Docker 相同（下表）。两个路径相关变量在裸机部署下需要留意：
@@ -125,7 +125,7 @@ After=network.target
 User=pigeon
 WorkingDirectory=/srv/pigeon
 EnvironmentFile=/srv/pigeon/.env
-ExecStart=/usr/bin/node apps/api/dist-node/entry.mjs
+ExecStart=/usr/bin/node apps/server/dist-node/entry.mjs
 Restart=on-failure
 
 [Install]
@@ -136,7 +136,7 @@ WantedBy=multi-user.target
 
 ## 环境变量参考
 
-以下变量在 `apps/api/src/node/runtime.ts` 装配，变量名与 Worker 部署的 wrangler vars/secrets 对齐。除标注外均可省略（省略即用默认行为）。
+以下变量在 `apps/server/src/node/runtime.ts` 装配，变量名与 Worker 部署的 wrangler vars/secrets 对齐。除标注外均可省略（省略即用默认行为）。
 
 ### 数据库
 

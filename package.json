@@ -13,14 +13,14 @@
     "npm": ">=10"
   },
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail \"npm run dev --workspace @pigeon-skin/api\" \"npm run dev --workspace @pigeon-skin/web\"",
+    "dev": "concurrently --kill-others-on-fail \"npm run dev --workspace @pigeon-skin/server\" \"npm run dev --workspace @pigeon-skin/web\"",
     "setup:local": "node tools/setup-local.mjs",
     "build": "npm run build --workspace @pigeon-skin/web",
     "test": "npm run test --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "lint": "eslint .",
     "db:check": "npm run test --workspace @pigeon-skin/db",
-    "db:migrate:local": "npm exec --offline --workspace @pigeon-skin/api -- wrangler d1 migrations apply bs-dev --local",
+    "db:migrate:local": "npm exec --offline --workspace @pigeon-skin/server -- wrangler d1 migrations apply bs-dev --local",
     "db:migrate:preview": "node tools/cloudflare.mjs preview migrate",
     "db:migrate:prod": "node tools/cloudflare.mjs production migrate",
     "deploy:preview": "node tools/cloudflare.mjs preview deploy",
