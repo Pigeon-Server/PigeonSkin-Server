@@ -12,11 +12,11 @@ async function account(admin: boolean) {
   if (admin) await makeAdmin(id);
   const logged = await SELF.fetch('https://x/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: email, password }) });
   expect(logged.status).toBe(200);
-  return logged.headers.get('set-cookie')!.split(';')[0]!;
+  return (await logged.json<{ accessToken: string }>()).accessToken;
 }
 const document = { title: '客户端接入', description: '本站的外置登录指南', content: '## 配置\n\n`{{site_url}}/api/yggdrasil`', revision: 0 };
 function save(cookie: string, body: ManualDocumentInput & { group?: string } = document, slug = 'yggdrasil', locale?: string) {
-  return SELF.fetch(`https://x/api/v1/admin/manual/${slug}${locale ? `?locale=${locale}` : ''}`, { method: 'PUT', headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify(body) });
+  return SELF.fetch(`https://x/api/v1/admin/manual/${slug}${locale ? `?locale=${locale}` : ''}`, { method: 'PUT', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify(body) });
 }
 describe('内置用户手册', () => {
   it('分别保存各语言版本，英文回退与目标语言修订号互不混用', async () => {
@@ -38,7 +38,7 @@ describe('内置用户手册', () => {
     expect((await save(cookie, { ...document, content: 'English update', revision: en.updatedAt }, slug, 'en')).status).toBe(200);
     expect((await read('ja_JP')).items.find(item => item.slug === slug)?.content).toBe('日本語の内容');
     expect((await save(cookie, { ...document, revision: 0 }, slug, 'ja_JP')).status).toBe(409);
-    expect((await SELF.fetch(`https://x/api/v1/admin/manual/${slug}?locale=ja_JP&revision=${ja.updatedAt}`, { method: 'DELETE', headers: { cookie, 'sec-fetch-site': 'same-origin' } })).status).toBe(204);
+    expect((await SELF.fetch(`https://x/api/v1/admin/manual/${slug}?locale=ja_JP&revision=${ja.updatedAt}`, { method: 'DELETE', headers: { authorization: `Bearer ${cookie}`, 'sec-fetch-site': 'same-origin' } })).status).toBe(204);
     expect((await read('ja_JP')).items.find(item => item.slug === slug)?.content).toBe('English update');
     expect((await save(cookie, document, slug, 'fr_FR')).status).toBe(422);
   });
@@ -58,7 +58,7 @@ describe('内置用户手册', () => {
     expect((await save('')).status).toBe(401);
     const cookie = await account(false);
     expect((await save(cookie)).status).toBe(403);
-    expect((await SELF.fetch('https://x/api/v1/admin/manual/yggdrasil?revision=0', { method: 'DELETE', headers: { cookie, 'sec-fetch-site': 'same-origin' } })).status).toBe(403);
+    expect((await SELF.fetch('https://x/api/v1/admin/manual/yggdrasil?revision=0', { method: 'DELETE', headers: { authorization: `Bearer ${cookie}`, 'sec-fetch-site': 'same-origin' } })).status).toBe(403);
   });
   it('保存原始 Markdown，公开返回配置地址，防止覆盖别人的修改，并可恢复内置版本', async () => {
     const cookie = await account(true);
@@ -75,8 +75,8 @@ describe('内置用户手册', () => {
     expect((await save(cookie, { ...document, content: '更新内容', revision: saved.updatedAt })).status).toBe(200);
     const current = await (await SELF.fetch('https://x/api/v1/manual')).json<{ items: Array<{ slug: string; updatedAt: number }> }>();
     const revision = current.items.find(page => page.slug === 'yggdrasil')!.updatedAt;
-    expect((await SELF.fetch(`https://x/api/v1/admin/manual/yggdrasil?revision=${saved.updatedAt}`, { method: 'DELETE', headers: { cookie, 'sec-fetch-site': 'same-origin' } })).status).toBe(409);
-    expect((await SELF.fetch(`https://x/api/v1/admin/manual/yggdrasil?revision=${revision}`, { method: 'DELETE', headers: { cookie, 'sec-fetch-site': 'same-origin' } })).status).toBe(204);
+    expect((await SELF.fetch(`https://x/api/v1/admin/manual/yggdrasil?revision=${saved.updatedAt}`, { method: 'DELETE', headers: { authorization: `Bearer ${cookie}`, 'sec-fetch-site': 'same-origin' } })).status).toBe(409);
+    expect((await SELF.fetch(`https://x/api/v1/admin/manual/yggdrasil?revision=${revision}`, { method: 'DELETE', headers: { authorization: `Bearer ${cookie}`, 'sec-fetch-site': 'same-origin' } })).status).toBe(204);
     const reset = await (await SELF.fetch('https://x/api/v1/manual')).json<{ items: Array<{ slug: string }> }>();
     expect(reset.items.some(page => page.slug === 'yggdrasil')).toBe(false);
   });
@@ -94,7 +94,7 @@ describe('内置用户手册', () => {
     const saved = await response.json<{ updatedAt: number }>();
     const read = await (await SELF.fetch('https://x/api/v1/manual')).json<{ items: Array<{ slug: string; group: string }> }>();
     expect(read.items.find(page => page.slug === 'server-connection')!.group).toBe('服务器接入');
-    expect((await SELF.fetch(`https://x/api/v1/admin/manual/server-connection?revision=${saved.updatedAt}`, { method: 'DELETE', headers: { cookie, 'sec-fetch-site': 'same-origin' } })).status).toBe(204);
+    expect((await SELF.fetch(`https://x/api/v1/admin/manual/server-connection?revision=${saved.updatedAt}`, { method: 'DELETE', headers: { authorization: `Bearer ${cookie}`, 'sec-fetch-site': 'same-origin' } })).status).toBe(204);
     const after = await (await SELF.fetch('https://x/api/v1/manual')).json<{ items: Array<{ slug: string }> }>();
     expect(after.items.some(page => page.slug === 'server-connection')).toBe(false);
   });

@@ -90,7 +90,7 @@ vi.mock('@/api', () => {
       add: vi.fn().mockResolvedValue({ ok: true, scoreSpent: 0 }),
       remove: vi.fn().mockResolvedValue(undefined),
     },
-    previewUrl: (hash: string) => `/preview/${hash}?render=3`,
+    previewUrl: (hash: string, texture: { kind: 'skin' | 'cape' }) => `/preview/${hash}?render=3&kind=${texture.kind}`,
   };
 });
 

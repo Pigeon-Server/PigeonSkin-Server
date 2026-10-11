@@ -7,13 +7,19 @@ import { runMigrations } from './setup.ts';
 
 let uid = 0, cookie = '';
 const bindings = () => ({ ...env, GITHUB_CLIENT_ID: 'test-github', GITHUB_CLIENT_SECRET: 'github-secret', LITTLESKIN_CLIENT_ID: 'test-little', LITTLESKIN_CLIENT_SECRET: 'little-secret', MICROSOFT_CLIENT_ID: 'test-microsoft', MICROSOFT_CLIENT_SECRET: 'microsoft-secret' }) as Bindings;
+// session 串 = "<Bearer access token>[; <Cookie>][...]"：含 "=" 的是 Cookie 段
+function authHeaders(session: string): Record<string, string> {
+  const tokens: string[] = [], cookies: string[] = [];
+  for (const part of session.split('; ').filter(Boolean)) (part.includes('=') ? cookies : tokens).push(part);
+  return { ...(tokens.length ? { authorization: `Bearer ${tokens.join('; ')}` } : {}), ...(cookies.length ? { cookie: cookies.join('; ') } : {}) };
+}
 async function get(path: string, session = '') {
   const ctx = createExecutionContext();
-  const response = await createApp().fetch(new Request('https://x' + path, { headers: { cookie: session } }), bindings(), ctx);
+  const response = await createApp().fetch(new Request('https://x' + path, { headers: authHeaders(session) }), bindings(), ctx);
   await waitOnExecutionContext(ctx); return response;
 }
 async function json(path: string, body: unknown, session: string) {
-  return SELF.fetch('https://x' + path, { method: 'POST', headers: { cookie: session, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  return SELF.fetch('https://x' + path, { method: 'POST', headers: { ...authHeaders(session), 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' }, body: JSON.stringify(body) });
 }
 function cookies(response: Response) { return (response.headers as Headers & { getSetCookie(): string[] }).getSetCookie().map(v => v.split(';')[0]!).join('; '); }
 async function begin(provider = 'github', session = '') {
@@ -23,6 +29,16 @@ async function begin(provider = 'github', session = '') {
 }
 async function finish(auth: Awaited<ReturnType<typeof begin>>, provider = 'github', suffix = 'code=remote-code') {
   return get(`/auth/oauth/${provider}/callback?state=${auth.state}&${suffix}`, auth.session);
+}
+/** 登录类回调现在 302 到前端回调页携带一次性 code；这里替 SPA 完成 code 换令牌 */
+async function finishExchange(auth: Awaited<ReturnType<typeof begin>>, provider = 'github', suffix = 'code=remote-code') {
+  const response = await finish(auth, provider, suffix);
+  const location = response.headers.get('location') ?? '';
+  if (!location.includes('/auth/exchange?code=')) return { response, location, tokens: null };
+  const code = new URL(location).searchParams.get('code')!;
+  const exchange = await json('/api/v1/auth/token', { code }, '');
+  expect(exchange.status).toBe(200);
+  return { response, location, tokens: await exchange.json<{ accessToken: string; refreshToken: string; destination: string }>() };
 }
 function github(id: number, email: string | null = 'remote@example.com', verified = true) {
   fetchMock.activate(); fetchMock.disableNetConnect();
@@ -36,7 +52,7 @@ beforeAll(async () => {
   const row = await env.DB.prepare("INSERT INTO users (email, nickname, password_hash, role, score, email_verified_at, created_at, updated_at) VALUES (?, ?, ?, 'normal', 1000, ?, ?, ?) RETURNING id").bind('owner@example.com', 'Local owner', await hashPassword('social-password-9'), now, now, now).first<{ id: number }>();
   uid = row!.id;
   const login = await json('/api/v1/auth/login', { identifier: 'owner@example.com', password: 'social-password-9' }, '');
-  cookie = cookies(login);
+  cookie = (await login.json<{ accessToken: string }>()).accessToken;
 });
 afterEach(() => { fetchMock.deactivate(); });
 
@@ -48,15 +64,15 @@ describe('Third-party authorization', () => {
   });
   it('registers from the private verified GitHub email and never invents a usable password', async () => {
     const auth = await begin(); github(101);
-    const response = await finish(auth); expect(response.headers.get('location')).toBe('/auth/initialize?redirect=%2Fuser');
-    let session = cookies(response);
+    const exchanged = await finishExchange(auth); expect(exchanged.tokens!.destination).toBe('/auth/initialize?redirect=%2Fuser');
+    let session = exchanged.tokens!.accessToken;
     const user = await env.DB.prepare('SELECT id, email_verified_at, password_hash FROM users WHERE email = ?').bind('remote@example.com').first<{ id: number; email_verified_at: number; password_hash: string }>();
     expect(user!.email_verified_at).toBeTruthy(); expect(user!.password_hash).toBe('');
     const status = await (await get('/api/v1/auth/initialize', session)).json<{ needsInitialization: boolean; ticket: string }>();
     expect(status.needsInitialization).toBe(true);
     expect((await json('/api/v1/me/oauth/github/unbind', {}, session)).status).toBe(403);
     const initialized = await json('/api/v1/auth/initialize', { ticket: status.ticket, nickname: 'Remote player', email: 'remote@example.com', password: 'new-social-password-9', playerName: 'RemotePlayer' }, session);
-    expect(initialized.status).toBe(200); session = cookies(initialized);
+    expect(initialized.status).toBe(200); session = (await initialized.json<{ accessToken: string }>()).accessToken;
     expect((await json('/api/v1/me/oauth/github/unbind', {}, session)).status).toBe(200);
     const login = await json('/api/v1/auth/login', { identifier: 'remote@example.com', password: 'new-social-password-9' }, ''); expect(login.status).toBe(200);
     fetchMock.assertNoPendingInterceptors();
@@ -66,7 +82,7 @@ describe('Third-party authorization', () => {
     fetchMock.activate(); fetchMock.disableNetConnect();
     fetchMock.get('https://littleskin.cn').intercept({ path: '/oauth/token', method: 'POST' }).reply(200, { access_token: 'little-token' });
     fetchMock.get('https://littleskin.cn').intercept({ path: '/api/user', method: 'GET' }).reply(200, { uid: 102, nickname: 'Little player', email: 'little@example.com', verified: true });
-    const response = await finish(auth, 'littleskin'); expect(response.headers.get('location')).toBe('/auth/initialize?redirect=%2Fuser');
+    const exchanged = await finishExchange(auth, 'littleskin'); expect(exchanged.tokens!.destination).toBe('/auth/initialize?redirect=%2Fuser');
     const row = await env.DB.prepare('SELECT provider_user_id FROM user_identities WHERE provider = ?').bind('littleskin').first<{ provider_user_id: string }>(); expect(row!.provider_user_id).toBe('102');
     fetchMock.assertNoPendingInterceptors();
   });
@@ -77,12 +93,12 @@ describe('Third-party authorization', () => {
     fetchMock.get('https://graph.microsoft.com').intercept({ path: '/v1.0/me', method: 'GET' }).reply(200, { id: 'ms-user', mail: 'owner@example.com', displayName: 'Microsoft account' });
     const response = await finish(auth, 'microsoft'); expect(response.headers.get('location')).toContain('auth.oauth_link_required');
     expect(await env.DB.prepare('SELECT 1 FROM user_identities WHERE provider = ?').bind('microsoft').first()).toBeNull();
-    expect(cookies(response)).not.toContain('bs_session='); fetchMock.assertNoPendingInterceptors();
+    fetchMock.assertNoPendingInterceptors();
   });
   it('merges only when both the provider and existing account have verified the email', async () => {
     const auth = await begin(); github(103, 'owner@example.com');
-    const response = await finish(auth); expect(response.headers.get('location')).toBe('/user');
-    const session = await get('/api/v1/auth/session', cookies(response)); expect((await session.json<{ id: number }>()).id).toBe(uid);
+    const exchanged = await finishExchange(auth); expect(exchanged.tokens!.destination).toBe('/user');
+    const session = await get('/api/v1/auth/session', exchanged.tokens!.accessToken); expect((await session.json<{ id: number }>()).id).toBe(uid);
     expect((await env.DB.prepare('SELECT count(*) AS n FROM users').first<{ n: number }>())!.n).toBe(1);
   });
   it('requires explicit linking for a locally unverified matching email', async () => {
@@ -93,19 +109,22 @@ describe('Third-party authorization', () => {
   });
   it('keeps unverified GitHub emails from being used to identify an existing user', async () => {
     const auth = await begin(); github(105, 'owner@example.com', false);
-    const response = await finish(auth); expect(response.headers.get('location')).toBe('/auth/initialize?redirect=%2Fuser');
-    const user = await (await get('/api/v1/auth/session', cookies(response))).json<{ id: number; emailVerified: boolean; email: string }>();
+    const exchanged = await finishExchange(auth); expect(exchanged.tokens!.destination).toBe('/auth/initialize?redirect=%2Fuser');
+    const user = await (await get('/api/v1/auth/session', exchanged.tokens!.accessToken)).json<{ id: number; emailVerified: boolean; email: string }>();
     expect(user.id).not.toBe(uid); expect(user.emailVerified).toBe(false); expect(user.email).toMatch(/@oauth.invalid$/);
   });
-  it('binds state to the provider, browser and current local session, then consumes it once', async () => {
+  it('binds state to the provider, browser and initiating session, then consumes it once', async () => {
     const auth = await begin('github', cookie);
     const other = { ...auth, session: cookie + '; oauth_' + auth.state + '=wrong-browser' };
     expect((await finish(other)).headers.get('location')).toContain('auth.oauth_failed');
     expect((await finish(auth, 'microsoft')).headers.get('location')).toContain('auth.oauth_failed');
-    expect((await finish({ ...auth, session: auth.session.replace(cookie + '; ', '') })).headers.get('location')).toContain('auth.oauth_failed');
+    // 回调身份以 state 行为准：即使发起会话被撤销，也不会误绑到别的会话/用户，
+    // 而是退化为匿名注册流程
+    await env.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE user_id = ?').bind(Date.now(), uid).run();
     github(106, 'different@example.com');
-    expect((await finish(auth)).headers.get('location')).toBe('/profile?oauth_success=1');
-    expect((await finish(auth)).headers.get('location')).toContain('auth.oauth_failed');
+    const loggedOut = await finishExchange({ ...auth, session: auth.session.replace(cookie + '; ', '') });
+    expect(loggedOut.tokens!.destination).toBe('/auth/initialize?redirect=%2Fuser');
+    expect(await env.DB.prepare("SELECT 1 FROM user_identities WHERE provider_user_id = '106' AND user_id = ?").bind(uid).first()).toBeNull();
     fetchMock.assertNoPendingInterceptors();
   });
   it('allows independent browser tabs without overwriting another authorization state', async () => {
@@ -138,7 +157,11 @@ describe('Third-party authorization', () => {
     const start = await get('/auth/oauth/github?redirect=%2Fconnect%2Fauthorize%2Finteraction', cookie);
     const auth = { state: new URL(start.headers.get('location')!).searchParams.get('state')!, session: cookie + '; ' + cookies(start), url: new URL(start.headers.get('location')!) };
     github(109);
-    const callback = await finish(auth); expect(callback.headers.get('location')).toBe('/connect/authorize/interaction');
-    expect(cookies(callback)).toContain('bs_session='); expect(cookies(callback)).not.toContain(cookie);
+    const exchanged = await finishExchange(auth);
+    expect(exchanged.tokens!.destination).toBe('/connect/authorize/interaction');
+    // 登录轮换：换取到的 refresh 令牌与发起者的当前会话不同（旧会话已被撤销）
+    expect(exchanged.tokens!.refreshToken).not.toBe('');
+    const session = await get('/api/v1/auth/session', exchanged.tokens!.accessToken);
+    expect((await session.json<{ id: number }>()).id).toBe(uid);
   });
 });

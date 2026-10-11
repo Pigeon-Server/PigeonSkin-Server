@@ -131,12 +131,57 @@ export function textureObjectKey(hash: string): string {
 
 /** 头像衍生图的对象键 */
 export function avatarObjectKey(hash: string, mode: '2d' | '3d', size: number): string {
-  return mode === '3d' ? `avatars/v3/${hash}/3d/${size}.png` : `avatars/v3/${hash}/2d-${size}.png`;
+  return `${avatarObjectPrefix(hash)}${mode === '3d' ? `3d/${size}` : `2d-${size}`}.png`;
+}
+
+/** 该哈希所有头像衍生图的键前缀（按前缀批量清理时用，避免在别处重写键格式） */
+export function avatarObjectPrefix(hash: string): string {
+  return `avatars/v3/${hash}/`;
 }
 
 /** 预览衍生图的对象键 */
 export function previewObjectKey(hash: string): string {
   return `previews/v3/${hash}.png`;
+}
+
+// ── 预览的渲染签名 ───────────────────────────────────────────────────────────
+// 预览图由 (哈希, 类型, 模型) 决定，而类型与模型是可以在材质页改的库列。
+// 签名是这三者里除哈希外的部分：它必须以查询参数进 URL（前端据此让浏览器
+// 在改过模型后换一条 URL），服务端据此判断这条 URL 能不能 immutable 缓存。
+// 规则与理由见 docs/rewrite/06-texture-architecture.md §6.4。
+
+export type PreviewRenderKind = 'skin' | 'cape';
+
+export interface PreviewRenderIdentity {
+  kind: PreviewRenderKind;
+  /** 披风没有模型概念，统一归一为 default */
+  model: 'default' | 'slim';
+}
+
+/** 归一化签名：`skin:slim` / `cape:default` */
+export function previewRenderSignature(identity: PreviewRenderIdentity): string {
+  return `${identity.kind}:${identity.kind === 'cape' ? 'default' : identity.model}`;
+}
+
+/**
+ * 预览 URL 的查询串（`render` 是渲染管线版本，沿用既有的缓存破坏约定）。
+ * kind 按库内取值归一：只有 `cape` 视为披风，其余都当皮肤（披风不带 model）。
+ */
+export function previewRenderQuery(kind: string, model?: string | null): string {
+  const normalized: PreviewRenderKind = kind === 'cape' ? 'cape' : 'skin';
+  const params = new URLSearchParams({ render: '3', kind: normalized });
+  if (normalized === 'skin') params.set('model', model === 'slim' ? 'slim' : 'default');
+  return params.toString();
+}
+
+/**
+ * 解析请求声明的签名。kind 缺失或非法、皮肤没给出模型 → null（"未声明"）。
+ * 未声明的请求拿不到 immutable：结果取决于库内当前值，只能重验证。
+ */
+export function parsePreviewRenderSignature(kind?: string | null, model?: string | null): string | null {
+  if (kind !== 'skin' && kind !== 'cape') return null;
+  if (kind === 'cape') return 'cape:default';
+  return model === 'default' || model === 'slim' ? `skin:${model}` : null;
 }
 
 /** 尺寸是否在衍生图白名单里。旧版接受任意整数，会被用来把 R2 存储撑爆。 */

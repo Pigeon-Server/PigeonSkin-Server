@@ -20,14 +20,14 @@ async function admin(role = 'super_admin') {
   await makeAdmin(id);
   if (role !== 'super_admin') await env.DB.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, id).run();
   const logged = await SELF.fetch('https://x/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: email, password }) });
-  return logged.headers.get('set-cookie')!.split(';')[0]!;
+  return (await logged.json<{ accessToken: string }>()).accessToken;
 }
 async function settings(cookie: string, entries: Record<string, string>) {
-  return SELF.fetch('https://x/api/v1/admin/settings', { method: 'PATCH', headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ settings: Object.entries(entries).map(([key, value]) => ({ key, value })) }) });
+  return SELF.fetch('https://x/api/v1/admin/settings', { method: 'PATCH', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ settings: Object.entries(entries).map(([key, value]) => ({ key, value })) }) });
 }
 async function legacyFetch(path: string, cookie = '') {
   const ctx = createExecutionContext();
-  const response = await createApp().fetch(new Request(`https://x${path}`, { headers: { cookie } }), { ...env, GITHUB_CLIENT_ID: 'legacy-client', GITHUB_CLIENT_SECRET: 'legacy-secret', MICROSOFT_CLIENT_ID: 'legacy-microsoft', MICROSOFT_CLIENT_SECRET: 'legacy-microsoft-secret' } as Bindings, ctx);
+  const response = await createApp().fetch(new Request(`https://x${path}`, { headers: { authorization: `Bearer ${cookie}` } }), { ...env, GITHUB_CLIENT_ID: 'legacy-client', GITHUB_CLIENT_SECRET: 'legacy-secret', MICROSOFT_CLIENT_ID: 'legacy-microsoft', MICROSOFT_CLIENT_SECRET: 'legacy-microsoft-secret' } as Bindings, ctx);
   await waitOnExecutionContext(ctx);
   return response;
 }
@@ -66,10 +66,26 @@ describe('Web configuration', () => {
     expect((await settings(cookie, { icp_beian: '<script>alert(1)</script>' })).status).toBe(422);
     expect(await (await SELF.fetch('https://x/api/v1/settings/public')).json()).toMatchObject({ public_security_beian: '京公网安备11010102000001号' });
   });
+  // 覆盖层读缓存（60 秒）依赖写路径显式失效：写后必须立即可见、
+  // 删除覆盖后必须立即回落全局值，否则表现为 60 秒脏读。
+  it('localizes site_name per locale and falls back immediately after clearing the override', async () => {
+    const cookie = await admin();
+    expect((await settings(cookie, { site_name: 'Localized Name' })).status).toBe(200);
+    const overridden = await SELF.fetch('https://x/api/v1/settings/public?locale=ja_JP');
+    expect(await overridden.json()).toMatchObject({ site_name: 'Localized Name' });
+    const write = await SELF.fetch('https://x/api/v1/admin/settings', { method: 'PATCH', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ settings: [{ key: 'site_name', locale: 'ja_JP', value: 'ローカライズド' }] }) });
+    expect(write.status).toBe(200);
+    const localized = await SELF.fetch('https://x/api/v1/settings/public?locale=ja_JP');
+    expect(await localized.json()).toMatchObject({ site_name: 'ローカライズド' });
+    expect(await (await SELF.fetch('https://x/api/v1/settings/public')).json()).toMatchObject({ site_name: 'Localized Name' });
+    const clear = await SELF.fetch('https://x/api/v1/admin/settings/site_name?locale=ja_JP', { method: 'DELETE', headers: { authorization: `Bearer ${cookie}`, 'sec-fetch-site': 'same-origin' } });
+    expect(clear.status).toBe(204);
+    expect(await (await SELF.fetch('https://x/api/v1/settings/public?locale=ja_JP')).json()).toMatchObject({ site_name: 'Localized Name' });
+  });
   it('edits provider credentials through the Web API and returns only a secret placeholder', async () => {
     const cookie = await admin();
     expect((await settings(cookie, { github_client_id: 'web-client', github_client_secret: 'web-secret' })).status).toBe(200);
-    const response = await SELF.fetch('https://x/api/v1/admin/settings', { headers: { cookie } });
+    const response = await SELF.fetch('https://x/api/v1/admin/settings', { headers: { authorization: `Bearer ${cookie}` } });
     const body = await response.json<{ values: Record<string, string>; specs: Record<string, { secret?: boolean }> }>();
     expect(body.values.github_client_id).toBe('web-client'); expect(body.values.github_client_secret).toBe('********'); expect(body.specs.github_client_secret!.secret).toBe(true);
     expect(JSON.stringify(body)).not.toContain('web-secret');
@@ -91,7 +107,7 @@ describe('Web configuration', () => {
     await settings(owner, { resend_api_key: 'private-mail-key' });
     const cookie = await admin('admin');
     expect((await settings(cookie, { resend_api_key: 'other-key' })).status).toBe(403);
-    const read = await (await SELF.fetch('https://x/api/v1/admin/settings', { headers: { cookie } })).json<{ values: Record<string, string> }>();
+    const read = await (await SELF.fetch('https://x/api/v1/admin/settings', { headers: { authorization: `Bearer ${cookie}` } })).json<{ values: Record<string, string> }>();
     expect(read.values.resend_api_key).toBeUndefined();
     const pub = await (await SELF.fetch('https://x/api/v1/settings/public')).text(); expect(pub).not.toContain('private-mail-key'); expect(pub).not.toContain('resend_api_key');
   });
@@ -99,7 +115,7 @@ describe('Web configuration', () => {
     const cookie = await admin();
     expect((await settings(cookie, { site_url: 'https://skin.example.com', mail_from: 'Skin Server <mail@example.com>' })).status).toBe(200);
     const metadata = await (await SELF.fetch('https://x/api/yggdrasil')).json<{ meta: { links: { homepage: string } } }>(); expect(metadata.meta.links.homepage).toBe('https://skin.example.com');
-    const state = await (await SELF.fetch('https://x/api/v1/admin/integrations', { headers: { cookie } })).json<{ apiRoot: string }>(); expect(state.apiRoot).toBe('https://skin.example.com/api/yggdrasil');
+    const state = await (await SELF.fetch('https://x/api/v1/admin/integrations', { headers: { authorization: `Bearer ${cookie}` } })).json<{ apiRoot: string }>(); expect(state.apiRoot).toBe('https://skin.example.com/api/yggdrasil');
     expect((await settings(cookie, { site_url: 'javascript:alert(1)' })).status).toBe(422);
     expect((await settings(cookie, { mail_from: 'bad\r\nInjected' })).status).toBe(422);
     // mail_from 允许纯显示名与纯邮箱;含尖括号必须是完整地址形式
@@ -110,6 +126,32 @@ describe('Web configuration', () => {
     // 切到 smtp 驱动后同一值合法
     expect((await settings(cookie, { mail_driver: 'smtp' })).status).toBe(422); // smtp 缺 host
     expect((await settings(cookie, { mail_driver: 'smtp', smtp_host: 'mail.example.test', mail_from: 'Pigeon Skin' })).status).toBe(200);
+  });
+  it('overrides OAuth redirect URIs and exposes them in the admin integrations status', async () => {
+    const cookie = await admin();
+    // 默认回调 = APP_URL 拼接
+    const before = await (await SELF.fetch('https://x/api/v1/admin/integrations', { headers: { authorization: `Bearer ${cookie}` } })).json<{ providers: Array<{ id: string; callbackUrl: string }>; mojang: { callbackUrl: string } }>();
+    expect(before.providers.find(p => p.id === 'github')!.callbackUrl).toBe('http://localhost:8787/auth/oauth/github/callback');
+    expect(before.mojang.callbackUrl).toBe('http://localhost:8787/mojang/callback');
+    // 覆盖后发起授权与状态接口都使用覆盖值
+    expect((await settings(cookie, { github_redirect_uri: 'https://skin.example.com/auth/login/github/callback' })).status).toBe(200);
+    const after = await (await SELF.fetch('https://x/api/v1/admin/integrations', { headers: { authorization: `Bearer ${cookie}` } })).json<{ providers: Array<{ id: string; callbackUrl: string }>; mojang: { callbackUrl: string } }>();
+    expect(after.providers.find(p => p.id === 'github')!.callbackUrl).toBe('https://skin.example.com/auth/login/github/callback');
+    expect(after.providers.find(p => p.id === 'littleskin')!.callbackUrl).toBe('http://localhost:8787/auth/oauth/littleskin/callback');
+    const authorize = await SELF.fetch('https://x/api/v1/oauth/providers');
+    expect(authorize.status).toBe(200);
+    // 回调地址须带合法路径；http 与 query 都拒绝
+    expect((await settings(cookie, { mojang_redirect_uri: 'http://skin.example.com/mojang/callback' })).status).toBe(422);
+    expect((await settings(cookie, { mojang_redirect_uri: 'https://skin.example.com/mojang/callback?x=1' })).status).toBe(422);
+    expect((await settings(cookie, { mojang_redirect_uri: 'https://skin.example.com/mojang/callback' })).status).toBe(200);
+    expect((await (await SELF.fetch('https://x/api/v1/admin/integrations', { headers: { authorization: `Bearer ${cookie}` } })).json<{ mojang: { callbackUrl: string } }>()).mojang.callbackUrl).toBe('https://skin.example.com/mojang/callback');
+  });
+  it('serves the legacy PHP-style callback alias with the same error shape', async () => {
+    // 未配置凭据：别名与标准路径同样 404 重定向回登录页
+    const alias = await SELF.fetch('https://x/auth/login/github/callback?code=x&state=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', { redirect: 'manual' });
+    expect(alias.status).toBe(302);
+    expect(alias.headers.get('location')).toContain('/login?oauth_error=auth.oauth_unavailable');
+    expect(alias.headers.get('cache-control')).toBe('no-store');
   });
   it('configures the captcha driver and business switches without exposing the secret', async () => {
     const cookie = await admin();

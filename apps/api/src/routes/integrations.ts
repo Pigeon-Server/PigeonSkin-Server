@@ -5,6 +5,7 @@ import { searchConfiguration, searchSubmissionStatus, queuePublicSubmissions } f
 import { createSkinConfigs } from '@pigeon-skin/shared/skin-config';
 import { readPublic } from '../services/settings.ts';
 import { getSetting, type AppEnv } from '../lib.ts';
+import { configurationValues } from '../services/configuration.ts';
 import { inspectSigningKey } from '../services/ygg-key.ts';
 import { audit } from '../services/audit.ts';
 import { officialResourceStatus, syncOfficialResources } from '../services/official-updates.ts';
@@ -50,6 +51,7 @@ integrationRoutes.get('/config/extra-list', async (c) => {
 integrationRoutes.get('/admin/integrations', async (c) => {
   currentAdmin(c);
   const root = c.env.APP_URL.replace(/\/$/, '');
+  const values = await configurationValues(c.env);
   const providers = [
     {
       id: 'github',
@@ -69,7 +71,7 @@ integrationRoutes.get('/admin/integrations', async (c) => {
   ].map((provider) => ({
     ...provider,
     configured: provider.clientId && provider.clientSecret,
-    callbackUrl: `${root}/auth/oauth/${provider.id}/callback`,
+    callbackUrl: values[`${provider.id}_redirect_uri`] || `${root}/auth/oauth/${provider.id}/callback`,
   }));
   return c.json({
     apiRoot: `${root}/api/yggdrasil`,
@@ -77,7 +79,7 @@ integrationRoutes.get('/admin/integrations', async (c) => {
     mojang: {
       configured:
         (c.env.MOJANG_CLIENT_ID || c.env.MOJANG_CLIENT_SECRET) ? !!(c.env.MOJANG_CLIENT_ID && c.env.MOJANG_CLIENT_SECRET) : !!(c.env.MICROSOFT_CLIENT_ID && c.env.MICROSOFT_CLIENT_SECRET),
-      callbackUrl: `${root}/mojang/callback`,
+      callbackUrl: values.mojang_redirect_uri || `${root}/mojang/callback`,
       usesMicrosoft: !(c.env.MOJANG_CLIENT_ID || c.env.MOJANG_CLIENT_SECRET),
     },
     signingKey: await inspectSigningKey(await getSetting(c.env, 'ygg_private_key')),

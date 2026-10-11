@@ -44,7 +44,8 @@ onMounted(load);
     </AppButton>
   </PageHeader>
   <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
-  <AppSkeleton v-if="loading" :count="5" /><template v-else-if="stats"><div class="grid grid-cols-2 gap-3 lg:grid-cols-5">
+  <AppSkeleton v-if="loading" variant="stats" :count="5" />
+  <template v-else-if="stats"><div class="grid grid-cols-2 gap-3 lg:grid-cols-5">
     <div v-for="card in cards" :key="card.field" class="panel !p-4">
       <div class="flex items-center justify-between">
         <span class="text-xs text-muted">{{ i18n.t(card.label) }}</span>

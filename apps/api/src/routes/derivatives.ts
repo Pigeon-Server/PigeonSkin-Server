@@ -4,11 +4,14 @@ import { defaultAvatarModel, defaultAvatarUrls } from '@pigeon-skin/shared/defau
 import { hashToken } from '@pigeon-skin/auth';
 import {
   avatarObjectKey, previewObjectKey, isAllowedDerivativeSize,
-  DERIVATIVE_CACHE_CONTROL, decodePng, encodePng,
+  DERIVATIVE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, previewEtag, decodePng, encodePng,
+  parsePreviewRenderSignature, previewRenderSignature, type PreviewRenderIdentity,
 } from '@pigeon-skin/minecraft';
 import { flag } from '../env.ts';
 import { isAdmin, type AppEnv } from '../lib.ts';
-import { canViewTextureHash, texturePubliclyReachable } from '../services/texture-access.ts';
+import {
+  canViewTextureHash, texturePubliclyReachable, textureRenderIdentity,
+} from '../services/texture-access.ts';
 
 type Ctx = Context<AppEnv>;
 
@@ -109,11 +112,21 @@ async function userAvatar(c: Ctx, userId: number) {
   return c.body(new Uint8Array(png), 200, { ...headers, 'Content-Type': 'image/png' });
 }
 
-async function servePreview(c: Ctx, hash: string, publicAccess: boolean): Promise<Response> {
+async function servePreview(
+  c: Ctx, hash: string, publicAccess: boolean,
+  identity: PreviewRenderIdentity, signatureMatches: boolean,
+): Promise<Response> {
   const key = previewObjectKey(hash);
-  const etag = `"pv-${hash}-3"`;
+  // ETag 带上 kind/model：预览的渲染结果取决于它们，而哈希不变 —— 只按哈希
+  // 算 ETag 会让改过模型的客户端重验证时拿到 304，继续用旧模型那一张。
+  const etag = previewEtag(hash, identity.kind, identity.kind === 'cape' ? null : identity.model);
 
-  const cacheControl = publicAccess ? DERIVATIVE_CACHE_CONTROL : 'private, no-store';
+  // 渲染签名与库内一致 → 这条 URL 就是内容地址，可以放心 immutable；
+  // 未声明（老链接、爬虫直连 /preview/{hash}）或与库内不一致 → 只能重验证，
+  // 否则会把旧模型的图钉在浏览器里。
+  const cacheControl = !publicAccess
+    ? 'private, no-store'
+    : signatureMatches ? DERIVATIVE_CACHE_CONTROL : REVALIDATE_CACHE_CONTROL;
   if (publicAccess && c.req.header('if-none-match') === etag) {
     return c.body(null, 304, { ETag: etag, 'Cache-Control': cacheControl });
   }
@@ -132,6 +145,7 @@ async function servePreview(c: Ctx, hash: string, publicAccess: boolean): Promis
   const generated = await generateOnMiss(c, hash, 'preview', publicAccess);
   if (generated) {
     generated.headers.set('ETag', etag);
+    generated.headers.set('Cache-Control', cacheControl);
     return generated;
   }
   return c.body(null, 404, { 'Cache-Control': publicAccess ? DERIVATIVE_MISSING_CACHE_CONTROL : 'private, no-store' });
@@ -154,19 +168,25 @@ export function registerDerivativeRoutes(app: Hono<AppEnv>): void {
     if (!publicAccess && !await canViewTextureHash(c.env, hash, c.get('user'))) {
       return c.body(null, 404, { 'Cache-Control': 'private, no-store' });
     }
-    const metadata = await c.env.DB.prepare('SELECT kind FROM textures WHERE hash = ? ORDER BY (kind = ?) DESC LIMIT 1').bind(hash, 'skin').first<{ kind: string }>();
-    if (metadata?.kind === 'cape') return c.body(null, 422, { 'Cache-Control': DERIVATIVE_MISSING_CACHE_CONTROL });
+    const identity = await textureRenderIdentity(c.env, hash);
+    if (identity.kind === 'cape') return c.body(null, 422, { 'Cache-Control': DERIVATIVE_MISSING_CACHE_CONTROL });
 
     return serveAvatar(c, hash, `avatar-${mode}-${size}`, publicAccess);
   });
 
-  // GET /preview/{hash}
+  // GET /preview/{hash}?kind=skin|cape&model=default|slim
+  //
+  // kind/model 不是渲染输入的自由选项，而是**渲染签名**：它告诉服务端这条 URL
+  // 声明要的是哪一版渲染。签名与库内一致才允许 immutable 缓存 —— 模型是可以在
+  // 材质页改的，不把签名放进 URL 的话，改过模型之后浏览器还会拿哈希旧缓存。
   app.get('/preview/:hash', async (c) => {
     const hash = c.req.param('hash');
     if (!isHash(hash)) return c.notFound();
 
     const publicAccess = await texturePubliclyReachable(c.env, hash);
     if (!publicAccess && !await canViewTextureHash(c.env, hash, c.get('user'))) return c.body(null, 404, { 'Cache-Control': 'private, no-store' });
-    return servePreview(c, hash, publicAccess);
+    const identity = await textureRenderIdentity(c.env, hash);
+    const requested = parsePreviewRenderSignature(c.req.query('kind'), c.req.query('model'));
+    return servePreview(c, hash, publicAccess, identity, requested === previewRenderSignature(identity));
   });
 }

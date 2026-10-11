@@ -6,7 +6,7 @@ import { isoCBOR } from '@simplewebauthn/server/helpers';
 import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON, AuthenticationResponseJSON } from '@simplewebauthn/server';
 import { createApp } from '../src/app.ts';
 import type { Bindings } from '../src/env.ts';
-import { createSession, sessionCookieName } from '../src/lib.ts';
+import { issueTokensFor } from '../src/lib.ts';
 import { base32, decryptSecret, encryptSecret, totp, matchingStep } from '../src/services/security-crypto.ts';
 import { state } from '../src/repositories/security.ts';
 import { runMigrations, mintRawToken } from './setup.ts';
@@ -15,9 +15,21 @@ const password = 'correct-horse-9';
 const key = base64url.encode(new Uint8Array(32).fill(7));
 const bindings = (): Bindings => ({ ...env, APP_URL: 'https://x', MFA_ENCRYPTION_KEY: key, RESEND_API_KEY: 'mail-test', GITHUB_CLIENT_ID: 'github-test', GITHUB_CLIENT_SECRET: 'secret' }) as Bindings;
 let uid: number, email: string, cookie: string;
+// session 串 = "<Bearer access token>[; <挑战/状态 Cookie>][...]"：
+// 含 "=" 的是 Cookie 段，否则是身份令牌（JWT 字符集不含 "="）。
+function splitSession(session: string): { token: string; cookie: string } {
+  let token = '', cookie = '';
+  for (const part of session.split('; ')) {
+    if (!part) continue;
+    if (part.includes('=')) cookie = cookie ? `${cookie}; ${part}` : part;
+    else token = part;
+  }
+  return { token, cookie };
+}
 async function call(path: string, body?: unknown, session = cookie, method = body === undefined ? 'GET' : 'POST', override: Partial<Bindings> = {}, origin = 'https://x') {
   const ctx = createExecutionContext();
-  const response = await createApp().fetch(new Request(origin + path, { method, headers: { cookie: session, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json', 'cf-connecting-ip': '127.0.0.12' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), { ...bindings(), ...override }, ctx);
+  const { token, cookie: challengeCookie } = splitSession(session);
+  const response = await createApp().fetch(new Request(origin + path, { method, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(challengeCookie ? { cookie: challengeCookie } : {}), 'sec-fetch-site': 'same-origin', 'content-type': 'application/json', 'cf-connecting-ip': '127.0.0.12' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), { ...bindings(), ...override }, ctx);
   await waitOnExecutionContext(ctx); return response;
 }
 function cookies(response: Response) {
@@ -58,8 +70,8 @@ function mockEmail(captured: string[]) {
 beforeAll(runMigrations);
 beforeEach(async () => {
   email = `security-${crypto.randomUUID()}@example.com`; uid = await user(email);
-  const session = await createSession(bindings(), uid, {});
-  cookie = `${sessionCookieName(bindings())}=${session.token}`;
+  const session = await issueTokensFor(bindings(), uid, {});
+  cookie = session.accessToken;
 });
 afterEach(() => { fetchMock.deactivate(); });
 
@@ -94,8 +106,10 @@ describe('two-factor authentication', () => {
     expect((await call('/api/v1/auth/2fa/verify', { method: 'totp', code: await totp(result.secret, Math.floor(Date.now() / 30000)) }, pending)).status).toBe(401);
     const nextCode = await totp(result.secret, Math.floor(Date.now() / 30000) + 1);
     const verified = await call('/api/v1/auth/2fa/verify', { method: 'totp', code: nextCode }, pending);
-    expect(verified.status).toBe(200); expect(await verified.json()).toMatchObject({ id: uid, redirect: '/connect/device' });
-    expect((await call('/api/v1/auth/session', undefined, cookies(verified))).status).toBe(200);
+    expect(verified.status).toBe(200);
+    const verifiedBody = await verified.json<{ id: number; redirect: string; accessToken: string }>();
+    expect(verifiedBody).toMatchObject({ id: uid, redirect: '/connect/device' });
+    expect((await call('/api/v1/auth/session', undefined, verifiedBody.accessToken)).status).toBe(200);
     expect((await call('/api/v1/auth/2fa/verify', { method: 'totp', code: nextCode }, pending)).status).toBe(401);
   });
   it('atomically consumes recovery codes and rejects concurrent challenge replay', async () => {
@@ -127,11 +141,11 @@ describe('two-factor authentication', () => {
   });
   it('regenerates recovery codes, revokes other sessions, and forbids removing the last method', async () => {
     const { codes } = await enableTotp();
-    const other = await createSession(bindings(), uid, {});
+    const other = await issueTokensFor(bindings(), uid, {});
     expect((await call('/api/v1/me/security/methods/totp', undefined, cookie, 'DELETE')).status).toBe(409);
     const regenerated = await call('/api/v1/me/security/recovery', {}); expect(regenerated.status).toBe(200);
     expect(await env.DB.prepare('SELECT id FROM recovery_codes WHERE id = ?').bind(await hashToken(`${uid}:${codes[0]}`)).first()).toBeNull();
-    expect((await call('/api/v1/auth/session', undefined, `bs_session=${other.token}`)).status).toBe(401);
+    expect((await call('/api/v1/auth/session', undefined, other.accessToken)).status).toBe(401);
     expect((await call('/api/v1/me/security/disable', {})).status).toBe(200);
     expect(await call('/api/v1/me/security').then(r => r.json())).toMatchObject({ enabled: false, recoveryRemaining: 0 });
   });
@@ -206,13 +220,13 @@ describe('two-factor authentication', () => {
 });
 
 async function githubCallback(session = '', target = '/user') {
-  const start = await call(`/auth/oauth/github?redirect=${encodeURIComponent(target)}`, undefined, session);
+  const start = await call(`/auth/oauth/github?redirect=${encodeURIComponent(target)}${session ? `&web_token=${encodeURIComponent(session)}` : ''}`, undefined, '');
   const state = new URL(start.headers.get('location')!).searchParams.get('state')!;
   fetchMock.activate(); fetchMock.disableNetConnect();
   fetchMock.get('https://github.com').intercept({ method: 'POST', path: '/login/oauth/access_token' }).reply(200, JSON.stringify({ access_token: 'test-token' }));
   fetchMock.get('https://api.github.com').intercept({ path: '/user' }).reply(200, JSON.stringify({ id: 'security-github', name: 'Security user' }));
   fetchMock.get('https://api.github.com').intercept({ path: '/user/emails' }).reply(200, JSON.stringify([{ email, verified: true, primary: true }]));
-  return call(`/auth/oauth/github/callback?state=${state}&code=test-code`, undefined, [session, cookies(start)].filter(Boolean).join('; '));
+  return call(`/auth/oauth/github/callback?state=${state}&code=test-code`, undefined, cookies(start));
 }
 describe('third-party identity verification', () => {
   beforeEach(async () => { await env.DB.prepare("INSERT INTO user_identities (provider, provider_user_id, user_id, created_at) VALUES ('github', 'security-github', ?, ?)").bind(uid, Date.now()).run(); });
@@ -272,8 +286,9 @@ describe('WebAuthn on workerd', () => {
     await reauth(); const authenticator = await virtualAuthenticator(); await registerKey(authenticator);
     const begin = await call('/api/v1/auth/passkeys/options', { remember: true, destination: '/user' }, ''); expect(begin.status).toBe(200);
     const verified = await call('/api/v1/auth/passkeys/verify', await authenticator.authenticate(await begin.json<PublicKeyCredentialRequestOptionsJSON>()), cookies(begin)); expect(verified.status).toBe(200);
-    expect(await verified.json()).toMatchObject({ id: uid, redirect: '/user' });
-    expect((await call('/api/v1/auth/session', undefined, cookies(verified))).status).toBe(200);
+    const verifiedBody = await verified.json<{ id: number; redirect: string; accessToken: string }>();
+    expect(verifiedBody).toMatchObject({ id: uid, redirect: '/user' });
+    expect((await call('/api/v1/auth/session', undefined, verifiedBody.accessToken)).status).toBe(200);
   });
   it('rejects registration without user verification, wrong origins, and HTTP', async () => {
     await reauth(); const authenticator = await virtualAuthenticator();

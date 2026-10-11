@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023"],
-    "types": ["@cloudflare/workers-types", "vitest/globals"]
+    "types": ["./worker-configuration.d.ts", "vitest/globals"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

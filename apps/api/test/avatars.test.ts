@@ -10,9 +10,9 @@ const hash = 'a'.repeat(64);
 const rgba = new Uint8Array(64 * 64 * 4);
 for (let y = 8; y < 16; y++) for (let x = 8; x < 16; x++) rgba.set([255, 0, 0, 255], (y * 64 + x) * 4);
 for (let y = 8; y < 16; y++) for (let x = 40; x < 48; x++) rgba.set([0, 0, 255, 255], (y * 64 + x) * 4);
-async function request(path: string, authenticated = false) { return SELF.fetch('https://x' + path, authenticated ? { headers: { cookie } } : undefined); }
+async function request(path: string, authenticated = false) { return SELF.fetch('https://x' + path, authenticated ? { headers: { authorization: `Bearer ${cookie}` } } : undefined); }
 async function setAvatar(id: number | null) {
-  return SELF.fetch('https://x/api/v1/me/avatar', { method: 'POST', headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ textureId: id }) });
+  return SELF.fetch('https://x/api/v1/me/avatar', { method: 'POST', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ textureId: id }) });
 }
 beforeAll(async () => {
   await runMigrations();
@@ -21,7 +21,7 @@ beforeAll(async () => {
   const texture = await env.DB.prepare("INSERT INTO textures (hash,name,kind,model,visibility,size_bytes,width,height,uploader_id,created_at,updated_at) VALUES (?,?,'skin','slim','private',1,64,64,?,?,?) RETURNING id").bind(hash, 'Private skin', uid, now, now).first<{ id: number }>(); tid = texture!.id;
   const png = await encodePng(64, 64, rgba); await env.BUCKET.put(textureObjectKey(hash), png);
   const login = await SELF.fetch('https://x/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: 'avatar@example.com', password: 'avatar-password-9' }) });
-  cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+  cookie = (await login.json<{ accessToken: string }>()).accessToken;
 });
 describe('Minecraft user avatars', () => {
   it('serves stable Steve and Alex defaults as actual PNG avatars', async () => {

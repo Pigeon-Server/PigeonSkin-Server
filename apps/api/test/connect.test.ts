@@ -10,8 +10,17 @@ const PASSWORD = 'correct-horse-9';
 const GAME_SCOPES = 'openid profile email offline_access Yggdrasil.PlayerProfiles.Select Yggdrasil.Server.Join';
 let cookie = '', uid = 0, pid = 0, secondPid = 0, clientId = '';
 const redirectUri = 'http://127.0.0.1:8123/callback';
+// session 串 = "<Bearer access token>[; <Cookie>][...]"：含 "=" 的是 Cookie 段。
+function authHeaders(session: string): Record<string, string> {
+  const tokens: string[] = [], cookies: string[] = [];
+  for (const part of session.split('; ').filter(Boolean)) (part.includes('=') ? cookies : tokens).push(part);
+  return {
+    ...(tokens.length ? { authorization: `Bearer ${tokens.join('; ')}` } : {}),
+    ...(cookies.length ? { cookie: cookies.join('; ') } : {}),
+  };
+}
 async function json(path: string, body?: unknown, method = 'POST', session = cookie) {
-  return SELF.fetch(`https://x${path}`, { method, headers: { 'content-type': 'application/json', ...(session ? { cookie: session } : {}), 'sec-fetch-site': 'same-origin' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return SELF.fetch(`https://x${path}`, { method, headers: { 'content-type': 'application/json', ...authHeaders(session), 'sec-fetch-site': 'same-origin' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function form(path: string, values: Record<string, string>) {
   return SELF.fetch(`https://x/yggc/${path}`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: clientId, ...values }).toString() });
@@ -19,12 +28,12 @@ async function form(path: string, values: Record<string, string>) {
 async function authorize(scopes = GAME_SCOPES, type = 'code', approved = true, playerId: number | null = pid) {
   const verifier = 'a'.repeat(64);
   const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
-  const query = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: type, scope: scopes, code_challenge: challenge, code_challenge_method: 'S256', state: 'state-value', nonce: 'nonce-value' });
-  const response = await SELF.fetch(`https://x/yggc/authorize?${query}`, { headers: { cookie }, redirect: 'manual' });
+  const query = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: type, scope: scopes, code_challenge: challenge, code_challenge_method: 'S256', state: 'state-value', nonce: 'nonce-value', web_token: cookie });
+  const response = await SELF.fetch(`https://x/yggc/authorize?${query}`, { redirect: 'manual' });
   expect(response.status).toBe(302);
   const location = response.headers.get('location')!;
   const interactionId = location.split('/').at(-1)!;
-  const view = await SELF.fetch(`https://x/api/v1/connect/interactions/${interactionId}`, { headers: { cookie } });
+  const view = await SELF.fetch(`https://x/api/v1/connect/interactions/${interactionId}`, { headers: { authorization: `Bearer ${cookie}` } });
   expect(view.status).toBe(200);
   const approval = await json(`/api/v1/connect/interactions/${interactionId}`, { approve: approved, playerId });
   expect(approval.status).toBe(200);
@@ -58,7 +67,7 @@ beforeAll(async () => {
   const second = await env.DB.prepare('INSERT INTO players (user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?) RETURNING id').bind(uid, 'ConnectTwo', now, now).first<{ id: number }>();
   pid = first!.id; secondPid = second!.id;
   const login = await json('/api/v1/auth/login', { identifier: 'connect@example.com', password: PASSWORD }, 'POST', '');
-  expect(login.status).toBe(200); cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+  expect(login.status).toBe(200); cookie = (await login.json<{ accessToken: string }>()).accessToken;
   const key = await json('/api/v1/admin/connect/keys', {}); expect(key.status).toBe(200);
   const client = await json('/api/v1/admin/connect/clients', { name: 'Test Launcher', redirectUris: [redirectUri], confidential: false, shared: true });
   expect(client.status).toBe(201); clientId = (await client.json<{ id: string }>()).id;
@@ -85,14 +94,22 @@ describe('Worker Connect', () => {
     fetchMock.get('https://api.github.com').intercept({ path: '/user/emails', method: 'GET' }).reply(200, []);
     try {
       const callback = await app.fetch(new Request(`https://x/auth/oauth/github/callback?code=remote-code&state=${state}`, { headers: { cookie: cookies } }), bindings, ctx);
-      expect(callback.status).toBe(302); expect(callback.headers.get('location')).toBe(destination);
-      expect((callback.headers as Headers & { getSetCookie(): string[] }).getSetCookie().some(v => v.startsWith('bs_session='))).toBe(true);
+      expect(callback.status).toBe(302);
+      const loginRedirect = new URL(callback.headers.get('location')!);
+      expect(loginRedirect.pathname).toBe('/auth/exchange');
+      const code = loginRedirect.searchParams.get('code')!;
+      expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
       await waitOnExecutionContext(ctx);
+      // SPA 回调页用 code 换令牌，destination 原样带回
+      const exchange = await SELF.fetch('https://x/api/v1/auth/token', { method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ code }) });
+      expect(exchange.status).toBe(200);
+      expect(await exchange.json()).toMatchObject({ destination, id: uid });
     } finally { fetchMock.deactivate(); }
   });
   it('protects consent endpoints with CSRF and rejects unknown scopes', async () => {
     const auth = await authorize();
-    const forged = await SELF.fetch(`https://x/api/v1/connect/interactions/${auth.interactionId}`, { method: 'POST', headers: { cookie, origin: 'https://evil.example', 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' }, body: JSON.stringify({ approve: true, playerId: pid }) });
+    // Bearer 令牌无法被跨站表单携带；CSRF 中间件按来源拒绝无凭据的跨站 POST
+    const forged = await SELF.fetch(`https://x/api/v1/connect/interactions/${auth.interactionId}`, { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' }, body: JSON.stringify({ approve: true, playerId: pid }) });
     expect(forged.status).toBe(403);
     const scopes = await form('device_authorization', { scope: 'openid Yggdrasil.Unknown' }); expect(scopes.status).toBe(400);
     const mixed = await form('device_authorization', { scope: 'openid Yggdrasil.PlayerProfiles.Read Yggdrasil.PlayerProfiles.Select' }); expect(mixed.status).toBe(400);
@@ -204,7 +221,7 @@ describe('Worker Connect', () => {
     expect((await form('device_authorization', { client_id: client.id, client_secret: client.clientSecret, scope: 'openid' })).status).toBe(200);
     const stored = await env.DB.prepare('SELECT secret_hash FROM connect_clients WHERE id = ?').bind(client.id).first<{ secret_hash: string }>();
     expect(stored!.secret_hash).toBe(await hashToken(client.clientSecret));
-    expect(JSON.stringify(await (await SELF.fetch('https://x/api/v1/admin/connect', { headers: { cookie } })).json())).not.toContain(client.clientSecret);
+    expect(JSON.stringify(await (await SELF.fetch('https://x/api/v1/admin/connect', { headers: { authorization: `Bearer ${cookie}` } })).json())).not.toContain(client.clientSecret);
   });
   it('rejects expired authorization and device codes', async () => {
     const auth = await authorize();
@@ -223,7 +240,7 @@ describe('Worker Connect', () => {
   });
   it('revokes grants from the user application list and keeps production issuer HTTPS-only', async () => {
     const tokens = await codeToken();
-    const grants = await (await SELF.fetch('https://x/api/v1/me/connect/grants', { headers: { cookie } })).json<{ items: Array<{ id: string }> }>();
+    const grants = await (await SELF.fetch('https://x/api/v1/me/connect/grants', { headers: { authorization: `Bearer ${cookie}` } })).json<{ items: Array<{ id: string }> }>();
     expect(grants.items.length).toBeGreaterThan(0);
     expect((await json(`/api/v1/me/connect/grants/${grants.items[0]!.id}`, undefined, 'DELETE')).status).toBe(204);
     expect((await userinfo(tokens.access_token)).status).toBe(401);
@@ -231,6 +248,18 @@ describe('Worker Connect', () => {
     const production = await createApp().fetch(new Request('https://x/yggc/.well-known/openid-configuration'), { ...env, ENVIRONMENT: 'production', APP_URL: 'http://example.com' } as Bindings, ctx);
     expect(production.status).toBe(503);
     await waitOnExecutionContext(ctx);
+  });
+  it('serves root-path discovery redirects only while connect is enabled', async () => {
+    const redirect = await SELF.fetch('https://x/.well-known/oauth-authorization-server', { redirect: 'manual' });
+    expect(redirect.status).toBe(302); expect(new URL(redirect.headers.get('location')!).pathname).toBe('/yggc/.well-known/oauth-authorization-server');
+    expect((await SELF.fetch(redirect.headers.get('location')!)).status).toBe(200);
+    await json('/api/v1/admin/settings', { settings: [{ key: 'ygg_connect_enabled', value: 'false' }, { key: 'oauth_enabled', value: 'false' }] }, 'PATCH');
+    const disabled = await SELF.fetch('https://x/.well-known/openid-configuration', { redirect: 'manual' });
+    expect(disabled.status).toBe(503);
+    const direct = await SELF.fetch('https://x/yggc/.well-known/openid-configuration');
+    expect(direct.status).toBe(503);
+    await json('/api/v1/admin/settings', { settings: [{ key: 'ygg_connect_enabled', value: 'true' }, { key: 'oauth_enabled', value: 'true' }] }, 'PATCH');
+    expect((await SELF.fetch('https://x/.well-known/openid-configuration', { redirect: 'manual' })).status).toBe(302);
   });
   it('disabling and reenabling a client does not restore old grants', async () => {
     const tokens = await codeToken();

@@ -1,27 +1,26 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import { hashPassword, hashToken, verifyStoredPassword } from '@pigeon-skin/auth';
-import { createSession } from '../src/lib.ts';
+import { issueTokensFor } from '../src/lib.ts';
 import type { Bindings } from '../src/env.ts';
 import { runMigrations, mintRawToken } from './setup.ts';
 
 let uid = 0, cookie = '', otherCookie = '', adminCookie = '';
 const pendingEmail = 'oauth-init@example.com';
 async function request(path: string, body?: unknown, method = 'GET', session = cookie, origin?: string) {
-  return SELF.fetch('https://x' + path, { method, headers: { cookie: session, 'content-type': 'application/json', ...(origin ? { origin } : { 'sec-fetch-site': 'same-origin' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return SELF.fetch('https://x' + path, { method, headers: { ...(session ? { authorization: `Bearer ${session}` } : {}), 'content-type': 'application/json', ...(origin ? { origin } : { 'sec-fetch-site': 'same-origin' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function status(session = cookie) { return (await request('/api/v1/auth/initialize', undefined, 'GET', session)).json<{ ticket: string; email: string; emailVerified: boolean; needsInitialization: boolean; playerRequired: boolean }>(); }
 async function payload(extra: Record<string, unknown> = {}) { return { ticket: (await status()).ticket, nickname: 'Initialized player', email: pendingEmail, password: 'initialized-password-9', playerName: 'InitializedOne', redirect: '/user', ...extra }; }
-function sessionCookie(response: Response) { return (response.headers as Headers & { getSetCookie(): string[] }).getSetCookie().find(v => v.startsWith('bs_session='))!.split(';')[0]!; }
 beforeAll(async () => {
   await runMigrations();
   const now = Date.now();
   for (const [email, hash, role] of [[pendingEmail, '', 'normal'], ['second-init@oauth.invalid', '', 'normal'], ['init-admin@example.com', await hashPassword('initialization-admin-9'), 'super_admin']]) {
     const row = await env.DB.prepare('INSERT INTO users (email, nickname, password_hash, role, score, email_verified_at, created_at, updated_at) VALUES (?, ?, ?, ?, 1000, ?, ?, ?) RETURNING id').bind(email!, 'OAuth player', hash!, role!, now, now, now).first<{ id: number }>();
-    const session = await createSession(env as Bindings, row!.id, {});
-    if (email === pendingEmail) { uid = row!.id; cookie = 'bs_session=' + session.token; }
-    else if (role === 'super_admin') adminCookie = 'bs_session=' + session.token;
-    else otherCookie = 'bs_session=' + session.token;
+    const session = await issueTokensFor(env as Bindings, row!.id, {});
+    if (email === pendingEmail) { uid = row!.id; cookie = session.accessToken; }
+    else if (role === 'super_admin') adminCookie = session.accessToken;
+    else otherCookie = session.accessToken;
   }
   await env.DB.prepare('INSERT INTO user_identities (provider, provider_user_id, user_id, created_at) VALUES (?, ?, ?, ?)').bind('github', 'initializing-player', uid, now).run();
   await env.DB.prepare('UPDATE users SET needs_initialization = 1 WHERE id = ?').bind(uid).run();
@@ -54,8 +53,9 @@ describe('OAuth account initialization', () => {
   it('creates the first player, preserves verified email and score, and rotates the session', async () => {
     const body = await payload({ redirect: '/connect/authorize/preserved-interaction' });
     const completed = await request('/api/v1/auth/initialize', body, 'POST'); expect(completed.status).toBe(200);
-    expect(await completed.json()).toEqual({ redirect: '/connect/authorize/preserved-interaction', needsEmailVerification: false });
-    const freshCookie = sessionCookie(completed); expect(freshCookie).not.toBe(cookie);
+    const completedBody = await completed.json<{ redirect: string; needsEmailVerification: boolean; accessToken: string }>();
+    expect({ redirect: completedBody.redirect, needsEmailVerification: completedBody.needsEmailVerification }).toEqual({ redirect: '/connect/authorize/preserved-interaction', needsEmailVerification: false });
+    const freshCookie = completedBody.accessToken; expect(freshCookie).not.toBe(cookie);
     expect((await request('/api/v1/auth/session')).status).toBe(401);
     const session = await (await request('/api/v1/auth/session', undefined, 'GET', freshCookie)).json<{ needsInitialization: boolean; score: number; emailVerified: boolean; nickname: string }>();
     expect(session.needsInitialization).toBe(false); expect(session.score).toBe(1000); expect(session.emailVerified).toBe(true); expect(session.nickname).toBe('Initialized player');
@@ -88,14 +88,15 @@ describe('OAuth account initialization', () => {
   it('binds the setup form to the account and exact session, and rejects expired tickets', async () => {
     const body = await payload();
     expect((await request('/api/v1/auth/initialize', body, 'POST', otherCookie)).status).toBe(409);
-    const fresh = await createSession(env as Bindings, uid, {});
-    expect((await request('/api/v1/auth/initialize', body, 'POST', 'bs_session=' + fresh.token)).status).toBe(409);
+    const fresh = await issueTokensFor(env as Bindings, uid, {});
+    expect((await request('/api/v1/auth/initialize', body, 'POST', fresh.accessToken)).status).toBe(409);
     await env.DB.prepare('UPDATE oauth_login_states SET expires_at = 0 WHERE id = ?').bind(await hashToken(body.ticket)).run();
     expect((await request('/api/v1/auth/initialize', body, 'POST')).status).toBe(409);
     expect((await status()).needsInitialization).toBe(true);
   });
   it('enforces CSRF even with an otherwise valid initialization form', async () => {
-    const result = await request('/api/v1/auth/initialize', await payload(), 'POST', cookie, 'https://evil.example'); expect(result.status).toBe(403);
+    // Bearer 令牌无法被跨站表单伪造携带，CSRF 防线对无凭据的跨站 POST 生效
+    const result = await request('/api/v1/auth/initialize', await payload(), 'POST', '', 'https://evil.example'); expect(result.status).toBe(403);
     expect((await status()).needsInitialization).toBe(true);
   });
   it('commits only once when two initialization requests race', async () => {
@@ -114,8 +115,9 @@ describe('OAuth account initialization', () => {
     const settings = await request('/api/v1/admin/settings', { settings: [{ key: 'register_with_player_name', value: false }, { key: 'require_email_verification', value: true }] }, 'PATCH', adminCookie); expect(settings.status).toBe(200);
     expect((await status()).playerRequired).toBe(false);
     const completed = await request('/api/v1/auth/initialize', await payload({ email: 'verify-new@example.com', playerName: undefined }), 'POST'); expect(completed.status).toBe(200);
-    expect((await completed.json<{ needsEmailVerification: boolean }>()).needsEmailVerification).toBe(true);
-    const fresh = sessionCookie(completed), current = await status(fresh); expect(current.needsInitialization).toBe(false); expect(current.emailVerified).toBe(false);
+    const completedBody = await completed.json<{ needsEmailVerification: boolean; accessToken: string }>();
+    expect(completedBody.needsEmailVerification).toBe(true);
+    const fresh = completedBody.accessToken, current = await status(fresh); expect(current.needsInitialization).toBe(false); expect(current.emailVerified).toBe(false);
     expect(await env.DB.prepare('SELECT id FROM players WHERE user_id = ?').bind(uid).first()).toBeNull();
   });
   it('does not create another free player for an older incomplete account that already has one', async () => {
@@ -128,7 +130,7 @@ describe('OAuth account initialization', () => {
     const token = await mintRawToken(uid);
     const reset = await request('/api/v1/auth/reset-password', { token, password: 'reset-before-setup-9' }, 'POST', ''); expect(reset.status).toBe(200);
     const login = await request('/api/v1/auth/login', { identifier: pendingEmail, password: 'reset-before-setup-9' }, 'POST', ''); expect(login.status).toBe(200);
-    const session = sessionCookie(login);
+    const session = (await login.json<{ accessToken: string }>()).accessToken;
     expect((await status(session)).needsInitialization).toBe(true);
     expect((await request('/api/v1/players', undefined, 'GET', session)).status).toBe(403);
   });

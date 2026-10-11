@@ -226,6 +226,6 @@ onMounted(load);
       </table>
     </div>
 
-    <AppSkeleton v-if="loading && !items.length" class="p-4" :count="3" />
+    <AppSkeleton v-if="loading && !items.length" variant="table" :count="5" class="p-4" />
   </section>
 </template>

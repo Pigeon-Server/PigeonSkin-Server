@@ -260,7 +260,7 @@ onMounted(load);
       </table>
     </div>
 
-    <AppSkeleton v-if="loading && !items.length" class="p-4" :count="4" />
+    <AppSkeleton v-if="loading && !items.length" variant="table" :count="6" class="p-4" />
 
     <footer v-if="totalPages > 1" class="border-t border-line p-3 flex justify-center">
       <AppPagination v-model="page" :total-pages="totalPages" />

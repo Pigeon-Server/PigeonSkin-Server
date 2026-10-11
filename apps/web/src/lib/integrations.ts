@@ -6,13 +6,13 @@ export const integrationModules = [
     id: 'oauth',
     icon: 'login',
     plugins: ['oauth', 'oauth-github', 'oauth-littleskin', 'oauth-microsoft-live'],
-    keys: ['oauth_enabled', 'github_client_id', 'github_client_secret', 'littleskin_client_id', 'littleskin_client_secret', 'littleskin_api_root', 'microsoft_client_id', 'microsoft_client_secret'],
+    keys: ['oauth_enabled', 'github_client_id', 'github_client_secret', 'github_redirect_uri', 'littleskin_client_id', 'littleskin_client_secret', 'littleskin_api_root', 'littleskin_redirect_uri', 'microsoft_client_id', 'microsoft_client_secret', 'microsoft_redirect_uri'],
   },
   {
     id: 'mojang',
     icon: 'verified_user',
     plugins: ['mojang-verification'],
-    keys: ['mojang_verification_score_award', 'mojang_client_id', 'mojang_client_secret'],
+    keys: ['mojang_verification_score_award', 'mojang_client_id', 'mojang_client_secret', 'mojang_redirect_uri'],
   },
   {
     id: 'yggdrasil',

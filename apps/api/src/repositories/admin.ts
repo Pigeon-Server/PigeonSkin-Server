@@ -1,5 +1,4 @@
 // 后台仓储 —— 只负责查询。
-import type { D1PreparedStatement } from '@cloudflare/workers-types';
 import { and, eq, sql } from 'drizzle-orm';
 import { scalarMax, players, reports, textures, users, closet, noCaseEq } from '@pigeon-skin/db';
 import type { Db } from './textures.ts';
@@ -216,6 +215,7 @@ export async function listAdminTextures(
       likes: textures.likes,
       uploaderId: textures.uploaderId,
       uploaderName: users.nickname,
+      official: sql<boolean>`${textures.officialKey} IS NOT NULL`.mapWith(Boolean),
       createdAt: textures.createdAt,
     })
     .from(textures)
@@ -252,6 +252,7 @@ export async function listAdminPlayers(
       updatedAt: players.updatedAt,
       skinHash: sql<string | null>`(SELECT hash FROM textures WHERE id = ${players.skinTextureId})`,
       capeHash: sql<string | null>`(SELECT hash FROM textures WHERE id = ${players.capeTextureId})`,
+      skinModel: sql<string | null>`(SELECT model FROM textures WHERE id = ${players.skinTextureId})`,
     })
     .from(players)
     .leftJoin(users, eq(users.id, players.userId))

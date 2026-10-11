@@ -168,7 +168,7 @@ onMounted(load);
         </AppButton>
       </p>
       <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-      <AppSkeleton v-if="loading" :count="3" />
+      <AppSkeleton v-if="loading" variant="form" :count="4" />
       <template v-else-if="data && status">
         <header class="flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-lg font-semibold">{{ i18n.t(`integration.modules.${active.id}`) }}</h2>

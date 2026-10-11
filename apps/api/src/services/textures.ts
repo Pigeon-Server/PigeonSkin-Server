@@ -291,6 +291,10 @@ export async function patchTexture(
       .bind(kind, id, kind, id, now, id, id));
     if (kind === 'cape') statements.push(env.DB.prepare("UPDATE users SET avatar_texture_id = NULL WHERE avatar_texture_id = ? AND EXISTS (SELECT 1 FROM textures WHERE id = ? AND kind = 'cape')").bind(id, id));
   }
+  // 类型/模型变了会连带改角色资料（skins 键、指针）；批处理里已经推进了角色行的
+  // updated_at，这里补上按名字清协议出口缓存（必须在批处理前取名字）。
+  const { playersWearingTexture, purgePlayerProfiles } = await import('./texture-access.ts');
+  const wearingPlayers = typeChanged ? await playersWearingTexture(env, id) : [];
   const results = await env.DB.batch(statements);
   if (!results[1]?.meta.changes) {
     const current = await repo.findTextureById(db(env), id);
@@ -300,9 +304,14 @@ export async function patchTexture(
     if (scoreDelta > 0 && (user?.score ?? 0) < scoreDelta) throw fail.insufficientScore();
     throw fail.conflict('texture.changed');
   }
+  for (const name of wearingPlayers) await purgePlayerProfiles(env, name);
   await bumpSitemap();
   await queueTextureSubmission(env, id);
-  if (wasPubliclyReachable && !await repo.countPublicReferencesToHash(db(env), texture.hash)) {
+  // 类型与模型参与衍生图的渲染（预览区分披风/皮肤与经典/纤细模型），
+  // 而产物按哈希寻址、以 immutable 下发 —— 不改这一处就等于让新模型永远
+  // 看不到：哈希没变，缓存也不会自己过期。删产物让下次请求按新模型重建。
+  const leftPublicCache = wasPubliclyReachable && !await repo.countPublicReferencesToHash(db(env), texture.hash);
+  if (typeChanged || leftPublicCache) {
     await (await import('./texture-access.ts')).purgeTextureDerivatives(env, texture.hash);
   }
   return { scoreDelta };
@@ -335,6 +344,12 @@ export async function replaceTextureContent(
   const grossDelta = Math.ceil(byteLength / 1024) * perKb - Math.ceil(texture.sizeBytes / 1024) * perKb;
   const scoreDelta = governance ? 0 : grossDelta < 0 ? -Math.min(-grossDelta, texture.scoreRefundBasis) : grossDelta;
 
+  // 穿戴着这张纹理的角色，其协议出口（`/{name}.json`、`/skin|/cape/{name}.png`）
+  // 的内容跟着变了，但它们的 URL 没变 —— 必须在改写前推进角色行的 updated_at，
+  // 否则客户端带旧 ETag 重验证拿到 304，继续用随后就被删掉的旧哈希。
+  const { playersWearingTexture, purgePlayerProfiles } = await import('./texture-access.ts');
+  const wearingPlayers = await playersWearingTexture(env, id, Date.now());
+
   await env.BUCKET.put(textureObjectKey(hash), bytes, {
     httpMetadata: { contentType: 'image/png', cacheControl: 'public, max-age=31536000, immutable' },
   });
@@ -360,6 +375,7 @@ export async function replaceTextureContent(
     await env.BUCKET.delete(textureObjectKey(texture.hash));
   }
   if (!await repo.countPublicReferencesToHash(database, texture.hash)) await (await import('./texture-access.ts')).purgeTextureDerivatives(env, texture.hash);
+  for (const name of wearingPlayers) await purgePlayerProfiles(env, name);
   await bumpSitemap();
   await queueTextureSubmission(env, id);
   return { hash, width: info.width, height: info.height, sizeBytes: byteLength };
@@ -378,6 +394,10 @@ export async function deleteTexture(
   const wasPubliclyReachable = texture.visibility === 'public' || await repo.countPublicReferencesToHash(database, texture.hash) > 0;
   const shouldRefund = refund.enabled && texture.uploaderId === actor.id;
   const refundAmount = shouldRefund ? texture.scoreRefundBasis : 0;
+  // 纹理消失后外键把角色的 skin/cape 指针置空 —— 资料内容变了，但外键动作不碰
+  // 角色行的 updated_at，客户端带旧 ETag 重验证会拿到 304 继续用已删除的旧哈希。
+  const { playersWearingTexture, purgePlayerProfiles } = await import('./texture-access.ts');
+  const wearingPlayers = await playersWearingTexture(env, id, Date.now());
   const statements = [env.DB.prepare('DELETE FROM textures WHERE id=? AND hash=? AND updated_at=? RETURNING id')
     .bind(id, texture.hash, texture.updatedAt)];
   // 退款守卫依赖上一条语句（DELETE textures）的 changes()，中间不能插其他语句
@@ -386,6 +406,7 @@ export async function deleteTexture(
   statements.push(env.DB.prepare('DELETE FROM ai_jobs WHERE tid=?').bind(id));
   const deleted = await env.DB.batch(statements);
   if (!deleted[0]?.meta.changes) throw fail.conflict('texture.changed');
+  for (const name of wearingPlayers) await purgePlayerProfiles(env, name);
   await bumpSitemap();
   await queueTextureSubmission(env, id);
 

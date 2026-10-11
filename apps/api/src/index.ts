@@ -3,7 +3,6 @@ import { createApp } from './app.ts';
 import { DerivativeGenerator } from './do/derivatives.ts';
 import { OfficialResourceUpdater } from './do/official-resources.ts';
 import type { Bindings } from './env.ts';
-import type { MessageBatch } from '@cloudflare/workers-types';
 import { runScheduledTasks, processQueueBatch } from './tasks.ts';
 import { processDueJobs } from './services/ai-jobs.ts';
 import type { SearchQueueMessage } from './services/search-submissions.ts';

@@ -10,7 +10,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import {
   buildPlayerProfile, serializePlayerProfile, textureObjectKey,
-  PLAYER_PROFILE_CACHE_CONTROL, TEXTURE_CACHE_CONTROL,
+  PLAYER_PROFILE_CACHE_CONTROL, TEXTURE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL,
   PLAYER_BANNED_MESSAGE, TEXTURE_OBJECT_MISSING_STATUS,
   textureEtag, playerProfileEtag,
 } from '@pigeon-skin/minecraft';
@@ -229,14 +229,15 @@ app.get('/raw/:tid', async (c) => {
     return c.body(null, status === 404 ? 404 : 403, { 'Cache-Control': 'private, no-store' });
   }
 
-  // tid → hash 是内容寻址的不变映射（纹理内容不可变，重传生成新行），
-  // 因此与 /textures/{hash} 一样可以 immutable 缓存（契约 07 §2.4：头与
-  // /textures 相同；旧版 raw 也在一年 TTL 的 etag 中间件清单里）。
+  // tid → 字节**不是**不变映射：在线编辑器的"覆盖保存"就地改掉行上的 hash
+  // （见 services/textures.ts replaceTextureContent），tid 与 URL 都不变。
+  // 所以这里不能按 immutable 下发，只能给短新鲜窗口 + 重验证；ETag 仍是内容
+  // 哈希，内容一换就变，未换时重验证是纯 304（契约 07 §2.4 已同步这条偏差）。
   const rawEtag = textureEtag(hash);
   if (c.req.header('if-none-match') === rawEtag) {
     return c.body(null, 304, {
       'ETag': rawEtag,
-      'Cache-Control': TEXTURE_CACHE_CONTROL,
+      'Cache-Control': REVALIDATE_CACHE_CONTROL,
     });
   }
 
@@ -246,7 +247,7 @@ app.get('/raw/:tid', async (c) => {
   return c.body(object.body, 200, {
     'Content-Type': 'image/png',
     'Content-Length': String(object.size),
-    'Cache-Control': TEXTURE_CACHE_CONTROL,
+    'Cache-Control': REVALIDATE_CACHE_CONTROL,
     'ETag': rawEtag,
     'X-Content-Type-Options': 'nosniff',
   });

@@ -18,9 +18,8 @@ import {
   avatarObjectKey, previewObjectKey, textureObjectKey, isAllowedDerivativeSize,
   type DecodedPng,
 } from '@pigeon-skin/minecraft';
-import { createDb, textures } from '@pigeon-skin/db';
-import { eq, sql } from 'drizzle-orm';
 import { flag, type Bindings } from '../env.ts';
+import { textureRenderIdentity } from '../services/texture-access.ts';
 
 /** 一次生成请求的解析结果 */
 interface GenerateSpec {
@@ -80,8 +79,11 @@ export class DerivativeGenerator {
 
     const decoded = await decodePng(sourceBytes);
     if (!decoded.ok) return new Response(null, { status: 404 });
-    const meta = spec.kind === 'preview' ? await metaOf(this.#env, spec.hash) : null;
-    const png = await render(spec, decoded.image, meta?.kind === 'cape', meta?.model === 'slim');
+    // 预览的渲染输入含类型与模型，且它们可以在材质页改。这里的取行优先级必须
+    // 与读端点判"渲染签名是否一致"时用的那份一致，否则签名一致的 URL 会配上
+    // 按另一种优先级渲染出来的字节。
+    const identity = spec.kind === 'preview' ? await textureRenderIdentity(this.#env, spec.hash) : null;
+    const png = await render(spec, decoded.image, identity?.kind === 'cape', identity?.model === 'slim');
     if (!png) return new Response(null, { status: 404 });
 
     // 4. 写 R2（immutable）并回字节。写失败不影响本次响应 ——
@@ -125,25 +127,11 @@ function parseSpec(url: URL): GenerateSpec | null {
 }
 
 /**
- * 查该哈希在库里的 kind 与 model。同一哈希可能同时有 skin 与 cape 两行
- * （64×32 既是合法 legacy 皮肤也是合法披风尺寸），无法从内容区分，
- * 只能约定优先级：legacy 皮肤远多于披风，skin 优先。
+ * 查该哈希在库里的 kind 与 model 由 `textureRenderIdentity` 统一提供
+ * （同一哈希可能同时有 skin 与 cape 两行：64×32 既是合法 legacy 皮肤也是合法
+ * 披风尺寸，无法从内容区分，只能约定优先级：legacy 皮肤远多于披风，skin 优先）。
+ * 那份优先级同时决定读端点认不认请求声明的渲染签名，所以只能有一处实现。
  */
-async function metaOf(
-  env: Bindings, hash: string,
-): Promise<{ kind: 'skin' | 'cape'; model: 'default' | 'slim' }> {
-  const [row] = await createDb(env.DB)
-    .select({ kind: textures.kind, model: textures.model })
-    .from(textures)
-    .where(eq(textures.hash, hash))
-    .orderBy(sql`(${textures.kind} = 'skin') DESC`)
-    .limit(1);
-  return {
-    kind: (row?.kind as 'skin' | 'cape' | undefined) ?? 'skin',
-    model: (row?.model as 'default' | 'slim' | null | undefined) ?? 'default',
-  };
-}
-
 async function render(
   spec: GenerateSpec, img: DecodedPng, isCape: boolean, isAlex: boolean,
 ): Promise<Uint8Array | null> {

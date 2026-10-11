@@ -151,7 +151,7 @@ onBeforeUnmount(() => {
         <Transition name="manual-page" mode="out-in" @after-enter="articleEntered">
         <article :key="slug" ref="article" tabindex="-1" class="manual-article" :lang="localeTag(manual.contentLocale(slug))">
           <p v-if="manual.error.value" class="alert alert-danger" role="alert">{{ i18n.t('manual.load_error') }}<button type="button" @click="manual.fetch(true)"> {{ i18n.t('common.retry') }} </button></p>
-          <AppSkeleton v-if="manual.loading.value && !manual.loaded.value" :count="3" />
+          <AppSkeleton v-if="manual.loading.value && !manual.loaded.value" variant="detail" :count="4" />
           <template v-else-if="page">
             <header class="manual-heading"><p>{{ page.group }}</p><h1>{{ page.title }}</h1><p class="manual-description">{{ page.description }}</p></header>
             <div v-if="!slug" class="manual-shortcuts">

@@ -449,7 +449,7 @@ describe('mail driver dispatch', () => {
       const { id } = await created.json<{ id: number }>();
       await makeAdmin(id);
       const logged = await SELF.fetch('https://x/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: email, password: 'smtp-test-9-pass' }) });
-      return { id, cookie: logged.headers.get('set-cookie')!.split(';')[0]! };
+      return { id, cookie: (await logged.json<{ accessToken: string }>()).accessToken };
     };
     const superUser = await register(superEmail);
     const staffUser = await register(adminEmail);
@@ -464,10 +464,10 @@ describe('mail driver dispatch', () => {
     });
     smtpTransport.connect = async () => server.connection();
 
-    const denied = await SELF.fetch('https://x/api/v1/admin/settings/email-test', { method: 'POST', headers: { cookie: staffUser.cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({}) });
+    const denied = await SELF.fetch('https://x/api/v1/admin/settings/email-test', { method: 'POST', headers: { authorization: `Bearer ${staffUser.cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({}) });
     expect(denied.status).toBe(403);
 
-    const allowed = await SELF.fetch('https://x/api/v1/admin/settings/email-test', { method: 'POST', headers: { cookie: superUser.cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ to: 'operator@example.test' }) });
+    const allowed = await SELF.fetch('https://x/api/v1/admin/settings/email-test', { method: 'POST', headers: { authorization: `Bearer ${superUser.cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ to: 'operator@example.test' }) });
     expect(allowed.status).toBe(200);
     expect(await allowed.json()).toEqual({ ok: true, reason: null, detail: null });
     expect(server.lines).toContain('RCPT TO:<operator@example.test>');

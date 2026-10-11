@@ -121,7 +121,7 @@ onBeforeUnmount(() => { observer?.disconnect(); window.clearTimeout(searchTimer)
       <AppButton class="ml-2 btn-sm" @click="load">{{ i18n.t('common.retry') }}</AppButton>
     </p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-    <AppSkeleton v-if="loading" />
+    <AppSkeleton v-if="loading" variant="grid" />
     <div v-else-if="items.length || hasSelection" class="grid items-start gap-4" :class="hasSelection ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : ''">
       <div v-if="items.length" class="texture-grid">
         <article v-for="e in visible" :key="e.textureId" class="texture-card" :class="isSelected(e) ? '!border-brand-500 ring-1 ring-brand-500' : ''">

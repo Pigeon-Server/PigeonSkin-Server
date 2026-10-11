@@ -93,7 +93,7 @@ onMounted(load);
     <p class="text-sm text-muted">{{ i18n.t('devices.intro') }}</p>
     <p v-if="error" class="text-sm text-red-600" role="alert">{{ error }}</p>
 
-    <AppSkeleton v-if="loading" :count="3" />
+    <AppSkeleton v-if="loading" variant="list" :count="4" />
 
     <template v-else>
       <!-- 浏览器会话 -->

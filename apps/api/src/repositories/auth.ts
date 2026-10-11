@@ -1,5 +1,4 @@
 // 认证仓储 —— 只负责查询。
-import type { D1PreparedStatement } from '@cloudflare/workers-types';
 import { eq, sql, type SQL } from 'drizzle-orm';
 import { players, users, noCaseEq } from '@pigeon-skin/db';
 import type { Db } from './textures.ts';

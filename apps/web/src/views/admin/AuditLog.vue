@@ -108,7 +108,7 @@ onMounted(load);
     </div>
     <p v-if="errMsg" class="alert alert-danger" role="alert">{{ errMsg }}<AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
 
-    <AppSkeleton v-if="loading" :count="3" /><div v-else-if="!errMsg" class="overflow-x-auto rounded-xl border border-line bg-surface">
+    <AppSkeleton v-if="loading" variant="table" :count="8" /><div v-else-if="!errMsg" class="overflow-x-auto rounded-xl border border-line bg-surface">
       <table class="table">
         <thead>
           <tr>

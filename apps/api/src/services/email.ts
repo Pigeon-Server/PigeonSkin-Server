@@ -1,6 +1,5 @@
 import { createT, normalizeLocale } from '@pigeon-skin/shared/i18n';
 import { noCaseEq } from '@pigeon-skin/db';
-import type { D1Database, Queue } from '@cloudflare/workers-types';
 import { translationOverrides } from './translations.ts';
 import type { TranslationOverride } from '@pigeon-skin/shared/messages';
 import { configurationValues, type ConfigurationSourceEnv } from './configuration.ts';

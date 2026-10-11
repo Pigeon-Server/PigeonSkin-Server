@@ -6,7 +6,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
-import { createSession, sessionCookieName } from '../src/lib.ts';
+import { issueTokensFor } from '../src/lib.ts';
 import type { Bindings } from '../src/env.ts';
 import { issueSkinlibPass, verifySkinlibPass } from '../src/middleware/skinlib-guard.ts';
 import { runMigrations } from './setup.ts';
@@ -236,18 +236,18 @@ describe('logged-in users use the looser bucket and are only rate limited', () =
     const userId = (await env.DB.prepare(
       "INSERT INTO users (email, nickname, password_hash, role, email_verified_at, created_at, updated_at) VALUES (?, 'Guard user', 'x', 'normal', ?, ?, ?) RETURNING id",
     ).bind(`guard-${crypto.randomUUID()}@example.com`, now, now, now).first<{ id: number }>())!.id;
-    const session = await createSession(baseBindings(), userId, {});
-    const cookie = `${sessionCookieName(baseBindings())}=${session.token}`;
+    const session = await issueTokensFor(baseBindings(), userId, {});
+    const cookie = session.accessToken;
 
     const userLimiter = fakeLimiter(2);
     const guestLimiter = fakeLimiter(0);
     const override = { RL_SKINLIB_USER: userLimiter, RL_SKINLIB: guestLimiter, CAPTCHA_DRIVER: 'image' };
 
     for (let i = 0; i < 2; i++) {
-      const res = await call('/api/v1/textures', override, { headers: { cookie } });
+      const res = await call('/api/v1/textures', override, { headers: { authorization: `Bearer ${cookie}` } });
       expect(res.status).toBe(200);
     }
-    const limited = await call('/api/v1/textures', override, { headers: { cookie } });
+    const limited = await call('/api/v1/textures', override, { headers: { authorization: `Bearer ${cookie}` } });
     expect(limited.status).toBe(429);
     expect((await limited.json<{ error: string }>()).error).toBe('common.rate_limited');
     expect(limited.headers.get('set-cookie')).toBeNull();

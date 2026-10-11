@@ -20,7 +20,7 @@ onMounted(load);
   <PageHeader :title="i18n.t('votes.title')"><AppButton @click="load">{{ i18n.t('common.refresh') }}</AppButton></PageHeader>
   <div><AppSelect id="vote-filter" v-model="status" class="!w-auto" :aria-label="i18n.t('votes.status_filter')" :options="[{ value: '', label: i18n.t('votes.all') }, ...['active', 'scheduled', 'ended', 'closed', 'cancelled'].map(state => ({ value: state, label: i18n.t(`votes.states.${state}`) }))]" @change="filter" /></div>
   <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
-  <AppSkeleton v-if="loading" :count="3" />
+  <AppSkeleton v-if="loading" variant="stats" :count="3" :columns="3" />
   <p v-else-if="!items.length" class="panel text-muted">{{ i18n.t('votes.empty') }}</p>
   <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
     <article v-for="vote in items" :key="vote.id" class="panel flex flex-col gap-4">

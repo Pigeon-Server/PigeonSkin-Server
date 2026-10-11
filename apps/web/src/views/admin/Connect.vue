@@ -38,7 +38,7 @@ onMounted(load);
     </template>
   </PageHeader>
   <p v-if="error" class="alert alert-danger" role="alert">{{ error }} <AppButton class="btn-sm" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
-  <AppSkeleton v-if="busy && !data" :count="2" />
+  <AppSkeleton v-if="busy && !data" variant="form" :count="3" />
   <div v-if="data" class="space-y-5">
     <section class="panel space-y-3">
       <CopyField :label="i18n.t('oauth.issuer')" :value="data.issuer" />

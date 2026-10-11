@@ -148,9 +148,10 @@ onBeforeUnmount(() => {
 .pixel-dot { flex-shrink:0; width:7px; height:7px; background:var(--brand-base); }
 .hero-gallery { min-height:clamp(360px,32vw,520px); position:relative; overflow:visible; isolation:isolate; background:radial-gradient(ellipse,var(--brand-soft) 0%,transparent 66%); }
 .hero-grid { position:absolute; inset:0; background-image:linear-gradient(#68717d0b 1px,transparent 1px),linear-gradient(90deg,#68717d0b 1px,transparent 1px); background-size:36px 36px; mask-image:radial-gradient(ellipse,black,transparent 70%); }
-.hero-skin { position:absolute; width:34%; height:auto; aspect-ratio:0.72; bottom:12%; border:1px solid color-mix(in srgb,var(--v0-border) 72%,transparent); border-radius:12px; background:color-mix(in srgb,var(--v0-surface) 88%,transparent); backdrop-filter:blur(8px); box-shadow:0 14px 28px #26313f24; padding:16px; transform:rotate(-7deg); overflow:hidden; }
-.hero-skin img { height:90%; width:100%; object-fit:contain; image-rendering:pixelated; }
-.hero-skin span { display:block; font-size:12px; text-align:center; color:var(--v0-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hero-skin { position:absolute; width:34%; height:auto; aspect-ratio:0.72; bottom:12%; border:1px solid color-mix(in srgb,var(--v0-border) 72%,transparent); border-radius:12px; background:color-mix(in srgb,var(--v0-surface) 88%,transparent); backdrop-filter:blur(8px); box-shadow:0 14px 28px #26313f24; padding:16px; transform:rotate(-7deg); overflow:hidden; display:flex; flex-direction:column; }
+.hero-skin img, .hero-skin :deep(.skeleton) { flex:1; min-height:0; width:100%; object-fit:contain; image-rendering:pixelated; }
+.hero-skin :deep(canvas) { width:100% !important; }
+.hero-skin span { display:block; flex-shrink:0; font-size:12px; text-align:center; color:var(--v0-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .hero-skin-0 { left:1%; transform:rotate(-8deg); bottom:14%; }
 .hero-skin-1 { left:33%; z-index:2; width:36%; bottom:5%; transform:rotate(2deg); background:color-mix(in srgb,var(--v0-surface) 96%,transparent); box-shadow:0 18px 34px #26313f32; }
 .hero-skin-2 { left:66%; transform:rotate(8deg); bottom:16%; }

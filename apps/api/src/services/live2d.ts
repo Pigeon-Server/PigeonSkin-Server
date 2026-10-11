@@ -2,6 +2,7 @@ import { Unzip, UnzipInflate } from 'fflate';
 import { builtinLive2DModels, type Live2DModelInfo, type Live2DDisplay } from '@pigeon-skin/shared/live2d';
 import { fail } from '../framework.ts';
 import type { Bindings } from '../env.ts';
+import { invalidateSettingsCache } from '../lib.ts';
 
 const maxArchiveBytes = 20 * 1024 * 1024;
 const maxExpandedBytes = 32 * 1024 * 1024;
@@ -173,5 +174,7 @@ export async function saveDisplay(env: Bindings, enabled: boolean, modelId: stri
   if (!model) throw fail.notFound();
   await env.DB.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES (?, '', ?, ?) ON CONFLICT(key, locale) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
     .bind(settingsKey, JSON.stringify({ enabled, modelId }), Date.now()).run();
+  // settings 表直写不过 writeMany 的校验/失效链路，手动失效读缓存
+  invalidateSettingsCache();
   return { enabled, modelId, model };
 }

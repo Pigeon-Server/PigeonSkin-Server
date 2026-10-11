@@ -85,7 +85,7 @@ onMounted(load);
     <p v-if="notice" class="alert alert-success">{{ notice }}</p>
     <p v-if="errMsg" class="alert alert-danger" role="alert">{{ errMsg }}<AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
 
-    <AppSkeleton v-if="loading" :count="3" /><div v-else class="overflow-x-auto rounded-xl border border-line bg-surface">
+    <AppSkeleton v-if="loading" variant="table" :count="8" /><div v-else class="overflow-x-auto rounded-xl border border-line bg-surface">
       <table class="table">
         <thead>
           <tr>
@@ -113,7 +113,7 @@ onMounted(load);
                 {{ t.visibility === 'public' ? i18n.t('general.public') : i18n.t('general.private') }}
               </span>
             </td>
-            <td class="text-muted">{{ t.uploaderName ?? i18n.t('admin.anonymous') }}</td>
+            <td class="text-muted">{{ t.official ? i18n.t('skinlib.official_resource') : t.uploaderName ?? i18n.t('admin.anonymous') }}</td>
             <td>{{ i18n.n(t.likes) }}</td>
             <td class="whitespace-nowrap text-right"><AppButton class="btn-sm mr-1" :disabled="busyId !== 0" @click="rename(t)">{{ i18n.t('common.rename') }}</AppButton>
               <AppButton

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { confirmAction } from '@/stores/dialog';
 import { onMounted, ref } from 'vue';
-import { adminApi } from '@/api';
+import { adminApi, previewUrl } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import { apiErrorMessage } from '@/lib/api-error';
 import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
@@ -14,6 +14,9 @@ interface Row {
   ownerName: string | null;
   skinTextureId: number | null;
   capeTextureId: number | null;
+  skinHash: string | null;
+  capeHash: string | null;
+  skinModel: string | null;
   updatedAt: number;
 }
 const items = ref<Row[]>([]);
@@ -95,15 +98,15 @@ onMounted(load);
     />
     <p v-if="errMsg" class="alert alert-danger" role="alert">{{ errMsg }}<AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
 
-    <AppSkeleton v-if="loading" :count="3" /><div v-else class="overflow-x-auto rounded-xl border border-line bg-surface">
+    <AppSkeleton v-if="loading" variant="table" :count="6" /><div v-else class="overflow-x-auto rounded-xl border border-line bg-surface">
       <table class="table">
         <thead>
           <tr>
             <th>{{ i18n.t('common.id') }}</th>
             <th>{{ i18n.t('auth.player-name') }}</th>
             <th>{{ i18n.t('admin.owner') }}</th>
-            <th>{{ i18n.t('admin.skin_id') }}</th>
-            <th>{{ i18n.t('admin.cape_id') }}</th>
+            <th>{{ i18n.t('general.skin') }}</th>
+            <th>{{ i18n.t('general.cape') }}</th>
             <th class="text-right">{{ i18n.t('common.actions') }}</th>
           </tr>
         </thead>
@@ -114,15 +117,53 @@ onMounted(load);
             <td class="text-muted">
               {{ p.ownerName ?? i18n.t('admin.anonymous') }} (#{{ p.ownerId }})
             </td>
-            <td>{{ p.skinTextureId || i18n.t('common.none') }}</td>
-            <td>{{ p.capeTextureId || i18n.t('common.none') }}</td>
+            <td>
+              <a
+                v-if="p.skinTextureId && p.skinHash"
+                :href="`/skinlib/show/${p.skinTextureId}`"
+                target="_blank"
+                class="inline-block"
+                :title="`${p.name} - ${i18n.t('general.skin')}`"
+              >
+                <img
+                  :src="previewUrl(p.skinHash, { kind: 'skin', model: p.skinModel as 'default' | 'slim' | null })"
+                  :alt="`${p.name} - ${i18n.t('general.skin')}`"
+                  class="h-16 w-auto"
+                  loading="lazy"
+                />
+              </a>
+              <span v-else class="text-muted">{{ i18n.t('common.none') }}</span>
+            </td>
+            <td>
+              <a
+                v-if="p.capeTextureId && p.capeHash"
+                :href="`/skinlib/show/${p.capeTextureId}`"
+                target="_blank"
+                class="inline-block"
+                :title="`${p.name} - ${i18n.t('general.cape')}`"
+              >
+                <img
+                  :src="previewUrl(p.capeHash, { kind: 'cape' })"
+                  :alt="`${p.name} - ${i18n.t('general.cape')}`"
+                  class="h-16 w-auto"
+                  loading="lazy"
+                />
+              </a>
+              <span v-else class="text-muted">{{ i18n.t('common.none') }}</span>
+            </td>
             <td class="text-right">
-              <AppButton class="btn btn-sm" @click="rename(p)">
-                {{ i18n.t('common.edit') }}
-              </AppButton>
-              <AppButton class="btn btn-sm btn-danger ml-1" @click="remove(p)">
-                <AppIcon name="delete_outline" />
-              </AppButton>
+              <div class="inline-flex items-center gap-1">
+                <AppButton class="btn-icon btn-sm" :aria-label="i18n.t('common.edit')" @click="rename(p)">
+                  <AppIcon name="edit" />
+                </AppButton>
+                <AppButton
+                  class="btn-icon btn-sm text-danger"
+                  :aria-label="i18n.t('common.delete')"
+                  @click="remove(p)"
+                >
+                  <AppIcon name="delete_outline" />
+                </AppButton>
+              </div>
             </td>
           </tr><tr v-if="!items.length"><td colspan="6" class="text-center text-muted py-6">{{ i18n.t('general.noResult') }}</td></tr>
         </tbody>

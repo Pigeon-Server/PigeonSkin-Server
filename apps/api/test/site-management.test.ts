@@ -14,10 +14,10 @@ async function register(suffix: string, admin = false) {
   const { id } = await response.json<{ id: number }>();
   if (admin) await makeAdmin(id);
   const login = await SELF.fetch('https://x/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: email, password }) });
-  return { id, cookie: login.headers.get('set-cookie')!.split(';')[0]! };
+  return { id, cookie: (await login.json<{ accessToken: string }>()).accessToken };
 }
 function request(path: string, cookie: string, method = 'GET', body?: unknown) {
-  return SELF.fetch(`https://x/api/v1${path}`, { method, headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+  return SELF.fetch(`https://x/api/v1${path}`, { method, headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
 }
 describe('site management', () => {
   it('leaves texture fields and player assignments unchanged when the visibility charge fails', async () => {
@@ -26,7 +26,7 @@ describe('site management', () => {
     const form = new FormData();
     form.set('file', new Blob([makePng({ width: 64, height: 32 })]), 'skin.png');
     form.set('name', 'Original texture'); form.set('kind', 'skin'); form.set('model', 'default'); form.set('visibility', 'public');
-    const uploaded = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { cookie: user.cookie, 'sec-fetch-site': 'same-origin' }, body: form });
+    const uploaded = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { authorization: `Bearer ${user.cookie}`, 'sec-fetch-site': 'same-origin' }, body: form });
     const texture = await uploaded.json<{ id: number }>();
     const players = await (await request('/players', user.cookie)).json<{ items: Array<{ id: number }> }>();
     const player = players.items[0]!.id;
@@ -45,7 +45,7 @@ describe('site management', () => {
     const form = new FormData();
     form.set('file', new Blob([makePng({ width: 64, height: 64 })]), 'skin.png');
     form.set('name', 'Visibility texture'); form.set('kind', 'skin'); form.set('model', 'default'); form.set('visibility', 'public');
-    const uploaded = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { cookie: user.cookie, 'sec-fetch-site': 'same-origin' }, body: form });
+    const uploaded = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { authorization: `Bearer ${user.cookie}`, 'sec-fetch-site': 'same-origin' }, body: form });
     const texture = await uploaded.json<{ id: number; sizeBytes: number }>();
     const before = await (await request('/me/score', user.cookie)).json<{ score: number }>();
     const responses = await Promise.all([
@@ -77,7 +77,7 @@ describe('site management', () => {
     const form = new FormData();
     form.set('file', new Blob([makePng({ width: 64, height: 64 })]), 'skin.png');
     form.set('name', 'Atomic texture'); form.set('kind', 'skin'); form.set('model', 'default'); form.set('visibility', 'public');
-    const uploaded = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { cookie: user.cookie, 'sec-fetch-site': 'same-origin' }, body: form });
+    const uploaded = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { authorization: `Bearer ${user.cookie}`, 'sec-fetch-site': 'same-origin' }, body: form });
     expect(uploaded.status).toBe(201);
     const texture = await uploaded.json<{ id: number }>();
     expect((await request(`/admin/players/${player.id}`, admin.cookie, 'PATCH', { name: 'New_QA', ownerId: 999999, skin: texture.id })).status).toBe(404);
@@ -95,7 +95,7 @@ describe('site management', () => {
     const form = new FormData();
     form.set('file', new Blob([makePng({ width: 64, height: 64 })]), 'skin.png');
     form.set('name', 'Peer collection'); form.set('kind', 'skin'); form.set('model', 'default'); form.set('visibility', 'public');
-    const uploaded = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { cookie: uploader.cookie, 'sec-fetch-site': 'same-origin' }, body: form });
+    const uploaded = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { authorization: `Bearer ${uploader.cookie}`, 'sec-fetch-site': 'same-origin' }, body: form });
     const texture = await uploaded.json<{ id: number }>();
     const before = await env.DB.prepare('SELECT score FROM users WHERE id=?').bind(peer.id).first<{ score: number }>();
     expect((await request(`/admin/users/${peer.id}/closet`, admin.cookie, 'POST', { textureId: texture.id })).status).toBe(403);
@@ -108,7 +108,7 @@ describe('site management', () => {
     const form = new FormData();
     form.set('file', new Blob([makePng({ width: 64, height: 64 })]), 'skin.png');
     form.set('name', 'Collection texture'); form.set('kind', 'skin'); form.set('model', 'default'); form.set('visibility', 'public');
-    const uploaded = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { cookie: admin.cookie, 'sec-fetch-site': 'same-origin' }, body: form });
+    const uploaded = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { authorization: `Bearer ${admin.cookie}`, 'sec-fetch-site': 'same-origin' }, body: form });
     const texture = await uploaded.json<{ id: number }>();
     expect((await request('/admin/settings', admin.cookie, 'PATCH', { settings: [{ key: 'score_per_closet_item', value: 2000 }] })).status).toBe(200);
     const result = await request('/closet', user.cookie, 'POST', { textureId: texture.id });
@@ -149,7 +149,7 @@ describe('site management', () => {
   it('filters models and uploaders and clears incompatible assignments on type changes', async () => {
     const user = await register('model_user');
     const form = new FormData(); form.set('file', new Blob([makePng({ width: 64, height: 32 })]), 'skin.png'); form.set('name', 'Model texture'); form.set('kind', 'skin'); form.set('model', 'default'); form.set('visibility', 'public');
-    const response = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { cookie: user.cookie, 'sec-fetch-site': 'same-origin' }, body: form });
+    const response = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { authorization: `Bearer ${user.cookie}`, 'sec-fetch-site': 'same-origin' }, body: form });
     expect(response.status).toBe(201);
     const texture = await response.json<{ id: number }>();
     const players = await (await request('/players', user.cookie)).json<{ items: Array<{ id: number }> }>();

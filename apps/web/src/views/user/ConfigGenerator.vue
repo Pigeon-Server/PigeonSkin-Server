@@ -43,7 +43,7 @@ onMounted(() => {
       {{ i18n.t('common.retry') }}
     </AppButton>
   </p>
-  <AppSkeleton v-if="!site.ready.value && site.loading.value" :count="3" />
+  <AppSkeleton v-if="!site.ready.value && site.loading.value" variant="detail" :count="3" />
   <div
     v-else-if="site.ready.value"
     class="grid items-start gap-4 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)]"

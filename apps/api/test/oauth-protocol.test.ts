@@ -4,21 +4,23 @@ import { base64url, importJWK, jwtVerify } from 'jose';
 import { hashPassword, hashToken } from '@pigeon-skin/auth';
 import { runMigrations } from './setup.ts';
 
-let cookie = '', otherCookie = '', uid = 0, clientId = '';
+let cookie = '', sessionToken = '', otherCookie = '', uid = 0, clientId = '';
 const callback = 'https://client.example/callback';
 const verifier = 'a'.repeat(64);
 let challenge = '';
 async function json(path: string, body?: unknown, method = 'GET', session = cookie) {
-  return SELF.fetch(`https://x${path}`, { method, headers: { cookie: session, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const headers: Record<string, string> = { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' };
+  if (session) headers.authorization = `Bearer ${session}`;
+  return SELF.fetch(`https://x${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 async function form(path: string, values: Record<string, string>, basic?: string) {
   return SELF.fetch(`https://x/yggc/${path}`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', ...(basic ? { authorization: `Basic ${basic}` } : {}) }, body: new URLSearchParams(values).toString() });
 }
 function params(extra: Record<string, string> = {}) {
-  return new URLSearchParams({ client_id: clientId, redirect_uri: callback, scope: 'User.Read Player.Read offline_access', response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256', state: 'application-state', ...extra });
+  return new URLSearchParams({ client_id: clientId, redirect_uri: callback, scope: 'User.Read Player.Read offline_access', response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256', state: 'application-state', web_token: cookie, ...extra });
 }
 async function authorize(extra: Record<string, string> = {}) {
-  const start = await SELF.fetch(`https://x/yggc/authorize?${params(extra)}`, { headers: { cookie }, redirect: 'manual' });
+  const start = await SELF.fetch(`https://x/yggc/authorize?${params(extra)}`, { redirect: 'manual' });
   const id = start.headers.get('location')!.split('/').at(-1)!;
   const approved = await json(`/api/v1/connect/interactions/${id}`, { approve: true }, 'POST');
   expect(approved.status).toBe(200);
@@ -31,8 +33,8 @@ async function tokens(extra: Record<string, string> = {}, clientSecret?: string)
   expect(response.status).toBe(200);
   return response.json<{ access_token: string; refresh_token: string; id_token?: string; scope: string }>();
 }
-async function api(token: string, path: string, body?: unknown, method = 'GET', session = '') {
-  return SELF.fetch(`https://x${path}`, { method, headers: { authorization: `Bearer ${token}`, origin: 'https://client.example', ...(session ? { cookie: session } : {}), 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+async function api(token: string, path: string, body?: unknown, method = 'GET') {
+  return SELF.fetch(`https://x${path}`, { method, headers: { authorization: `Bearer ${token}`, origin: 'https://client.example', 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 beforeAll(async () => {
   await runMigrations();
@@ -41,8 +43,8 @@ beforeAll(async () => {
     const now = Date.now();
     const row = await env.DB.prepare("INSERT INTO users (email, nickname, password_hash, role, score, email_verified_at, created_at, updated_at) VALUES (?, ?, ?, 'normal', 1000, ?, ?, ?) RETURNING id").bind(email!, name!, await hashPassword('oauth-protocol-9'), now, now, now).first<{ id: number }>();
     const login = await json('/api/v1/auth/login', { identifier: email, password: 'oauth-protocol-9' }, 'POST', '');
-    const session = login.headers.get('set-cookie')!.split(';')[0]!;
-    if (name === 'Owner') { cookie = session; uid = row!.id; } else otherCookie = session;
+    const session = await login.json<{ accessToken: string; refreshToken: string }>();
+    if (name === 'Owner') { cookie = session.accessToken; sessionToken = session.refreshToken; uid = row!.id; } else otherCookie = session.accessToken;
   }
   const created = await json('/api/v1/me/oauth/clients', { name: 'Community application', redirectUris: [callback], confidential: false }, 'POST');
   expect(created.status).toBe(201); clientId = (await created.json<{ id: string }>()).id;
@@ -54,9 +56,9 @@ describe('OAuth application API', () => {
     const me = await api(token.access_token, '/api/v1/me'); expect(me.status).toBe(200);
     const profile = await me.json<Record<string, unknown>>(); expect(profile.id).toBe(uid); expect(profile.passwordHash).toBeUndefined();
     expect((await api(token.access_token, '/api/v1/players')).status).toBe(200);
-    expect((await api(token.access_token, '/api/v1/players', { name: 'Unauthorized' }, 'POST', otherCookie)).status).toBe(403);
+    expect((await api(token.access_token, '/api/v1/players', { name: 'Unauthorized' }, 'POST')).status).toBe(403);
     expect((await api(token.access_token, '/api/v1/admin/settings')).status).toBe(403);
-    expect((await api('invalid', '/api/v1/me', undefined, 'GET', cookie)).status).toBe(401);
+    expect((await api('invalid', '/api/v1/me')).status).toBe(401);
     expect(me.headers.get('access-control-allow-origin')).toBe('*');
     expect(me.headers.get('cache-control')).toBe('no-store');
   });
@@ -67,7 +69,7 @@ describe('OAuth application API', () => {
     expect((await json('/api/v1/players')).status).toBe(200);
   });
   it('does not delegate administrator permissions from an ordinary account', async () => {
-    const start = await SELF.fetch(`https://x/yggc/authorize?${params({ scope: 'UsersManagement.Read' })}`, { headers: { cookie }, redirect: 'manual' });
+    const start = await SELF.fetch(`https://x/yggc/authorize?${params({ scope: 'UsersManagement.Read' })}`, { redirect: 'manual' });
     const id = start.headers.get('location')!.split('/').at(-1)!;
     expect((await json(`/api/v1/connect/interactions/${id}`, { approve: true }, 'POST')).status).toBe(403);
   });
@@ -129,6 +131,11 @@ describe('OpenID Connect', () => {
   it('publishes accurate discovery and independently verifiable ID tokens', async () => {
     const metadata = await (await SELF.fetch('https://x/.well-known/openid-configuration/yggc')).json<{ issuer: string; token_endpoint_auth_methods_supported: string[]; scopes_supported: string[] }>();
     expect(metadata.token_endpoint_auth_methods_supported).toContain('client_secret_basic'); expect(metadata.scopes_supported).toContain('Player.Read');
+    for (const wellKnown of ['openid-configuration', 'oauth-authorization-server']) {
+      const redirect = await SELF.fetch(`https://x/.well-known/${wellKnown}`, { redirect: 'manual' });
+      expect(redirect.status).toBe(302); expect(redirect.headers.get('location')).toBe(`${metadata.issuer}/.well-known/${wellKnown}`);
+      expect((await SELF.fetch(redirect.headers.get('location')!)).status).toBe(200);
+    }
     const token = await tokens({ scope: 'openid profile email', nonce: 'id-token-nonce' });
     const jwks = await (await SELF.fetch('https://x/yggc/jwks')).json<{ keys: Array<Record<string, unknown>> }>();
     const verified = await jwtVerify(token.id_token!, await importJWK(jwks.keys[0]!, 'RS256'), { issuer: metadata.issuer, audience: clientId });
@@ -137,29 +144,29 @@ describe('OpenID Connect', () => {
   });
   it('reuses existing consent for prompt=none but never enlarges it silently', async () => {
     await tokens({ scope: 'openid profile' });
-    const silent = await SELF.fetch(`https://x/yggc/authorize?${params({ scope: 'openid', prompt: 'none' })}`, { headers: { cookie }, redirect: 'manual' });
+    const silent = await SELF.fetch(`https://x/yggc/authorize?${params({ scope: 'openid', prompt: 'none', web_token: cookie })}`, { redirect: 'manual' });
     expect(new URL(silent.headers.get('location')!).searchParams.get('code')).toBeTruthy();
-    const enlarged = await SELF.fetch(`https://x/yggc/authorize?${params({ scope: 'openid email', prompt: 'none' })}`, { headers: { cookie }, redirect: 'manual' }); expect(enlarged.headers.get('location')).toContain('error=consent_required');
-    const anonymous = await SELF.fetch(`https://x/yggc/authorize?${params({ scope: 'openid', prompt: 'none' })}`, { redirect: 'manual' }); expect(anonymous.headers.get('location')).toContain('error=login_required');
+    const enlarged = await SELF.fetch(`https://x/yggc/authorize?${params({ scope: 'openid email', prompt: 'none', web_token: cookie })}`, { redirect: 'manual' }); expect(enlarged.headers.get('location')).toContain('error=consent_required');
+    const anonymous = await SELF.fetch(`https://x/yggc/authorize?${params({ scope: 'openid', prompt: 'none', web_token: '' })}`, { redirect: 'manual' }); expect(anonymous.headers.get('location')).toContain('error=login_required');
   });
   it('requires actual fresh authentication for prompt=login', async () => {
-    await env.DB.prepare('UPDATE sessions SET created_at = created_at - 60000 WHERE id = ?').bind(await hashToken(cookie.split('=')[1]!)).run();
-    const start = await SELF.fetch(`https://x/yggc/authorize?${params({ scope: 'openid', prompt: 'login' })}`, { headers: { cookie }, redirect: 'manual' });
+    await env.DB.prepare('UPDATE sessions SET created_at = created_at - 60000 WHERE id = ?').bind(await hashToken(sessionToken)).run();
+    const start = await SELF.fetch(`https://x/yggc/authorize?${params({ scope: 'openid', prompt: 'login', web_token: cookie })}`, { redirect: 'manual' });
     const destination = new URL('https://x' + start.headers.get('location')).searchParams.get('redirect')!;
     const id = destination.split('/').at(-1)!;
     const blocked = await json(`/api/v1/connect/interactions/${id}`, { approve: true }, 'POST'); expect((await blocked.json<{ error: string }>()).error).toBe('login_required');
     const login = await json('/api/v1/auth/login', { identifier: 'oauth-owner@example.com', password: 'oauth-protocol-9' }, 'POST');
-    const fresh = login.headers.get('set-cookie')!.split(';')[0]!;
+    const fresh = (await login.json<{ accessToken: string }>()).accessToken;
     expect((await json(`/api/v1/connect/interactions/${id}`, { approve: true }, 'POST', fresh)).status).toBe(200);
   });
   it('returns form_post through a one-time, session-bound HTML response', async () => {
     const auth = await authorize({ scope: 'openid', response_mode: 'form_post', state: '<unsafe>"' });
     expect(auth.redirect).toMatch(/^\/yggc\/response\//);
-    expect((await SELF.fetch('https://x' + auth.redirect, { headers: { cookie: otherCookie } })).status).toBe(400);
-    const response = await SELF.fetch('https://x' + auth.redirect, { headers: { cookie } }); expect(response.status).toBe(200);
+    expect((await SELF.fetch(`https://x${auth.redirect}?web_token=${encodeURIComponent(otherCookie)}`)).status).toBe(400);
+    const response = await SELF.fetch(`https://x${auth.redirect}?web_token=${encodeURIComponent(cookie)}`); expect(response.status).toBe(200);
     const html = await response.text(); expect(html).toContain('method="post"'); expect(html).toContain('https://client.example/callback'); expect(html).toContain('&lt;unsafe&gt;&quot;'); expect(html).not.toContain('<unsafe>');
     expect(response.headers.get('referrer-policy')).toBe('no-referrer'); expect(response.headers.get('content-security-policy')).toContain("script-src 'nonce-");
-    expect((await SELF.fetch('https://x' + auth.redirect, { headers: { cookie } })).status).toBe(400);
+    expect((await SELF.fetch(`https://x${auth.redirect}?web_token=${encodeURIComponent(cookie)}`)).status).toBe(400);
   });
   it('accepts max_age=0 after fresh authentication without requiring an impossible zero-millisecond session age', async () => {
     const start = await form('authorize', Object.fromEntries(params({ scope: 'openid', max_age: '0' })));
@@ -167,7 +174,7 @@ describe('OpenID Connect', () => {
     const id = destination.split('/').at(-1)!;
     expect((await json(`/api/v1/connect/interactions/${id}`, { approve: true }, 'POST')).status).toBe(400);
     const login = await json('/api/v1/auth/login', { identifier: 'oauth-owner@example.com', password: 'oauth-protocol-9' }, 'POST');
-    const session = login.headers.get('set-cookie')!.split(';')[0]!;
+    const session = (await login.json<{ accessToken: string }>()).accessToken;
     expect((await json(`/api/v1/connect/interactions/${id}`, { approve: true }, 'POST', session)).status).toBe(200);
   });
   it('keeps a simple application rename authorized but revokes grants when callbacks change', async () => {

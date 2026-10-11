@@ -16,6 +16,7 @@ export default tseslint.config(
       '**/.wrangler/**',
       '**/.mimosa/**',
       '**/.cache/**',
+      'apps/api/worker-configuration.d.ts',
       'apps/web/public/blockbench/**',
       'apps/web/public/live2d/**',
       'vendor/**',        // 第三方上游源码（git submodule），不检查

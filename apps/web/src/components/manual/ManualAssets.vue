@@ -71,7 +71,7 @@ defineExpose({ upload, pick });
       <div class="flex flex-wrap justify-between gap-3 mb-3"><AppSelect v-model="kind" class="!w-auto" :options="[{ value: '', label: i18n.t('manual.all_assets') }, ...(['image', 'audio', 'video'] as const).map(value => ({ value, label: i18n.t('manual.' + value) }))]" :aria-label="i18n.t('manual.asset_type')" /><AppButton class="btn-primary" :loading="uploading" @click="pick"><AppIcon name="upload" />{{ i18n.t('manual.upload_insert') }}</AppButton></div>
       <p class="text-xs text-muted mb-4">{{ i18n.t('manual.asset_hint') }}</p>
       <p v-if="error" role="alert" class="alert alert-danger">{{ error }}</p>
-      <AppSkeleton v-if="loading" :count="3" />
+      <AppSkeleton v-if="loading" variant="grid" :count="3" />
       <div v-else class="manual-assets-grid"><article v-for="asset in items" :key="asset.id" class="manual-asset">
         <div class="manual-asset-preview"><img v-if="asset.kind === 'image'" :src="asset.url" :alt="asset.name" loading="lazy" /><AppIcon v-else :name="asset.kind === 'audio' ? 'audiotrack' : 'movie'" /></div>
         <h3 :title="asset.name">{{ asset.name }}</h3><p class="text-xs text-muted">{{ asset.builtin ? i18n.t('manual.builtin') : `${(asset.size / 1024 / 1024).toFixed(2)} MB` }} · {{ i18n.t(`manual.${asset.kind}`) }}</p>

@@ -33,7 +33,7 @@ onBeforeUnmount(() => { disposed = true; clearTimeout(timer); });
       <h3 class="font-semibold">{{ i18n.t('resources.title') }}</h3>
       <AppButton class="btn-sm" :loading="syncing" :disabled="loading || status?.running" @click="sync"><AppIcon name="sync" />{{ i18n.t('resources.sync') }}</AppButton>
     </div>
-    <AppSkeleton v-if="loading" :count="2" />
+    <AppSkeleton v-if="loading" variant="stats" :count="6" :columns="2" />
     <dl v-else-if="status" class="mt-4 grid gap-3 text-sm sm:grid-cols-2">
       <div><dt class="text-muted">{{ i18n.t('general.skin') }}</dt><dd>{{ i18n.n(status.skins) }}</dd></div>
       <div><dt class="text-muted">{{ i18n.t('general.cape') }}</dt><dd>{{ i18n.n(status.capes) }}</dd></div>

@@ -294,7 +294,7 @@ adminRoutes.post('/notifications', async (c) => {
 });
 
 adminRoutes.post('/notifications/email-preview', async c => {
-  const body = await readJson(c, z.object({ title: z.string().trim().min(1).max(20), content: z.string().max(10_000).default(''), locale: z.string().max(16).optional() }));
+  const body = await readJson(c, z.object({ title: z.string().trim().min(1).max(50), content: z.string().max(10_000).default(''), locale: z.string().max(16).optional() }));
   c.header('Cache-Control', 'no-store');
   return c.json(renderEmail({ kind: 'admin-broadcast', to: '', title: body.title || '', content: body.content || '', locale: body.locale ?? null }, c.env.APP_URL));
 });
@@ -404,7 +404,7 @@ adminRoutes.delete('/settings/:key', async (c) => {
 
 // ── 后台任务：AI 任务队列 ───────────────────────────────────────────────────
 
-const AI_JOB_KINDS = ['translate_texture', 'moderate_texture_name', 'moderate_texture_description'] as const;
+const AI_JOB_KINDS = ['translate_texture', 'moderate_texture_name', 'moderate_texture_description', 'translate_notification'] as const;
 const AI_JOB_STATUSES = ['pending', 'processing', 'done', 'failed', 'cancelled'] as const;
 
 adminRoutes.get('/ai-jobs', async (c) => {
@@ -543,6 +543,7 @@ adminRoutes.get('/ai-models', async (c) => {
     ai_api_key: c.req.query('ai_api_key') || undefined,
     openai_base_url: c.req.query('openai_base_url') || undefined,
     ai_systemone_api_key: c.req.query('ai_systemone_api_key') || undefined,
+    ai_systemone_base_url: c.req.query('ai_systemone_base_url') || undefined,
     ai_cloudflare_account_id: c.req.query('ai_cloudflare_account_id') || undefined,
     ai_cloudflare_api_token: c.req.query('ai_cloudflare_api_token') || undefined,
   };
@@ -570,6 +571,7 @@ adminRoutes.post('/ai-test', async (c) => {
     openai_base_url: body.edits?.openai_base_url,
     ai_timeout_seconds: body.edits?.ai_timeout_seconds,
     ai_systemone_api_key: body.edits?.ai_systemone_api_key,
+    ai_systemone_base_url: body.edits?.ai_systemone_base_url,
     ai_cloudflare_account_id: body.edits?.ai_cloudflare_account_id,
     ai_cloudflare_api_token: body.edits?.ai_cloudflare_api_token,
     __modelField: body.modelField,

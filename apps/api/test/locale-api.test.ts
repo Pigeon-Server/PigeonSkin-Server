@@ -8,12 +8,12 @@ async function account(admin = false) {
   const name = 'L' + crypto.randomUUID().replaceAll('-', '').slice(0, 12);
   const response = await SELF.fetch('https://x/api/v1/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: `${name}@example.com`, password: 'locale-preferences-test', playerName: name }) });
   expect(response.status).toBe(201);
-  const { id } = await response.json<{ id: number }>();
+  const { id, accessToken } = await response.json<{ id: number; accessToken: string }>();
   if (admin) await makeAdmin(id);
-  return response.headers.get('set-cookie')!.split(';')[0]!;
+  return accessToken;
 }
 function request(path: string, cookie: string, method = 'GET', json?: unknown) {
-  return SELF.fetch(`https://x/api/v1${path}`, { method, headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, ...(json === undefined ? {} : { body: JSON.stringify(json) }) });
+  return SELF.fetch(`https://x/api/v1${path}`, { method, headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, ...(json === undefined ? {} : { body: JSON.stringify(json) }) });
 }
 describe('six-language preferences and overrides', () => {
   it('saves each supported language and restores it in the session', async () => {

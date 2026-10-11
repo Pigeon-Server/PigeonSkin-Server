@@ -28,7 +28,7 @@ onMounted(load);
     </AppButton>
   </PageHeader>
   <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
-  <AppSkeleton v-if="loading" :count="4" />
+  <AppSkeleton v-if="loading" variant="stats" :count="4" />
   <div v-else-if="data" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
     <div v-for="field in ['database', 'storage'] as const" :key="field" class="panel">
       <AppIcon

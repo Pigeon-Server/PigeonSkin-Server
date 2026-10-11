@@ -38,7 +38,7 @@ async function login(email: string): Promise<string> {
     body: JSON.stringify({ identifier: email, password: PASSWORD }),
   });
   expect(response.status).toBe(200);
-  return response.headers.get('set-cookie')!.split(';')[0]!;
+  return (await response.json<{ accessToken: string }>()).accessToken;
 }
 
 let adminCookie: string;
@@ -65,7 +65,7 @@ beforeAll(async () => {
 });
 
 const get = (path: string, cookie?: string) =>
-  SELF.fetch(`https://x${path}`, cookie ? { headers: { cookie } } : undefined);
+  SELF.fetch(`https://x${path}`, cookie ? { headers: { authorization: `Bearer ${cookie}` } } : undefined);
 
 /** 该字段类型下一个合法的字面量，用于生成"引用全部字段"的表达式。 */
 function literalFor(field: SearchField): string {

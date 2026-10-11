@@ -37,7 +37,7 @@
 
 - 后台「设置 → 安全」中的 **皮肤库反爬守卫** 控制整个功能的开启（默认开启）。
 - 限流阈值是部署级配置，不在后台改：
-  - Cloudflare：`apps/api/wrangler.jsonc` 的 `ratelimits` 中 `RL_SKINLIB`（匿名）与 `RL_SKINLIB_USER`（登录用户）。
+  - Cloudflare：`../wrangler.jsonc` 的 `ratelimits` 中 `RL_SKINLIB`（匿名）与 `RL_SKINLIB_USER`（登录用户）。
   - Node 自托管：环境变量 `RATE_LIMIT_SKINLIB` / `RATE_LIMIT_SKINLIB_USER`，格式 `<次数>/<秒数>`。
 
 守卫在所有异常路径上 fail-open：限流 binding 缺失、验证码服务不可用、`RATE_LIMIT_ENABLED` 关闭时都直接放行——反爬是纵深防御的一层，不该把正常访问打挂。

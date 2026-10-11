@@ -40,7 +40,7 @@ watch(() => route.params.id, load); onMounted(load);
       </nav>
     </template>
   </PageHeader>
-  <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p><AppSkeleton v-if="loading" :count="3" />
+  <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p><AppSkeleton v-if="loading" variant="detail" :count="3" />
   <div v-else-if="vote" class="space-y-5">
     <section class="panel space-y-4">
       <div class="flex flex-wrap gap-3 items-center"><span class="badge">{{ i18n.t(`votes.states.${vote.status}`) }}</span><span class="text-sm text-muted">{{ new Date(vote.startsAt).toLocaleString() }} — {{ new Date(vote.endsAt).toLocaleString() }}</span></div>

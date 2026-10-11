@@ -27,19 +27,19 @@ async function account(name: string, admin = false) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ identifier: `${name}@example.com`, password }),
   });
-  return { id, cookie: logged.headers.get('set-cookie')!.split(';')[0]! };
+  return { id, cookie: (await logged.json<{ accessToken: string }>()).accessToken };
 }
 function request(path: string, cookie: string, method = 'GET', body?: unknown) {
   return SELF.fetch(`https://x${path}`, {
     method,
-    headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+    headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
-async function configuredFetch(path: string, cookie: string) {
+async function configuredFetch(path: string, cookie = "", cookieHeader = "") {
   const ctx = createExecutionContext();
   const response = await createApp().fetch(
-    new Request(`https://x${path}`, { headers: { cookie } }),
+    new Request(`https://x${path}`, { headers: { ...(cookie ? { authorization: `Bearer ${cookie}` } : {}), ...(cookieHeader ? { cookie: cookieHeader } : {}) } }),
     {
       ...env,
       GITHUB_CLIENT_ID: 'test-client-id',
@@ -109,7 +109,7 @@ describe('built-in feature UI contracts', () => {
     }
     const rejected = await SELF.fetch('https://x/api/v1/textures', {
       method: 'POST',
-      headers: { cookie: user.cookie },
+      headers: { authorization: `Bearer ${user.cookie}` },
       body: form('This text is too long'),
     });
     expect(rejected.status).toBe(422);
@@ -117,7 +117,7 @@ describe('built-in feature UI contracts', () => {
     expect(score.score).toBe(1000);
     const uploaded = await SELF.fetch('https://x/api/v1/textures', {
       method: 'POST',
-      headers: { cookie: user.cookie },
+      headers: { authorization: `Bearer ${user.cookie}` },
       body: form('**Skin**'),
     });
     expect(uploaded.status).toBe(201);
@@ -221,7 +221,7 @@ describe('built-in feature UI contracts', () => {
   });
   it('binds social login to the signed-in user without switching their account', async () => {
     const user = await account('bind_user');
-    const authorization = await configuredFetch('/auth/oauth/github', user.cookie);
+    const authorization = await configuredFetch(`/auth/oauth/github?web_token=${encodeURIComponent(user.cookie)}`);
     const state = new URL(authorization.headers.get('location')!).searchParams.get('state')!;
     fetchMock.activate();
     fetchMock.disableNetConnect();
@@ -236,7 +236,8 @@ describe('built-in feature UI contracts', () => {
     fetchMock.get('https://api.github.com').intercept({ path: '/user/emails', method: 'GET' }).reply(200, [{ email: 'different@example.com', primary: true, verified: true }]);
     const response = await configuredFetch(
       `/auth/oauth/github/callback?code=test-code&state=${state}`,
-      `${user.cookie}; ${authorization.headers.get('set-cookie')!.split(';')[0]}`,
+      '',
+      authorization.headers.get('set-cookie')!.split(';')[0],
     );
     expect(response.headers.get('location')).toBe('/profile?oauth_success=1');
     const bindings = await (

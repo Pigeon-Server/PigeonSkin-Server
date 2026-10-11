@@ -9,7 +9,6 @@ import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
 import { createApp } from '../src/app.ts';
 import type { Bindings } from '../src/env.ts';
 import worker from '../src/index.ts';
-import type { MessageBatch } from '@cloudflare/workers-types';
 
 const root = 'https://skin.example.com';
 const searchEnv = { DB: env.DB, APP_URL: root };
@@ -43,7 +42,7 @@ async function adminCookie(role = 'super_admin') {
   await makeAdmin(id);
   if (role !== 'super_admin') await env.DB.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, id).run();
   const login = await SELF.fetch('https://x/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: email, password }) });
-  return login.headers.get('set-cookie')!.split(';')[0]!;
+  return (await login.json<{ accessToken: string }>()).accessToken;
 }
 
 describe('search submissions', () => {
@@ -129,7 +128,7 @@ describe('search submissions', () => {
     const id = await texture();
     await texture('private');
     const ctx = createExecutionContext();
-    const response = await createApp().fetch(new Request('https://x/api/v1/admin/search-submissions', { method: 'POST', headers: { cookie, 'sec-fetch-site': 'same-origin' } }), env as Bindings, ctx);
+    const response = await createApp().fetch(new Request('https://x/api/v1/admin/search-submissions', { method: 'POST', headers: { authorization: `Bearer ${cookie}`, 'sec-fetch-site': 'same-origin' } }), env as Bindings, ctx);
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ queued: 1 });
     await waitOnExecutionContext(ctx);
@@ -160,11 +159,11 @@ describe('search submissions', () => {
     await expect(writeMany(env, [{ key: 'search_google_credentials', value: '{}' }], { isSuperAdmin: true })).rejects.toThrow();
     await writeMany(env, [{ key: 'search_bing_key', value: indexKey }], { isSuperAdmin: true });
     const cookie = await adminCookie();
-    const settings = await (await SELF.fetch('https://x/api/v1/admin/settings', { headers: { cookie } })).json<{ values: Record<string, string> }>();
+    const settings = await (await SELF.fetch('https://x/api/v1/admin/settings', { headers: { authorization: `Bearer ${cookie}` } })).json<{ values: Record<string, string> }>();
     expect(settings.values.search_bing_key).toBe('********');
     expect(await (await SELF.fetch('https://x/api/v1/settings/public')).text()).not.toContain(indexKey);
     const normalAdmin = await adminCookie('admin');
-    const response = await SELF.fetch('https://x/api/v1/admin/search-submissions', { method: 'POST', headers: { cookie: normalAdmin, 'sec-fetch-site': 'same-origin' } });
+    const response = await SELF.fetch('https://x/api/v1/admin/search-submissions', { method: 'POST', headers: { authorization: `Bearer ${normalAdmin}`, 'sec-fetch-site': 'same-origin' } });
     expect(response.status).toBe(403);
     expect((await SELF.fetch('https://x/api/v1/admin/search-submissions')).status).toBe(401);
   });
@@ -178,11 +177,11 @@ describe('search submissions', () => {
     form.set('kind', 'skin');
     form.set('model', 'default');
     form.set('visibility', 'private');
-    const upload = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { cookie, 'sec-fetch-site': 'same-origin' }, body: form });
+    const upload = await SELF.fetch('https://x/api/v1/textures', { method: 'POST', headers: { authorization: `Bearer ${cookie}`, 'sec-fetch-site': 'same-origin' }, body: form });
     expect(upload.status).toBe(201);
     const { id } = await upload.json<{ id: number }>();
     expect((await searchSubmissionStatus(searchEnv)).recent).toHaveLength(0);
-    const changed = await SELF.fetch(`https://x/api/v1/textures/${id}`, { method: 'PATCH', headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ visibility: 'public' }) });
+    const changed = await SELF.fetch(`https://x/api/v1/textures/${id}`, { method: 'PATCH', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ visibility: 'public' }) });
     expect(changed.status).toBe(200);
     expect((await searchSubmissionStatus(searchEnv)).recent[0]).toMatchObject({ textureId: id, engine: 'bing', status: 'pending' });
   });

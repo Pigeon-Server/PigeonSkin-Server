@@ -15,7 +15,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
 import { sha256Hex } from '../../../packages/minecraft/src/png.ts';
 import { avatarObjectKey, previewObjectKey } from '../../../packages/minecraft/src/texture.ts';
-import { invalidateSettingsCache } from '../src/lib.ts';
+import { invalidateSettingsCache, type AppEnv } from '../src/lib.ts';
 import { createApp } from '../src/app.ts';
 import {
   runMigrations, markVerified, makeAdmin, readAudit,
@@ -52,7 +52,7 @@ async function registerUser(overrides: { email?: string; playerName?: string } =
   return { id: body.id, email, playerName };
 }
 
-/** 用已注册用户登录，返回会话 Cookie */
+/** 用已注册用户登录，返回 access token（Bearer 用） */
 async function login(identifier: string, password = PASSWORD): Promise<string> {
   const res = await SELF.fetch('https://x/api/v1/auth/login', {
     method: 'POST',
@@ -60,13 +60,8 @@ async function login(identifier: string, password = PASSWORD): Promise<string> {
     body: JSON.stringify({ identifier, password }),
   });
   expect(res.status).toBe(200);
-  return getCookie(res);
-}
-
-function getCookie(res: Response): string {
-  const setCookie = res.headers.get('set-cookie') ?? '';
-  const pair = setCookie.split(';')[0] ?? '';
-  return pair;
+  const body = await res.json<{ accessToken: string }>();
+  return body.accessToken;
 }
 
 async function authedFetch(
@@ -75,7 +70,7 @@ async function authedFetch(
   init: RequestInit = {},
 ): Promise<Response> {
   const headers = new Headers(init.headers);
-  headers.set('cookie', cookie);
+  headers.set('authorization', `Bearer ${cookie}`);
   // FormData 自带 boundary 的 content-type 由 fetch 生成，绝不能覆盖
   if (init.body && !(init.body instanceof FormData) && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
@@ -113,7 +108,7 @@ describe('admin route authorization coverage', () => {
 
       const member = await app.request(endpoint.path, {
         method: endpoint.method,
-        headers: { cookie, 'sec-fetch-site': 'same-origin' },
+        headers: { authorization: `Bearer ${cookie}`, 'sec-fetch-site': 'same-origin' },
       }, env);
       expect([401, 403], `member ${endpoint.method} ${endpoint.path}`).toContain(member.status);
     }
@@ -145,7 +140,10 @@ describe('POST /api/v1/auth/register', () => {
       }),
     });
     expect(res.status).toBe(201);
-    expect(res.headers.get('set-cookie')).toContain('bs_session=');
+    const registered = await res.json<{ refreshToken: string; accessToken: string; expiresIn: number }>();
+    expect(registered.refreshToken).toBeTruthy();
+    expect(registered.accessToken.split('.')).toHaveLength(3);
+    expect(registered.expiresIn).toBeGreaterThan(0);
 
     // 注册即建玩家（register_with_player_name 默认 true）
     const list = await SELF.fetch(`https://x/api/v1/protocol-probe/${playerName}.json`);
@@ -201,16 +199,45 @@ describe('POST /api/v1/auth/login', () => {
     expect(body.error).toBe('auth.invalid_credentials');
   });
 
-  it('登录会话轮换：旧 Cookie 登录后失效', async () => {
+  it('登录会话轮换：旧令牌登录后失效', async () => {
     const u = await registerUser();
     const firstCookie = await login(u.email);
 
     // 第二次登录（新会话）
     await login(u.playerName);
 
-    // 第一次登录拿到的 Cookie 应已被轮换撤销
+    // 第一次登录拿到的 access token 应已被轮换撤销
     const res = await authedFetch(firstCookie, 'https://x/api/v1/auth/session');
     expect(res.status).toBe(401);
+  });
+
+  it('刷新端点：refresh token 换新 access token，撤销后 401', async () => {
+    const u = await registerUser();
+    const loginRes = await SELF.fetch('https://x/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identifier: u.email, password: PASSWORD }),
+    });
+    const { refreshToken } = await loginRes.json<{ refreshToken: string }>();
+
+    const refreshed = await SELF.fetch('https://x/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    expect(refreshed.status).toBe(200);
+    const body = await refreshed.json<{ accessToken: string; user: { id: number; email: string } }>();
+    expect(body.accessToken.split('.')).toHaveLength(3);
+    expect(body.user.email).toBe(u.email);
+
+    // 登出后 refresh 令牌被撤销，不能再刷新
+    await authedFetch(body.accessToken, 'https://x/api/v1/auth/logout', { method: 'POST' });
+    const revoked = await SELF.fetch('https://x/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    expect(revoked.status).toBe(401);
   });
 });
 
@@ -258,17 +285,36 @@ describe('会话与资料', () => {
     expect(anon.status).toBe(401);
   });
 
-  it('未知会话 token 视为未登录（401），而不是 500', async () => {
-    const res = await SELF.fetch('https://x/api/v1/auth/session', { headers: { cookie: 'bs_session=bogus' } });
+  it('未知 Bearer 令牌视为未登录（401），而不是 500', async () => {
+    const res = await SELF.fetch('https://x/api/v1/auth/session', { headers: { authorization: 'Bearer bogus' } });
     expect(res.status).toBe(401);
   });
 
-  it('登出后 Cookie 失效', async () => {
+  it('登出后令牌失效', async () => {
     const u = await registerUser();
     const cookie = await login(u.email);
     await authedFetch(cookie, 'https://x/api/v1/auth/logout', { method: 'POST' });
     const res = await authedFetch(cookie, 'https://x/api/v1/auth/session');
     expect(res.status).toBe(401);
+  });
+
+  it('生产环境删除 __Host- 会话 Cookie 时必须带 Secure 属性', async () => {
+    // `__Host-` 前缀在 Cookie 序列化层强制要求 Secure；删除（过期化）也走
+    // 同一条序列化路径，漏掉 Secure 会让登出在生产直接 500。
+    const { Hono } = await import('hono');
+    const { clearSessionCookie, sessionCookieName } = await import('../src/lib.ts');
+    const app = new Hono<AppEnv>();
+    let setCookie = '';
+    app.post('/', (c) => {
+      clearSessionCookie(c);
+      setCookie = c.res.headers.get('set-cookie') ?? '';
+      return c.body(null, 204);
+    });
+    const res = await app.request('https://skin.pigeon-server.cn/', { method: 'POST' }, { ENVIRONMENT: 'production' } as never);
+    expect(res.status).toBe(204);
+    expect(setCookie).toContain(`${sessionCookieName({ ENVIRONMENT: 'production' } as never)}=`);
+    expect(setCookie).toContain('Secure');
+    expect(setCookie).toContain('Max-Age=0');
   });
 });
 
@@ -1290,10 +1336,12 @@ describe('sitemap 自动生成', () => {
     }
 
     const bot = { headers: { 'user-agent': 'Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)' } };
-    // 整站一律 403：API、SPA 路由、协议路径、衍生图与静态资源都不例外。
+    // Worker-first 路径一律 403：API、SPA 路由、协议路径与衍生图都不例外。
+    // 纯静态文件（/manual 截图、hashed 产物等）由资产层直接服务、不进 Worker，
+    // 守卫不覆盖它们（见 wrangler.jsonc run_worker_first）。
     // 断言响应体而不只看状态码 —— /raw/1 这类路径在关闭下载时自身也返回 403，
     // 只看状态码分不出是守卫拦的还是路由拒的。
-    for (const path of ['/api/v1/settings/public', '/skinlib', '/textures/abc', '/api/yggdrasil', '/raw/1', '/avatar/u/1', '/manual/x.png', '/yggc/authserver/authenticate']) {
+    for (const path of ['/api/v1/settings/public', '/skinlib', '/textures/abc', '/api/yggdrasil', '/raw/1', '/avatar/u/1', '/yggc/authserver/authenticate']) {
       const res = await SELF.fetch(`https://x${path}`, bot);
       expect(res.status, path).toBe(403);
       expect(await res.text(), path).toBe('Forbidden');

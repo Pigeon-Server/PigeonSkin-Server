@@ -72,7 +72,7 @@ onMounted(load);
     </div>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }} <AppButton class="btn-sm" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
-    <AppSkeleton v-if="loading" :count="2" />
+    <AppSkeleton v-if="loading" variant="list" :count="3" />
     <p v-else-if="!error && !items.length" class="panel text-muted">{{ i18n.t('oauth.no_clients') }}</p>
     <div v-else-if="items.length" class="panel divide-y divide-line !py-0">
       <article v-for="client in items" :key="client.id" class="py-4 space-y-2">

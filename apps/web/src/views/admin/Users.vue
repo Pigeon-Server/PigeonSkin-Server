@@ -199,7 +199,7 @@ onMounted(load);
     {{ error }}
   </p>
   <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-  <AppSkeleton v-if="loading" :count="3" />
+  <AppSkeleton v-if="loading" variant="table" :count="6" />
   <div v-else class="panel !p-0 overflow-x-auto">
     <table class="table">
       <thead>

@@ -84,6 +84,9 @@ describe('TextureCard', () => {
     const officialSkin: TextureSummary = { ...mockSkin, official: true, uploaderName: null };
     const html = await renderToString(createTestCardApp({ texture: officialSkin }));
     expect(html).toContain('Mojang 官方');
+    // 角标 + 底行上传者位置共两处，名称下方的来源行不再重复
+    expect(html.match(/Mojang 官方/g)).toHaveLength(2);
+    expect(html).not.toContain('转载');
   });
 
   it('reflects collected state in button classes', async () => {

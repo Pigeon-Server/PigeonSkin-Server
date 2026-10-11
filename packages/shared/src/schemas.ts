@@ -218,7 +218,7 @@ export const adminPatchPlayerInputSchema = z.object({
 }).refine((v) => Object.keys(v).length > 0, { message: '至少要改一个字段' });
 
 export const adminBroadcastInputSchema = z.object({
-  title: z.string().trim().min(1).max(20),
+  title: z.string().trim().min(1).max(50),
   content: z.string().max(10_000).default(''),
   /** 'all' | 'normal' | 数字 uid | 邮箱 */
   receiver: z.union([z.literal('all'), z.literal('normal'), idSchema, emailSchema]),

@@ -136,7 +136,11 @@ vi.mock('@/api', () => ({
     reply: (id: number, body: string, files?: File[]) => replyMock(id, body, files),
     attachmentUrl: (ticketId: number, attachmentId: number) => `/api/v1/tickets/${ticketId}/attachments/${attachmentId}`,
   },
+  // 附件需要 Bearer 认证：组件经 requestBlob 取 blob 再渲染 object URL
+  requestBlob: () => Promise.resolve(new Blob(['attachment-bytes'])),
 }));
+
+vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:mock-attachment', revokeObjectURL: () => {} }));
 
 vi.mock('@/components/UserAvatar.vue', () => ({
   default: {
@@ -179,10 +183,10 @@ describe('User Ticket Detail View (Ticket.vue)', () => {
     expect(wrapper.text()).toContain('处理中');
     expect(wrapper.text()).toContain('进入游戏后皮肤显示为默认 Steve');
     expect(wrapper.text()).toContain('请提供一下游戏客户端日志');
-    // 图片附件渲染为缩略图 <img>，文件名进 alt/title 不再出现在文本里
+    // 图片附件渲染为缩略图 <img>（Bearer 经 requestBlob → object URL）
     const thumbnail = wrapper.find('img[alt="screenshot.png"]');
     expect(thumbnail.exists()).toBe(true);
-    expect(thumbnail.attributes('src')).toContain('/tickets/10/attachments/501');
+    expect(thumbnail.attributes('src')).toBe('blob:mock-attachment');
     expect(wrapper.text()).toContain('提交了工单');
     expect(wrapper.text()).toContain('工单状态变更为 处理中');
   });

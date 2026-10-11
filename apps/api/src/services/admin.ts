@@ -451,14 +451,19 @@ export async function deleteAnyTexture(env: AdminEnv, actor: { id: number; role:
     if (owner && !canModifyUser(actor.role, owner.role as Role)) throw fail.forbidden('admin.cannot_modify_peer');
   }
 
+  // 与用户侧删除同一套语义（见 services/textures.ts deleteTexture）：删除前先
+  // 推进穿戴者的 updated_at，否则客户端带旧 ETag 重验证会 304 继续用已删除的哈希。
+  const access = await import('./texture-access.ts');
+  const wearingPlayers = await access.playersWearingTexture(env, textureId, Date.now());
   await (await import('../repositories/textures.ts')).deleteTexture(database, textureId);
+  for (const name of wearingPlayers) await access.purgePlayerProfiles(env, name);
   const remaining = await (await import('../repositories/textures.ts')).countReferencesToHash(database, texture.hash);
   if (remaining === 0 && env.BUCKET) {
     const { textureObjectKey } = await import('@pigeon-skin/minecraft');
     await env.BUCKET.delete(textureObjectKey(texture.hash));
   }
   if (env.BUCKET && !(await (await import('../repositories/textures.ts')).countPublicReferencesToHash(database, texture.hash))) {
-    await (await import('./texture-access.ts')).purgeTextureDerivatives({ ...env, BUCKET: env.BUCKET }, texture.hash);
+    await access.purgeTextureDerivatives({ ...env, BUCKET: env.BUCKET }, texture.hash);
   }
   await audit(env, {
     actorId: actor.id, action: 'admin.texture.delete', targetType: 'texture', targetId: textureId,

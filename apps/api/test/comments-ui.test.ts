@@ -4,6 +4,17 @@ import { createApp } from '../src/app.ts';
 import type { Bindings } from '../src/env.ts';
 import { runMigrations, makeAdmin } from './setup.ts';
 import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
+/** 临时开启评论 AI 审核：这两个用例自带 mock AI，依赖开关打开 */
+async function enableModeration() {
+  await env.DB.prepare("UPDATE settings SET value='true' WHERE key='comments_ai_moderation' AND locale=''").run();
+  const { invalidateSettingsCache } = await import('../src/lib.ts');
+  invalidateSettingsCache();
+}
+async function disableModeration() {
+  await env.DB.prepare("UPDATE settings SET value='false' WHERE key='comments_ai_moderation' AND locale=''").run();
+  const { invalidateSettingsCache } = await import('../src/lib.ts');
+  invalidateSettingsCache();
+}
 beforeAll(runMigrations);
 async function user(name: string, admin = false) {
   const register = await SELF.fetch('https://x/api/v1/auth/register', {
@@ -23,12 +34,12 @@ async function user(name: string, admin = false) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ identifier: `${name}@example.com`, password: 'comments-ui-9' }),
   });
-  return { id, cookie: login.headers.get('set-cookie')!.split(';')[0]! };
+  return { id, cookie: (await login.json<{ accessToken: string }>()).accessToken };
 }
 function request(path: string, cookie = '', method = 'GET', body?: unknown) {
   return SELF.fetch(`https://x/api/v1${path}`, {
     method,
-    headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+    headers: { ...(cookie ? { authorization: `Bearer ${cookie}` } : {}), 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
@@ -38,7 +49,7 @@ async function upload(cookie: string, visibility: 'public' | 'private' = 'public
   form.set('name', 'Comment texture');
   const response = await SELF.fetch('https://x/api/v1/textures', {
     method: 'POST',
-    headers: { cookie },
+    headers: { authorization: `Bearer ${cookie}` },
     body: form,
   });
   expect(response.status).toBe(201);
@@ -46,7 +57,7 @@ async function upload(cookie: string, visibility: 'public' | 'private' = 'public
   if (visibility === 'private') {
     const patch = await SELF.fetch(`https://x/api/v1/textures/${id}`, {
       method: 'PATCH',
-      headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      headers: { ...(cookie ? { authorization: `Bearer ${cookie}` } : {}), 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
       body: JSON.stringify({ visibility: 'private' }),
     });
     expect(patch.status).toBe(200);
@@ -101,13 +112,14 @@ describe('user comment workflow', () => {
     ).toBe(0);
   });
   it('keeps rejected comments visible only to their author', async () => {
+    await enableModeration();
     const author = await user('moderated_user');
     const texture = await upload(author.cookie);
     const ctx = createExecutionContext();
     const response = await createApp().fetch(
       new Request(`https://x/api/v1/textures/${texture}/comments`, {
         method: 'POST',
-        headers: { cookie: author.cookie, 'content-type': 'application/json' },
+        headers: { authorization: `Bearer ${author.cookie}`, 'content-type': 'application/json' },
         body: JSON.stringify({ content: 'Rejected comment' }),
       }),
       {
@@ -133,8 +145,10 @@ describe('user comment workflow', () => {
     ).toBe(0);
     const own = await (await request(`/textures/${texture}/comments`, author.cookie)).json<{ items: { content: string; status: string }[] }>();
     expect(own.items).toEqual([expect.objectContaining({ content: 'Rejected comment', status: 'rejected' })]);
+    await disableModeration();
   });
   it('shows pending review to the author and hides it from visitors and other accounts', async () => {
+    await enableModeration();
     const author = await user('review_author');
     const other = await user('review_other');
     const texture = await upload(author.cookie);
@@ -142,7 +156,7 @@ describe('user comment workflow', () => {
     let release!: (value: { response: string }) => void;
     const verdict = new Promise<{ response: string }>(resolve => { release = resolve; });
     const response = await createApp().fetch(new Request(`https://x/api/v1/textures/${texture}/comments`, {
-      method: 'POST', headers: { cookie: author.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Awaiting review' }),
+      method: 'POST', headers: { authorization: `Bearer ${author.cookie}`, 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Awaiting review' }),
     }), { ...env, AI: { run: async () => verdict } } as unknown as Bindings, ctx);
     expect(response.status).toBe(201);
     const ownResponse = await request(`/textures/${texture}/comments`, author.cookie);
@@ -153,6 +167,7 @@ describe('user comment workflow', () => {
     await waitOnExecutionContext(ctx);
     const published = await (await request(`/textures/${texture}/comments`)).json<{ items: { status: string }[] }>();
     expect(published.items[0]?.status).toBe('published');
+    await disableModeration();
   });
   it('does not restore a comment deleted while review is running', async () => {
     const author = await user('delete_review');
@@ -161,7 +176,7 @@ describe('user comment workflow', () => {
     let release!: (value: { response: string }) => void;
     const verdict = new Promise<{ response: string }>(resolve => { release = resolve; });
     const response = await createApp().fetch(new Request(`https://x/api/v1/textures/${texture}/comments`, {
-      method: 'POST', headers: { cookie: author.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Delete pending review' }),
+      method: 'POST', headers: { authorization: `Bearer ${author.cookie}`, 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Delete pending review' }),
     }), { ...env, AI: { run: async () => verdict } } as unknown as Bindings, ctx);
     const created = await response.json<{ id: number }>();
     expect((await request(`/comments/${created.id}`, author.cookie, 'DELETE')).status).toBe(204);

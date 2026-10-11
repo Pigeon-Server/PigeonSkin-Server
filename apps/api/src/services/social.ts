@@ -268,13 +268,18 @@ export async function reviewReport(
   if (action === 'delete') {
     const texture = await textureRepo.findTextureById(database, report.textureId);
     if (texture) {
+      // 与用户侧/后台删除同一套语义：删前推进穿戴者的角色指纹，删后清它们的协议
+      // 出口缓存 —— 否则客户端带旧 ETag 重验证会 304 继续用已删除的旧哈希。
+      const access = await import('./texture-access.ts');
+      const wearingPlayers = await access.playersWearingTexture(env, report.textureId, now);
       await textureRepo.deleteTexture(database, report.textureId);
+      for (const name of wearingPlayers) await access.purgePlayerProfiles(env, name);
       // R2 对象按哈希引用计数才删（多行可能共享同一对象）
       if (await textureRepo.countReferencesToHash(database, texture.hash) === 0) {
         await env.BUCKET.delete(textureObjectKey(texture.hash));
       }
       if (!(await textureRepo.countPublicReferencesToHash(database, texture.hash))) {
-        await (await import('./texture-access.ts')).purgeTextureDerivatives(env, texture.hash);
+        await access.purgeTextureDerivatives(env, texture.hash);
       }
     }
   }

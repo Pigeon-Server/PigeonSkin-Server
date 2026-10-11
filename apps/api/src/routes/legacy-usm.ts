@@ -23,7 +23,7 @@ function embedFrag(frag: string, column: SQL, value: unknown) {
   const q = rhs.indexOf('?');
   return sql`${sql.raw(lhs)}${column}${sql.raw(rhs.slice(0, q))}${value}${sql.raw(rhs.slice(q + 1))}`;
 }
-import { TEXTURE_CACHE_CONTROL, TEXTURE_OBJECT_MISSING_STATUS, textureObjectKey, textureEtag } from '@pigeon-skin/minecraft';
+import { REVALIDATE_CACHE_CONTROL, TEXTURE_CACHE_CONTROL, TEXTURE_OBJECT_MISSING_STATUS, textureObjectKey, textureEtag } from '@pigeon-skin/minecraft';
 import type { AppEnv } from '../lib.ts';
 import { texturePubliclyReachable } from '../services/texture-access.ts';
 
@@ -70,19 +70,25 @@ async function textureHashOf(c: Ctx, tid: number | null): Promise<string | null>
   return t?.hash ?? null;
 }
 
-/** 直出纹理字节（内容寻址 immutable；私有不可达 404 —— 照搬原插件）。
- *  对象缺失与 /textures 同语义：503 + Retry-After（可恢复存储故障）。 */
-async function serveTexture(c: Ctx, hash: string): Promise<Response> {
+/** 直出纹理字节（私有不可达 404 —— 照搬原插件；对象缺失与 /textures 同语义：
+ *  503 + Retry-After（可恢复存储故障））。
+ *
+ *  缓存指令由调用方给：`/usm/textures/{hash}` 是按哈希寻址、可以 immutable；
+ *  `/skin|/cape/{player}.png` 的 URL 是**角色名**寻址，换肤后 URL 不变，
+ *  只能短新鲜窗口 + 重验证（旧站靠 refresh-qcloud-cdn 插件刷这两个 URL，
+ *  重写版不再依赖 CDN 刷新 —— 至少不能对可变 URL 承诺一年 immutable）。
+ *  ETag 两种情况都用内容哈希，内容一换就变。 */
+async function serveTexture(c: Ctx, hash: string, cacheControl: string): Promise<Response> {
   if (!await texturePubliclyReachable(c.env, hash)) return c.notFound();
   if (c.req.header('if-none-match') === textureEtag(hash)) {
-    return c.body(null, 304, { ETag: textureEtag(hash), 'Cache-Control': TEXTURE_CACHE_CONTROL });
+    return c.body(null, 304, { ETag: textureEtag(hash), 'Cache-Control': cacheControl });
   }
   const object = await c.env.BUCKET.get(textureObjectKey(hash));
   if (!object) return c.body(null, TEXTURE_OBJECT_MISSING_STATUS, { 'Retry-After': '60' });
   return c.body(object.body, 200, {
     'Content-Type': 'image/png',
     'Content-Length': String(object.size),
-    'Cache-Control': TEXTURE_CACHE_CONTROL,
+    'Cache-Control': cacheControl,
     'ETag': textureEtag(hash),
     'X-Content-Type-Options': 'nosniff',
   });
@@ -97,7 +103,7 @@ export function registerLegacyProtocolRoutes(app: Hono<AppEnv>): void {
     if (typeof row === 'string') return c.json({ error: 'This player is banned.' }, 403);
     const hash = await textureHashOf(c, kind === 'skin' ? row.skinTid : row.capeTid);
     if (!hash) return c.notFound();
-    return serveTexture(c, hash);
+    return serveTexture(c, hash, REVALIDATE_CACHE_CONTROL);
   };
   app.get('/skin/:player', (c) => legacy(c, 'skin'));
   app.get('/cape/:player', (c) => legacy(c, 'cape'));
@@ -133,6 +139,7 @@ export function registerLegacyProtocolRoutes(app: Hono<AppEnv>): void {
   app.get('/usm/textures/:hash', async (c) => {
     const hash = c.req.param('hash');
     if (!/^[0-9a-f]{64}$/.test(hash)) return c.notFound();
-    return serveTexture(c, hash);
+    // 这条是按哈希寻址的，URL 就是内容地址 —— immutable 成立
+    return serveTexture(c, hash, TEXTURE_CACHE_CONTROL);
   });
 }

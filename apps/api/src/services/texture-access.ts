@@ -1,3 +1,4 @@
+import { avatarObjectPrefix, previewObjectKey, type PreviewRenderIdentity } from '@pigeon-skin/minecraft';
 import type { AuthedUser } from '../lib.ts';
 import { isAdmin } from '../lib.ts';
 import type { Bindings } from '../env.ts';
@@ -32,20 +33,70 @@ export async function purgeTextureDerivatives(env: TextureAccessEnv, hash: strin
     await caches.default.delete(new Request(`${base}${path}`)).catch(() => false);
   }
   if (!env.BUCKET) return;
-  await env.BUCKET.delete(`previews/v3/${hash}.png`);
+  await env.BUCKET.delete(previewObjectKey(hash));
   let cursor: string | undefined;
   do {
-    const page = await env.BUCKET.list({ prefix: `avatars/v3/${hash}/`, ...(cursor ? { cursor } : {}), limit: 1000 });
+    const page = await env.BUCKET.list({ prefix: avatarObjectPrefix(hash), ...(cursor ? { cursor } : {}), limit: 1000 });
     if (page.objects.length) await env.BUCKET.delete(page.objects.map(object => object.key));
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
 }
 
+// ── 预览渲染身份 ─────────────────────────────────────────────────────────────
+// 签名本身（拼/解）在 @pigeon-skin/minecraft：前端拼 URL、服务端判定缓存指令
+// 用的是同一份规则。这里只负责"库内当前是哪一个身份"。
+
+/**
+ * 库内该哈希当前的渲染身份。优先级与 DO 生成衍生图时一致（两处都走这里）：
+ * 同一哈希同时存在 skin 与 cape 两行时（64×32 两种都合法）取 skin。
+ */
+export async function textureRenderIdentity(
+  env: Pick<Bindings, 'DB'>, hash: string,
+): Promise<PreviewRenderIdentity> {
+  const row = await env.DB.prepare(
+    "SELECT kind, model FROM textures WHERE hash=? ORDER BY (kind = 'skin') DESC LIMIT 1",
+  ).bind(hash).first<{ kind: string; model: string | null }>();
+  if (row?.kind === 'cape') return { kind: 'cape', model: 'default' };
+  return { kind: 'skin', model: row?.model === 'slim' ? 'slim' : 'default' };
+}
+
+/**
+ * 清一个角色名下所有协议出口的边缘缓存。
+ *
+ * 清单与旧站 refresh-qcloud-cdn 插件一致：资料 JSON 四个写法 + legacy-api 的
+ * `/skin|/cape/{name}.png`（换肤后这两个 URL 不变，插件当年就是靠刷新它们让
+ * 客户端看到新皮肤的）。
+ */
 export async function purgePlayerProfiles(env: TextureAccessEnv, name: string): Promise<void> {
   const base = (env.APP_URL || 'https://texture-cache.invalid').replace(/\/$/, '');
-  for (const path of [`/${encodeURIComponent(name)}.json`, `/csl/${encodeURIComponent(name)}.json`, `/usm/${encodeURIComponent(name)}`, `/usm/${encodeURIComponent(name)}.json`]) {
+  const encoded = encodeURIComponent(name);
+  const paths = [
+    `/${encoded}.json`, `/csl/${encoded}.json`, `/usm/${encoded}`, `/usm/${encoded}.json`,
+    `/skin/${encoded}.png`, `/cape/${encoded}.png`,
+  ];
+  for (const path of paths) {
     await caches.default.delete(new Request(`${base}${path}`)).catch(() => false);
   }
+}
+
+/**
+ * 谁穿戴着这张纹理（`skin_texture_id` 或 `cape_texture_id` 命中），返回角色名。
+ *
+ * 给了 `touchAt` 就顺手把这些角色行的 `updated_at` 推进：`/{name}.json` 的 ETag
+ * 与 Last-Modified 都取自它，而材质内容被覆盖/材质被删除时角色资料的内容变了、
+ * 角色行指纹却不会自己变 —— 不推进，客户端带旧 ETag 重验证会拿到 304，继续用
+ * 随后就被删掉的旧哈希（游戏里就是皮肤加载失败）。见 06 §6.5。
+ *
+ * 无论哪种用法，都必须在删除/改写**之前**调用：指针被外键置空后就查不到了。
+ */
+export async function playersWearingTexture(
+  env: Pick<Bindings, 'DB'>, textureId: number, touchAt?: number,
+): Promise<string[]> {
+  const statement = touchAt === undefined
+    ? env.DB.prepare('SELECT name FROM players WHERE skin_texture_id=? OR cape_texture_id=?').bind(textureId, textureId)
+    : env.DB.prepare('UPDATE players SET updated_at=? WHERE skin_texture_id=? OR cape_texture_id=? RETURNING name').bind(touchAt, textureId, textureId);
+  const { results } = await statement.all<{ name: string }>();
+  return (results ?? []).map(row => row.name);
 }
 
 /**

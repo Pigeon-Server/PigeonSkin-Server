@@ -6,7 +6,9 @@
 //   • 未命中 → SPA 回退返回 index.html（200, text/html）——app.ts 靠
 //     "content-type 含 text/html" 决定走 SEO 预渲染
 //
-// 对应 wrangler 的 not_found_handling = "single-page-application"。
+// shim 有意保留 SPA 回退（Workers 侧 wrangler.jsonc 已是 not_found_handling
+// = "none"，缺失文件由资产层回 404）：因此 Node 上缺失的静态文件（含
+// /assets/*）会回 200 SEO HTML，与 Workers 侧 404 的差异在此。
 // ETag 用 mtime+size 弱校验：业务代码不做条件请求，只是让响应头
 // 形状与 Workers 对齐。
 

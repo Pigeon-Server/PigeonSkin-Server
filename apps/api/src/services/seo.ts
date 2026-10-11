@@ -3,6 +3,7 @@ import { createDb, textures, texturesDescription } from '@pigeon-skin/db';
 import { canonicalPagePath, defaultSiteDescription, indexablePage, pageCanonical, languageAlternates, plainDescription, type PageMetadata } from '@pigeon-skin/shared/seo';
 import { localizedManualPages, renderManualContent, resolveManualDocuments, type ManualDocument } from '@pigeon-skin/shared/manual';
 import { marked, Renderer } from 'marked';
+import { previewRenderQuery } from '@pigeon-skin/minecraft';
 import { readLocalized } from './settings.ts';
 import { readManualDocuments } from './manual.ts';
 import { normalizeLocale, localeTag, DEFAULT_LOCALE, LOCALES, type Locale } from '@pigeon-skin/shared/locales';
@@ -12,6 +13,12 @@ import type { Bindings } from '../env.ts';
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 }
+
+// SEO 回退内容的浏览器端隐藏：head 内同步脚本在任何绘制前给 <html> 打标记，
+// Vue 挂载完成后由前端移除；8 秒超时兜底覆盖 JS 加载失败的情况，届时回退
+// 内容重新可见（与无 JS 时的表现一致）。选择器以 html 属性为前提，爬虫与
+// 禁用 JS 的浏览器拿到的正文不受影响。
+const seoFallbackGuard = '<style>html[data-seo-fallback] #app{visibility:hidden}</style><script>document.documentElement.setAttribute("data-seo-fallback","");setTimeout(function(){document.documentElement.removeAttribute("data-seo-fallback")},8000);</script>';
 
 function safeUrl(value: string): string {
   try { return ['http:', 'https:'].includes(new URL(value, 'https://example.com').protocol) ? value : ''; } catch { return ''; }
@@ -116,7 +123,8 @@ export async function searchPage(env: Bindings, requestUrl: string, locale: Loca
       const kind = t(texture.kind === 'cape' ? 'general.cape' : 'general.skin');
       metadata.title = `${texture.name} · Minecraft ${kind} · ${siteName}`;
       metadata.description = plainDescription(detail?.description || t('seo.texture_description', { name: texture.name, kind, width: texture.width, height: texture.height }));
-      metadata.image = new URL(`/preview/${texture.hash}`, env.APP_URL).href;
+      // 带渲染签名：模型/类型改过之后 og:image 是一条新 URL，爬虫才会重新抓图
+      metadata.image = new URL(`/preview/${texture.hash}?${previewRenderQuery(texture.kind, texture.model)}`, env.APP_URL).href;
       content = `<article><h1>${escapeHtml(texture.name)}</h1><p>Minecraft ${kind} · ${texture.width} × ${texture.height}${texture.kind === 'skin' ? ` · ${t(texture.model === 'slim' ? 'skinlib.model_slim' : 'skinlib.model_classic')}` : ''}</p><img src="${escapeHtml(metadata.image)}" alt="${escapeHtml(texture.name)}"><div>${renderSearchContent(detail?.description || '')}</div></article>`;
       metadata.structuredData = [{ '@type': 'CreativeWork', name: texture.name, description: metadata.description, url: canonical, image: metadata.image, datePublished: new Date(texture.createdAt).toISOString(), dateModified: new Date(texture.updatedAt).toISOString() }];
     }
@@ -140,7 +148,7 @@ export async function renderSearchPage(asset: Response, env: Bindings, request: 
   const { metadata, content, status } = await searchPage(env, request.url, locale);
   const graph = JSON.stringify({ '@context': 'https://schema.org', '@graph': metadata.structuredData || [] }).replace(/</g, '\\u003c');
   const alternates = metadata.indexable ? languageAlternates(metadata.canonical).filter(alternate => !metadata.alternateLocales || metadata.alternateLocales.some(locale => localeTag(locale) === alternate.tag) || (alternate.tag === 'x-default' && metadata.alternateLocales.includes(DEFAULT_LOCALE))).map(alternate => `<link rel="alternate" hreflang="${alternate.tag}" href="${escapeHtml(alternate.href)}">`).join('') : '';
-  const tags = `${alternates}${content ? '<style>html[data-seo-fallback] #app{visibility:hidden}</style><script>document.documentElement.setAttribute(\'data-seo-fallback\',\'\');</script>' : ''}<meta name="description" content="${escapeHtml(metadata.description)}"><meta name="robots" content="${metadata.indexable ? 'index,follow,max-image-preview:large' : 'noindex,follow'}"><link rel="canonical" href="${escapeHtml(metadata.canonical)}"><meta property="og:type" content="website"><meta property="og:title" content="${escapeHtml(metadata.title)}"><meta property="og:description" content="${escapeHtml(metadata.description)}"><meta property="og:url" content="${escapeHtml(metadata.canonical)}">${metadata.image ? `<meta property="og:image" content="${escapeHtml(metadata.image)}">` : ''}<meta name="twitter:card" content="${metadata.image ? 'summary_large_image' : 'summary'}"><script id="page-structured-data" type="application/ld+json">${graph}</script>`;
+  const tags = `${alternates}${content ? seoFallbackGuard : ''}<meta name="description" content="${escapeHtml(metadata.description)}"><meta name="robots" content="${metadata.indexable ? 'index,follow,max-image-preview:large' : 'noindex,follow'}"><link rel="canonical" href="${escapeHtml(metadata.canonical)}"><meta property="og:type" content="website"><meta property="og:title" content="${escapeHtml(metadata.title)}"><meta property="og:description" content="${escapeHtml(metadata.description)}"><meta property="og:url" content="${escapeHtml(metadata.canonical)}">${metadata.image ? `<meta property="og:image" content="${escapeHtml(metadata.image)}">` : ''}<meta name="twitter:card" content="${metadata.image ? 'summary_large_image' : 'summary'}"><script id="page-structured-data" type="application/ld+json">${graph}</script>`;
   const response = new Response(asset.body, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-cache', 'Content-Language': localeTag(locale), ...(metadata.indexable ? {} : { 'X-Robots-Tag': 'noindex, follow' }) } });
   return new HTMLRewriter().on('html', { element(element) { element.setAttribute('lang', localeTag(locale)); } }).on('title', { element(element) { element.setInnerContent(metadata.title); } }).on('head', { element(element) { element.append(tags, { html: true }); } }).on('#app', { element(element) { element.setInnerContent(content, { html: true }); } }).transform(response);
 }

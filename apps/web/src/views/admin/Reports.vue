@@ -80,7 +80,7 @@ onMounted(load);
 
     <p v-if="errMsg" class="alert alert-danger">{{ errMsg }}</p>
 
-    <AppSkeleton v-if="loading" :count="3" />
+    <AppSkeleton v-if="loading" variant="table" :count="6" />
     <div v-else-if="items.length" class="overflow-x-auto rounded-xl border border-line bg-surface">
       <table class="table">
         <tbody>

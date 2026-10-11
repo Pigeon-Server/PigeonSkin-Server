@@ -7,6 +7,7 @@ import {
 } from '@pigeon-skin/db';
 import { verifyStoredPassword, hashToken, hashPassword } from '@pigeon-skin/auth';
 import { getSetting, getSettingBool, getSettingInt, needsAccountInitialization, type AppEnv } from '../lib.ts';
+import { REVALIDATE_CACHE_CONTROL } from '@pigeon-skin/minecraft';
 import { verifyConnectToken } from '../services/connect.ts';
 import { gameProfiles, uuidForPlayer, publicProfile, userUuid, type GameProfile } from '../services/ygg-profiles.ts';
 import { inspectSigningKey, privateKeyBytes } from '../services/ygg-key.ts';
@@ -108,6 +109,14 @@ async function signPayload(c: Ctx, payload: string): Promise<string | null> {
 }
 
 
+// ── 会话服务 GET 的缓存指令 ──────────────────────────────────────────────────
+// 这些 GET 返回的都是**可变**状态：资料里带皮肤/披风哈希与名字（换肤/改名就变）、
+// 公开密钥会随轮换而变。旧实现（PHP 插件）完全没给缓存头 —— 而没有显式新鲜度时
+// 中介可以按启发式规则自行缓存，换肤之后客户端就可能长期拿旧资料（旧站是靠
+// refresh-qcloud-cdn 插件刷这些 URL 才压住这个问题）。所以统一给显式策略：
+// 可变状态用 60 秒窗口 + 强制重验证（REVALIDATE_CACHE_CONTROL）；hasJoined 是
+// 加入校验票据，直接 no-store。
+
 /** 组装完整带签 profile 响应。
  * 签名对象是 textures property 的 **value 字符串本身**（Mojang/authlib-injector 契约：
  * 验证方拿 property.value 去验签，不是整个 profile body）。
@@ -197,6 +206,13 @@ function str(body: Record<string, unknown>, key: string): string {
 
 // ── 路由 ─────────────────────────────────────────────────────────────────────
 
+/** 「查无此人」的 204：允许显式缓存等于把"这个角色不存在"钉住一分钟，
+ *  刚注册/刚改名的角色就会被启动器判成不存在。负结果一律不进缓存。 */
+function notFoundSession(c: Ctx): Response {
+  c.header('Cache-Control', 'no-store');
+  return c.body(null, 204);
+}
+
 export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
   const r = new Hono<AppEnv>();
 
@@ -235,7 +251,11 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
         ...(await getSettingBool(c.env, 'ygg_connect_enabled') ? { 'feature.openid_configuration_url': `${c.env.APP_URL.replace(/\/$/, '')}/yggc/.well-known/openid-configuration` } : {}),
       },
     };
-    const headers: Record<string, string> = { 'Content-Type': 'application/json; charset=utf-8' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json; charset=utf-8',
+      // 站点配置（域名、注册开关、公开密钥）改过之后要让启动器重新取
+      'Cache-Control': REVALIDATE_CACHE_CONTROL,
+    };
     if (await getSettingBool(c.env, 'ygg_enable_ali')) {
       headers['X-Authlib-Injector-API-Location'] = `${c.env.APP_URL.replace(/\/$/, '')}/api/yggdrasil`;
     }
@@ -394,6 +414,8 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
     const username = c.req.query('username') ?? '';
     const serverId = c.req.query('serverId') ?? '';
     const ip = c.req.query('ip');
+    // 加入校验：一旦被中介缓存，就等于把"这个人验过了"发给了别人
+    c.header('Cache-Control', 'no-store');
     if (!username || !serverId) return c.body(null, 204);
 
     const join = await c.env.DB.prepare(`SELECT u.uuid AS id, p.name, s.ip FROM ygg_sessions s JOIN uuid u ON u.player_id = s.player_id JOIN players p ON p.id = s.player_id JOIN users a ON a.id = p.user_id JOIN ygg_tokens t ON t.id = s.token_id WHERE s.server_hash = ? AND ${noCaseEq('p.name', '?')} AND s.expires_at > ? AND t.expires_at > ? AND u.uuid = s.profile_uuid AND u.version = s.profile_version AND a.role != 'banned'`)
@@ -415,12 +437,13 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
     // 容忍带连字符/大写的 uuid（normalize 更稳）
     const normalized = (c.req.param('uuid') ?? '').toLowerCase().replace(/-/g, '');
     const uuid = /^[0-9a-f]{32}$/.test(normalized) ? normalized : (c.req.param('uuid') ?? '');
+    c.header('Cache-Control', REVALIDATE_CACHE_CONTROL);
     const [row] = await createDb(c.env.DB)
       .select({ name: uuidMap.name })
       .from(uuidMap).where(eq(uuidMap.uuid, uuid)).limit(1);
-    if (!row) return c.body(null, 204);
+    if (!row) return notFoundSession(c);
     const profile = await fullProfile(c, uuid, row.name);
-    if (!profile) return c.body(null, 204);
+    if (!profile) return notFoundSession(c);
     // fullProfile 返回 mojangProfile 标记时：Mojang 官方签名已在其 properties 里，原样透传
     if ((profile as { __mojang?: boolean }).__mojang === true) {
       delete (profile as { __mojang?: boolean }).__mojang;
@@ -456,7 +479,8 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
     const [row] = await createDb(c.env.DB)
       .select({ name: players.name })
       .from(players).where(sql`${players.name} = ${name} COLLATE NOCASE`).limit(1);
-    if (!row) return c.body(null, 204);
+    if (!row) return notFoundSession(c);
+    c.header('Cache-Control', REVALIDATE_CACHE_CONTROL);
     return c.json({ id: await uuidFor(c, row.name), name: row.name });
   });
 
@@ -520,6 +544,8 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
 
   // 公钥下发
   r.get('/minecraftservices/publickeys', async (c) => {
+    // 管理员轮换私钥后这里的内容会变：给短窗口 + 重验证，别让旧公钥被长期缓存
+    c.header('Cache-Control', REVALIDATE_CACHE_CONTROL);
     const pem = await getSetting(c.env, 'ygg_private_key');
     const pub = (await inspectSigningKey(pem)).publicKey?.replace(/-----[^-]+-----|\s+/g, '') || '';
     if (!pub) {

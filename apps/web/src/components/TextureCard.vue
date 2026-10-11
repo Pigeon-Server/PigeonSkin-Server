@@ -19,7 +19,7 @@ const i18n = useI18n();
 <template>
   <article class="texture-card">
     <router-link :to="`/skinlib/${texture.id}`" class="preview" :aria-label="texture.name">
-      <img :src="previewUrl(texture.hash)" :alt="texture.name" loading="lazy" />
+      <img :src="previewUrl(texture.hash, texture)" :alt="texture.name" loading="lazy" />
       <span class="absolute left-2.5 top-2.5 badge !bg-surface/90 shadow-sm">
         {{ i18n.t(texture.kind === 'cape' ? 'general.cape' : texture.model === 'slim' ? 'skinlib.model_slim' : 'skinlib.model_classic') }}
       </span>
@@ -38,8 +38,8 @@ const i18n = useI18n();
       <router-link :to="`/skinlib/${texture.id}`" class="block">
         <h2 :title="texture.name">{{ texture.name }}</h2>
       </router-link>
-      <span class="mt-1 block truncate text-[11px] text-muted">
-        {{ texture.official ? i18n.t('skinlib.official_resource') : i18n.t(texture.origin === 'repost' ? 'skinlib.origin_repost' : 'skinlib.origin_original') }}
+      <span v-if="!texture.official" class="mt-1 block truncate text-[11px] text-muted">
+        {{ i18n.t(texture.origin === 'repost' ? 'skinlib.origin_repost' : 'skinlib.origin_original') }}
       </span>
       <div class="mt-2 flex items-center justify-between gap-2">
         <AppButton

@@ -4,7 +4,7 @@
 // IEND 后追加载荷这类样本，所以畸形样本由 test/png-builder.ts 专门构造。
 import { describe, it, expect } from 'vitest';
 import { inspectPng, sha256Hex } from '../src/png.ts';
-import { validateTexture, textureObjectKey, isAllowedDerivativeSize } from '../src/texture.ts';
+import { validateTexture, textureObjectKey, isAllowedDerivativeSize, previewRenderQuery, previewRenderSignature, parsePreviewRenderSignature } from '../src/texture.ts';
 import {
   buildPlayerProfile,
   serializePlayerProfile,
@@ -249,6 +249,37 @@ describe('衍生图尺寸白名单', () => {
     for (const size of [1, 37, 99, 999, 1000000]) {
       expect(isAllowedDerivativeSize(size), `${size} 应被拒绝`).toBe(false);
     }
+  });
+});
+
+describe('预览渲染签名（前端拼 URL 与服务端判缓存共用同一份规则）', () => {
+  it('皮肤带模型、披风不带：拼出来的查询串能被自己的解析器读回', () => {
+    for (const kind of ['skin', 'cape'] as const) {
+      for (const model of ['default', 'slim'] as const) {
+        const query = previewRenderQuery(kind, model);
+        const params = new URLSearchParams(query);
+        const parsed = parsePreviewRenderSignature(params.get('kind'), params.get('model'));
+        expect(parsed, `${kind}/${model} → ${query}`).toBe(previewRenderSignature({
+          kind,
+          model: kind === 'cape' ? 'default' : model,
+        }));
+      }
+    }
+  });
+
+  it('披风的模型参数被忽略（披风没有模型概念）', () => {
+    expect(parsePreviewRenderSignature('cape', 'slim')).toBe('cape:default');
+    expect(previewRenderSignature({ kind: 'cape', model: 'default' })).toBe('cape:default');
+    expect(previewRenderQuery('cape', 'slim')).not.toContain('model');
+  });
+
+  it('未声明或非法取值一律返回 null（拿不到 immutable，只能重验证）', () => {
+    expect(parsePreviewRenderSignature(undefined, undefined)).toBeNull();
+    expect(parsePreviewRenderSignature('skin', undefined)).toBeNull();
+    expect(parsePreviewRenderSignature('skin', 'alex')).toBeNull();
+    expect(parsePreviewRenderSignature('hat', 'default')).toBeNull();
+    // 未知的 model 归一为 default，不会让 URL 与库内取值意外相等
+    expect(previewRenderQuery('skin', 'whatever')).toContain('model=default');
   });
 });
 

@@ -107,7 +107,7 @@ onMounted(load);
     <AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton>
   </p>
   <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-  <AppSkeleton v-if="loading" :count="3" />
+  <AppSkeleton v-if="loading" variant="table" :count="8" />
   <div v-else class="panel !p-0 overflow-x-auto max-h-[70vh]">
     <table class="table">
       <thead class="sticky top-0">

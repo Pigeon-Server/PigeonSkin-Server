@@ -10,10 +10,10 @@ async function account(name: string, admin = false) {
   const id = (await r.json<{ id: number }>()).id;
   if (admin) await makeAdmin(id);
   const login = await api('/auth/login', { identifier: email, password }, 'POST', ''); expect(login.status).toBe(200);
-  return { id, cookie: login.headers.get('set-cookie')!.split(';')[0]! };
+  return { id, cookie: (await login.json<{ accessToken: string }>()).accessToken };
 }
 function api(path: string, body?: unknown, method = 'GET', cookie = adminCookie) {
-  return SELF.fetch(`https://x/api/v1${path}`, { method, headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', ...(cookie ? { cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return SELF.fetch(`https://x/api/v1${path}`, { method, headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', ...(cookie ? { authorization: `Bearer ${cookie}` } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 interface Vote { id: string; version: number; status: string; options: Array<{ id: string; votes: number | null }>; participants: number | null; resultsVisible: boolean; ballot: { optionIds: string[] } | null }
 function content(overrides: Record<string, unknown> = {}) { const now = Date.now(); return { title: 'Choose the next server event', description: 'One ballot per account.', startsAt: now - 1000, endsAt: now + 86400000, maxChoices: 1, resultsPolicy: 'after_close', registeredBefore: null, minScore: 0, requireVerified: false, playRules: [], options: [{ title: 'Building event', description: 'Build together' }, { title: 'Exploration event', description: 'Explore together' }], ...overrides }; }

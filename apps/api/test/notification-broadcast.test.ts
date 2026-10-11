@@ -32,7 +32,7 @@ async function adminCookie(): Promise<string> {
   const { id } = await registered.json<{ id: number }>();
   await makeAdmin(id);
   const logged = await SELF.fetch('https://x/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: email, password }) });
-  return logged.headers.get('set-cookie')!.split(';')[0]!;
+  return (await logged.json<{ accessToken: string }>()).accessToken;
 }
 
 describe('notification templates', () => {
@@ -61,7 +61,7 @@ describe('notification templates', () => {
       registered.push({ id: (await created.json<{ id: number }>()).id, email });
     }
 
-    const res = await SELF.fetch('https://x/api/v1/admin/notifications', { method: 'POST', headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ title: 'Hi {{player}}', content: 'Your email is {{email}}', receiver: 'all' }) });
+    const res = await SELF.fetch('https://x/api/v1/admin/notifications', { method: 'POST', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ title: 'Hi {{player}}', content: 'Your email is {{email}}', receiver: 'all' }) });
     expect(res.status).toBe(200);
     const { sent } = await res.json<{ sent: number }>();
     expect(sent).toBeGreaterThanOrEqual(2);
@@ -87,7 +87,7 @@ describe('notification templates', () => {
 
     // 关闭开关后不再入队新任务
     await setSettings({ notification_ai_translation: 'false' });
-    await SELF.fetch('https://x/api/v1/admin/notifications', { method: 'POST', headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ title: 'again', content: 'body', receiver: 'all' }) });
+    await SELF.fetch('https://x/api/v1/admin/notifications', { method: 'POST', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ title: 'again', content: 'body', receiver: 'all' }) });
     const afterOff = await env.DB.prepare("SELECT count(*) AS n FROM ai_jobs WHERE kind = 'translate_notification' AND tid = ?").bind(contentHash('again', 'body')).first<{ n: number }>();
     expect(afterOff?.n).toBe(0);
   });
@@ -98,7 +98,7 @@ describe('notification templates', () => {
     const register = await SELF.fetch('https://x/api/v1/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'tr@example.test', password: 'notify-test-9', playerName: 'Translator' }) });
     expect(register.status).toBeLessThan(400);
 
-    const res = await SELF.fetch('https://x/api/v1/admin/notifications', { method: 'POST', headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ title: 'Welcome {{player}}', content: 'Hello {{player}}', receiver: 'all' }) });
+    const res = await SELF.fetch('https://x/api/v1/admin/notifications', { method: 'POST', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ title: 'Welcome {{player}}', content: 'Hello {{player}}', receiver: 'all' }) });
     expect(res.status).toBe(200);
 
     // 无 AI 驱动的测试环境:任务执行失败留在 pending,此时读取回退原文;
@@ -113,7 +113,7 @@ describe('notification templates', () => {
       createdAt: Date.now(), updatedAt: Date.now(),
     });
 
-    const list = await SELF.fetch('https://x/api/v1/me/notifications?lang=en', { headers: { cookie } });
+    const list = await SELF.fetch('https://x/api/v1/me/notifications?lang=en', { headers: { authorization: `Bearer ${cookie}` } });
     expect(list.status).toBe(200);
     const data = await list.json<{ items: Array<{ title: string; body: string }> }>();
     // 译文骨架按管理员本人渲染:player 是其角色名(注册时生成的 Nt* 名)
@@ -123,7 +123,7 @@ describe('notification templates', () => {
 
     // 行的 template_hash 清空(等于模板失效/非翻译通知)后译文不再命中 → 回退原文
     await db.update(notifications).set({ body: 'Changed content', templateHash: '' }).where(eq(notifications.id, row!.id));
-    const list2 = await SELF.fetch('https://x/api/v1/me/notifications?lang=en', { headers: { cookie } });
+    const list2 = await SELF.fetch('https://x/api/v1/me/notifications?lang=en', { headers: { authorization: `Bearer ${cookie}` } });
     const data2 = await list2.json<{ items: Array<{ body: string }> }>();
     expect(data2.items.find(i => i.body === 'Changed content')).toBeTruthy();
   });
@@ -142,16 +142,16 @@ describe('notification templates', () => {
     await setSettings({ notification_ai_translation: 'true' });
     // 连发两条不同模板:第二条的哨兵行/译文行不得覆盖第一条(审查 P0-1 场景)
     for (const [title, content] of [['模板 A', '内容 A {{player}}'], ['模板 B', '内容 B {{player}}']]) {
-      const res = await SELF.fetch('https://x/api/v1/admin/notifications', { method: 'POST', headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ title, content, receiver: 'all' }) });
+      const res = await SELF.fetch('https://x/api/v1/admin/notifications', { method: 'POST', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ title, content, receiver: 'all' }) });
       expect(res.status).toBe(200);
     }
     const db = createDb(env.DB);
     for (const [hash, sourceTitle] of [[String(contentHash('模板 A', '内容 A {{player}}')), '模板 A'], [String(contentHash('模板 B', '内容 B {{player}}')), '模板 B']] as const) {
       const source = await db.select().from(notificationTranslations).where(and(eq(notificationTranslations.contentHash, hash), eq(notificationTranslations.locale, ''))).limit(1);
       expect(source[0]?.sourceTitle).toBe(sourceTitle);
-      // 各自的 ai_jobs 任务独立存在
+      // 各自的 ai_jobs 任务独立存在;广播端 waitUntil 会立即派发,认领后是 processing
       const job = await env.DB.prepare('SELECT status FROM ai_jobs WHERE kind = ? AND tid = ?').bind('translate_notification', Number(hash)).first<{ status: string }>();
-      expect(job?.status).toBe('pending');
+      expect(['pending', 'processing']).toContain(job?.status);
     }
   });
 });

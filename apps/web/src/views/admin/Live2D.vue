@@ -94,7 +94,7 @@ onMounted(load);
     <PageHeader :title="i18n.t('live2d.title')" />
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-    <AppSkeleton v-if="loading" :count="2" />
+    <AppSkeleton v-if="loading" variant="form" :count="3" />
     <div v-else-if="!models.length" class="panel"><AppButton @click="load">{{ i18n.t('common.retry') }}</AppButton></div>
     <div v-else class="grid gap-6 lg:grid-cols-[1fr_340px]">
       <div class="space-y-6">

@@ -80,6 +80,18 @@ export const TEXTURE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 export const DERIVATIVE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 /**
+ * 公开、但 URL 不随内容变化的资源用的缓存指令：短新鲜窗口 + 强制重验证。
+ *
+ * `immutable` 只对"URL 就是内容地址"的响应成立。下面这些端点的 URL 里带的不是
+ * 内容本身，而是可变的身份，所以内容一变 URL 不会跟着变，只能靠重验证纠正：
+ *   - 预览图：渲染还取决于 `kind`/`model` 两列可改数据（签名缺失或与库内不一致时）
+ *   - `/raw/{tid}`：数字 id 不变，但内容可以"覆盖保存"成新哈希
+ *   - `/skin/{player}.png`、`/cape/{player}.png`：角色名不变，但可以换肤
+ * 60 秒与玩家档案同口径；未变化时重验证是纯 304（哈希 ETag 直接比字符串）。
+ */
+export const REVALIDATE_CACHE_CONTROL = 'public, max-age=60, must-revalidate';
+
+/**
  * 玩家被封禁时返回给客户端的消息。CSL 会把它呈现给玩家，属于契约的一部分。
  * 旧版 403 体是翻译后的完整句子（Laravel trans('general.player-banned')），
  * 这里必须放消息文本本身，不能放翻译键。
@@ -98,4 +110,14 @@ export function textureEtag(hash: string): string {
 /** 玩家档案的弱 ETag，基于玩家 id 与最后修改时间 */
 export function playerProfileEtag(playerId: number, updatedAt: number): string {
   return `W/"${playerId}-${updatedAt}"`;
+}
+
+/**
+ * 预览衍生图的强 ETag。
+ *
+ * 预览不是纯哈希寻址：渲染结果取决于 (hash, kind, model)。ETag 必须把 kind/model
+ * 一起算进去 —— 否则改过模型的客户端重验证时会拿到 304，继续用旧模型那一张。
+ */
+export function previewEtag(hash: string, kind: string, model: string | null): string {
+  return `"pv-${hash}-${kind}-${model ?? 'none'}-3"`;
 }

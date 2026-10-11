@@ -29,14 +29,14 @@ async function register(name: string, admin = false) {
   const { id } = await response.json<{ id: number }>();
   if (admin) await makeAdmin(id);
   const login = await SELF.fetch('https://x/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: credentials.email, password: credentials.password }) });
-  return login.headers.get('set-cookie')!.split(';')[0]!;
+  return (await login.json<{ accessToken: string }>()).accessToken;
 }
 
 function upload(cookie: string, bytes: Uint8Array) {
   const body = new FormData();
   body.set('name', 'Uploaded model');
   body.set('file', new Blob([bytes]), 'model.zip');
-  return SELF.fetch('https://x/api/v1/admin/live2d/models', { method: 'POST', headers: { cookie, 'sec-fetch-site': 'same-origin' }, body });
+  return SELF.fetch('https://x/api/v1/admin/live2d/models', { method: 'POST', headers: { authorization: `Bearer ${cookie}`, 'sec-fetch-site': 'same-origin' }, body });
 }
 
 describe('Live2D model packages', () => {
@@ -80,7 +80,7 @@ describe('Live2D administration', () => {
     for (const version of [2, 4]) {
       const model = defaults.find(model => model.version === version)!;
       expect(model.url).toContain('b5caf5390c8c226f19c817ea37d5bc4452d85209');
-      const response = await SELF.fetch('https://x/api/v1/admin/live2d', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true, modelId: model.id }) });
+      const response = await SELF.fetch('https://x/api/v1/admin/live2d', { method: 'PUT', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true, modelId: model.id }) });
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ modelId: model.id, model: { url: model.url } });
     }
@@ -90,7 +90,7 @@ describe('Live2D administration', () => {
     expect((await SELF.fetch('https://x/api/v1/admin/live2d')).status).toBe(401);
     const cookie = await register('live2d_user');
     expect((await upload(cookie, archive())).status).toBe(403);
-    expect((await SELF.fetch('https://x/api/v1/admin/live2d', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ enabled: false, modelId: 'aoba' }) })).status).toBe(403);
+    expect((await SELF.fetch('https://x/api/v1/admin/live2d', { method: 'PUT', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json' }, body: JSON.stringify({ enabled: false, modelId: 'aoba' }) })).status).toBe(403);
   });
 
   it('uploads to R2, serves nested assets, persists selection and turns display off', async () => {
@@ -106,11 +106,11 @@ describe('Live2D administration', () => {
     const texture = await SELF.fetch(`https://x${new URL('textures/skin.png', `https://x${model.url}`).pathname}`);
     expect(texture.status).toBe(200);
     await texture.arrayBuffer();
-    const put = (enabled: boolean, modelId = model.id) => SELF.fetch('https://x/api/v1/admin/live2d', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ enabled, modelId }) });
+    const put = (enabled: boolean, modelId = model.id) => SELF.fetch('https://x/api/v1/admin/live2d', { method: 'PUT', headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json' }, body: JSON.stringify({ enabled, modelId }) });
     expect((await put(true)).status).toBe(200);
     const display = await (await SELF.fetch('https://x/api/v1/live2d')).json<{ enabled: boolean; modelId: string }>();
     expect(display).toMatchObject({ enabled: true, modelId: model.id });
-    const list = await (await SELF.fetch('https://x/api/v1/admin/live2d', { headers: { cookie } })).json<{ items: Array<{ id: string }> }>();
+    const list = await (await SELF.fetch('https://x/api/v1/admin/live2d', { headers: { authorization: `Bearer ${cookie}` } })).json<{ items: Array<{ id: string }> }>();
     expect(list.items.map(item => item.id)).toContain(model.id);
     expect((await put(true, 'missing')).status).toBe(404);
     expect((await put(false)).status).toBe(200);

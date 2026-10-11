@@ -659,6 +659,7 @@
     }
   }
   .app-shell {
+    position: relative;
     height: 100dvh;
     min-height: 0;
     overflow: hidden;
@@ -1744,8 +1745,11 @@
   .public-topbar .btn-icon {
     color: inherit;
   }
+  /* 顶栏可能是管理员设置的彩色背景（--navbar-ink 与之成对生成），
+     悬停不能落到全局正文墨色 --ink 上——浅色主题下会变成彩底黑图标。
+     与侧栏 nav-item:hover 同手法：保持墨色，用墨色淡混合做背景高亮。 */
   .app-topbar .btn-icon:hover:not(:disabled),
   .public-topbar .btn-icon:hover:not(:disabled) {
-    color: var(--ink);
+    background: color-mix(in srgb, var(--navbar-ink, var(--ink)) 14%, transparent);
   }
 }
