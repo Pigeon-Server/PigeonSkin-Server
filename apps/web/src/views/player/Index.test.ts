@@ -2,7 +2,7 @@
 import { mount, flushPromises } from '@vue/test-utils';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-vi.mock('@/components/TexturePreviewer.vue', () => ({
+vi.mock('@/components/texture/TexturePreviewer.vue', () => ({
   default: {
     name: 'TexturePreviewer',
     props: ['skinUrl', 'capeUrl', 'slim', 'name', 'height'],
@@ -10,7 +10,7 @@ vi.mock('@/components/TexturePreviewer.vue', () => ({
   },
 }));
 
-vi.mock('@/components/SkinPreview.vue', () => ({
+vi.mock('@/components/texture/SkinPreview.vue', () => ({
   default: {
     name: 'SkinPreview',
     props: ['skinUrl', 'slim', 'cape', 'alt'],
@@ -18,7 +18,7 @@ vi.mock('@/components/SkinPreview.vue', () => ({
   },
 }));
 
-vi.mock('@/components/AvatarPreview.vue', () => ({
+vi.mock('@/components/texture/AvatarPreview.vue', () => ({
   default: {
     name: 'AvatarPreview',
     props: ['hash', 'name'],

@@ -10,8 +10,8 @@ import { useTheme } from '@/composables/theme';
 import { usePreferences } from '@/composables/preferences';
 import ManualNavigation from '@/components/manual/ManualNavigation.vue';
 import ManualMarkdown from '@/components/manual/ManualMarkdown.vue';
-import SiteFooter from '@/components/SiteFooter.vue';
-import LocaleSelect from '@/components/LocaleSelect.vue';
+import SiteFooter from '@/components/layout/SiteFooter.vue';
+import LocaleSelect from '@/components/layout/LocaleSelect.vue';
 import { LOCALES, localeTag, normalizeLocale } from '@pigeon-skin/shared/locales';
 import { applyPageMetadata, baseMetadata } from '@/lib/seo';
 

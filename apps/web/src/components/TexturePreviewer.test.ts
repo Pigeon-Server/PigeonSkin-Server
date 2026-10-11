@@ -12,7 +12,7 @@ vi.mock('@/stores/i18n', () => ({
   }),
 }));
 
-vi.mock('@/components/SkinViewer.vue', () => ({
+vi.mock('@/components/texture/SkinViewer.vue', () => ({
   default: {
     name: 'SkinViewer',
     props: ['skinUrl', 'capeUrl', 'slim', 'height', 'name', 'active'],
@@ -20,7 +20,7 @@ vi.mock('@/components/SkinViewer.vue', () => ({
   },
 }));
 
-vi.mock('@/components/SkinPreview.vue', () => ({
+vi.mock('@/components/texture/SkinPreview.vue', () => ({
   default: {
     name: 'SkinPreview',
     props: ['skinUrl', 'slim', 'cape', 'alt'],
@@ -28,7 +28,7 @@ vi.mock('@/components/SkinPreview.vue', () => ({
   },
 }));
 
-import TexturePreviewer from '@/components/TexturePreviewer.vue';
+import TexturePreviewer from '@/components/texture/TexturePreviewer.vue';
 
 function mountPreviewer() {
   return mount(TexturePreviewer, {

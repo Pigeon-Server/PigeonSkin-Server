@@ -3,8 +3,8 @@ import { computed, ref, useId } from 'vue';
 import { useI18n } from '@/stores/i18n';
 import { useSessionStore } from '@/stores/session';
 import { useSiteSettings } from '@/stores/site';
-import LocaleSelect from '@/components/LocaleSelect.vue';
-import SiteFooter from '@/components/SiteFooter.vue';
+import LocaleSelect from '@/components/layout/LocaleSelect.vue';
+import SiteFooter from '@/components/layout/SiteFooter.vue';
 import OverlayScrollbar from '@/components/ui/OverlayScrollbar.vue';
 
 const i18n = useI18n();

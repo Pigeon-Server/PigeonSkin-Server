@@ -8,7 +8,7 @@ import { startAuthentication } from '@simplewebauthn/browser';
 import { passkeysSupported, securityError } from '@/lib/security';
 import { useSessionStore } from '@/stores/session';
 import { useI18n } from '@/stores/i18n';
-import OAuthButtons from '@/components/OAuthButtons.vue';
+import OAuthButtons from '@/components/auth/OAuthButtons.vue';
 import { isErrorCode } from '@pigeon-skin/shared';
 import { apiErrorMessage } from '@/lib/api-error';
 

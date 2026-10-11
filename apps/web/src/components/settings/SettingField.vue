@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { useI18n } from '@/stores/i18n';
 import { resolveThemeColor, DEFAULT_THEME_COLOR } from '@/lib/theme';
-import DomainListEditor from '@/components/DomainListEditor.vue';
+import DomainListEditor from '@/components/settings/DomainListEditor.vue';
 const value = defineModel<string | undefined>({ default: '' });
 const props = defineProps<{
   name: string;

@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from '@/stores/i18n';
-import SkinPreview from '@/components/SkinPreview.vue';
+import SkinPreview from '@/components/texture/SkinPreview.vue';
 import { defaultSkinUrls } from '@pigeon-skin/shared/default-skins';
 
 const router = useRouter();

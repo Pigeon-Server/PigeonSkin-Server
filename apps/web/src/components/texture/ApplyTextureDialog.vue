@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { Combobox } from '@vuetify/v0';
 import { playerApi, type PlayerSummary } from '@/api';
 import { useI18n } from '@/stores/i18n';
-import AvatarPreview from '@/components/AvatarPreview.vue';
+import AvatarPreview from '@/components/texture/AvatarPreview.vue';
 import { apiErrorMessage } from '@/lib/api-error';
 const open = defineModel<boolean>({ default: false });
 const props = defineProps<{ textureId?: number | undefined; kind?: 'skin' | 'cape' | undefined; textures?: { skin?: number; cape?: number } | undefined }>();

@@ -1,7 +1,7 @@
 import { createSSRApp, h } from 'vue';
 import { renderToString } from 'vue/server-renderer';
 import { describe, expect, it, vi } from 'vitest';
-import TextureCard from '@/components/TextureCard.vue';
+import TextureCard from '@/components/texture/TextureCard.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import type { TextureSummary } from '@/api';

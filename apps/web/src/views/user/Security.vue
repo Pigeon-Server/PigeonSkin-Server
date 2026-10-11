@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AccountSecurity from '@/components/AccountSecurity.vue';
+import AccountSecurity from '@/components/auth/AccountSecurity.vue';
 import { useI18n } from '@/stores/i18n';
 
 const i18n = useI18n();

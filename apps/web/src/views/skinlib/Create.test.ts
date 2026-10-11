@@ -38,7 +38,7 @@ vi.mock('@/stores/i18n', () => ({
   }),
 }));
 
-vi.mock('@/components/SkinPreview.vue', () => ({
+vi.mock('@/components/texture/SkinPreview.vue', () => ({
   default: {
     props: ['skinUrl', 'slim', 'cape', 'alt'],
     template: '<div class="mock-skin-preview">{{ alt }}</div>',

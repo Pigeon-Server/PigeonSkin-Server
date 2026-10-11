@@ -73,7 +73,7 @@ vi.mock('@/stores/i18n', () => ({
   }),
 }));
 
-vi.mock('@/components/TextureCard.vue', () => ({
+vi.mock('@/components/texture/TextureCard.vue', () => ({
   default: {
     props: ['texture'],
     template: '<article class="mock-texture-card" :data-id="texture.id">{{ texture.name }}</article>',

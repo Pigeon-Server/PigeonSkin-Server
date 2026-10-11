@@ -157,14 +157,14 @@ vi.mock('@/api', () => ({
   previewUrl: (hash: string, texture: { kind: 'skin' | 'cape' }) => `/preview/${hash}?render=3&kind=${texture.kind}`,
 }));
 
-vi.mock('@/components/TexturePreviewer.vue', () => ({
+vi.mock('@/components/texture/TexturePreviewer.vue', () => ({
   default: {
     props: ['skinUrl', 'capeUrl', 'slim', 'height', 'name'],
     template: '<div class="mock-texture-previewer">{{ name }}</div>',
   },
 }));
 
-vi.mock('@/components/TextureComments.vue', () => ({
+vi.mock('@/components/texture/TextureComments.vue', () => ({
   default: {
     props: ['textureId'],
     template: '<div class="mock-texture-comments">Comments</div>',
@@ -177,7 +177,7 @@ vi.mock('@/components/SkinlibLoading.vue', () => ({
   },
 }));
 
-vi.mock('@/components/ApplyTextureDialog.vue', () => ({
+vi.mock('@/components/texture/ApplyTextureDialog.vue', () => ({
   default: {
     template: '<div class="mock-apply-dialog"></div>',
   },

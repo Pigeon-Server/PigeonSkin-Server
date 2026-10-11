@@ -71,7 +71,7 @@ vi.mock('@/stores/i18n', () => ({
   }),
 }));
 
-vi.mock('@/components/TexturePreviewer.vue', () => ({
+vi.mock('@/components/texture/TexturePreviewer.vue', () => ({
   default: {
     template: '<div class="mock-texture-previewer"></div>',
   },

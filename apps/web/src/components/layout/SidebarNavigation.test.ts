@@ -2,8 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import SidebarGroup from './SidebarGroup.vue';
-import en from '../../../../packages/shared/src/locales/en.json';
-import zh_CN from '../../../../packages/shared/src/locales/zh_CN.json';
+import en from '../../../../../packages/shared/src/locales/en.json';
+import zh_CN from '../../../../../packages/shared/src/locales/zh_CN.json';
 
 describe('Sidebar Navigation', () => {
   it('correctly matches active state for subroutes like /tickets/123, /skinlib/456, /votes/7', () => {

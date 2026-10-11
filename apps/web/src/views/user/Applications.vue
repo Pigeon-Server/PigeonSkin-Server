@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import ConnectGrants from '@/components/ConnectGrants.vue';
-import OAuthClients from '@/components/OAuthClients.vue';
+import OAuthClients from '@/components/auth/OAuthClients.vue';
 import { useI18n } from '@/stores/i18n';
 const i18n = useI18n();
 const tab = ref<'grants' | 'clients'>('grants');

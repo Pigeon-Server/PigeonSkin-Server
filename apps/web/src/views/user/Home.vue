@@ -6,7 +6,7 @@ import { useRoute } from 'vue-router';
 import { api, closetApi, textureApi, type TextureSummary, type UserProfile } from '@/api';
 import { useSessionStore } from '@/stores/session';
 import { useI18n } from '@/stores/i18n';
-import TextureCard from '@/components/TextureCard.vue';
+import TextureCard from '@/components/texture/TextureCard.vue';
 import { apiErrorMessage } from '@/lib/api-error';
 import { withSkinlibChallenge } from '@/stores/skinlib-challenge';
 

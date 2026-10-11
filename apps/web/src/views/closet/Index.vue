@@ -3,9 +3,9 @@ import { onMounted, onBeforeUnmount, ref, computed, watch, nextTick } from 'vue'
 import { closetApi, meApi, textureUrl, type ClosetEntry } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import { confirmAction } from '@/stores/dialog';
-import SkinPreview from '@/components/SkinPreview.vue';
-import ApplyTextureDialog from '@/components/ApplyTextureDialog.vue';
-import TexturePreviewer from '@/components/TexturePreviewer.vue';
+import SkinPreview from '@/components/texture/SkinPreview.vue';
+import ApplyTextureDialog from '@/components/texture/ApplyTextureDialog.vue';
+import TexturePreviewer from '@/components/texture/TexturePreviewer.vue';
 import { apiErrorMessage } from '@/lib/api-error';
 import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
 const i18n = useI18n();

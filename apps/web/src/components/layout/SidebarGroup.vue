@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, useId, watch } from 'vue';
-import SidebarLink from '@/components/SidebarLink.vue';
+import SidebarLink from '@/components/layout/SidebarLink.vue';
 const props = defineProps<{ title: string; icon: string; items: Array<{ title: string; link: string; icon: string }>; activePath: string }>();
 const id = useId();
 const trigger = ref<HTMLElement | null>(null);

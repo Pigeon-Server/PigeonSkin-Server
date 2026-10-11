@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { textureApi, userAvatarUrl } from '@/api';
-import AvatarPreview from '@/components/AvatarPreview.vue';
+import AvatarPreview from '@/components/texture/AvatarPreview.vue';
 const props = defineProps<{ textureId: number | null; name: string; userId?: number | null }>();
 const hash = ref<string | null>(null);
 const cacheVersion = ref(Date.now());

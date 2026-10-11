@@ -2,7 +2,7 @@
 import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useI18n } from '@/stores/i18n';
 import { useTheme } from '@/composables/theme';
-import SkinPreview from '@/components/SkinPreview.vue';
+import SkinPreview from '@/components/texture/SkinPreview.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import { defaultSkinUrl } from '@/lib/default-skin';
 const props = withDefaults(defineProps<{

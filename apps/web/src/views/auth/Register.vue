@@ -6,7 +6,7 @@ import { useRouter } from 'vue-router';
 import { ApiError } from '@/api';
 import { useSessionStore } from '@/stores/session';
 import { useI18n } from '@/stores/i18n';
-import OAuthButtons from '@/components/OAuthButtons.vue';
+import OAuthButtons from '@/components/auth/OAuthButtons.vue';
 import { apiErrorMessage } from '@/lib/api-error';
 
 const router = useRouter();

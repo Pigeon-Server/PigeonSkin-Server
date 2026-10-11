@@ -4,8 +4,8 @@ import { textureApi, textureUrl, type TextureSummary } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import { useSessionStore } from '@/stores/session';
 import { useSiteSettings } from '@/stores/site';
-import SkinPreview from '@/components/SkinPreview.vue';
-import SkinViewer from '@/components/SkinViewer.vue';
+import SkinPreview from '@/components/texture/SkinPreview.vue';
+import SkinViewer from '@/components/texture/SkinViewer.vue';
 import { defaultSkinUrl } from '@/lib/default-skin';
 
 const i18n = useI18n();

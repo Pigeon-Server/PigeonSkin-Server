@@ -9,7 +9,7 @@ import { useSiteSettings } from '@/stores/site';
 import { confirmAction } from '@/stores/dialog';
 import { integrationModules } from '@/lib/integrations';
 import { generateSigningKey } from '@/lib/signing-key';
-import SettingField from '@/components/SettingField.vue';
+import SettingField from '@/components/settings/SettingField.vue';
 import CopyField from '@/components/ui/CopyField.vue';
 import SearchSubmissionPanel from '@/components/SearchSubmissionPanel.vue';
 import OfficialResourcePanel from '@/components/OfficialResourcePanel.vue';

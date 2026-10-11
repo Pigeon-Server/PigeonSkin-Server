@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Live2DModelInfo } from '@pigeon-skin/shared/live2d';
 import { ApiError, live2dApi } from '@/api';
 import { useI18n } from '@/stores/i18n';
-import Live2DCanvas from '@/components/Live2DCanvas.vue';
+import Live2DCanvas from '@/components/live2d/Live2DCanvas.vue';
 import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
 import { useSearchExpression } from '@/lib/search-expression';
 import { matchSearch, searchSchema } from '@pigeon-skin/shared/search';

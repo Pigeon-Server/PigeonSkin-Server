@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from '@/stores/i18n';
-import SkinViewer from '@/components/SkinViewer.vue';
-import SkinPreview from '@/components/SkinPreview.vue';
+import SkinViewer from '@/components/texture/SkinViewer.vue';
+import SkinPreview from '@/components/texture/SkinPreview.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 const props = withDefaults(defineProps<{ skinUrl?: string | null | undefined; capeUrl?: string | null | undefined; slim?: boolean; height?: number; name?: string }>(), { height: 380, slim: false, name: '' });
 const i18n = useI18n();

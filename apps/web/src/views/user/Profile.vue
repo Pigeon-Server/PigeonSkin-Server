@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { LOCALE_OPTIONS, normalizeLocale, type Locale } from '@pigeon-skin/shared/locales';
-import AccountSecurity from '@/components/AccountSecurity.vue';
+import AccountSecurity from '@/components/auth/AccountSecurity.vue';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import {
   api,
@@ -20,7 +20,7 @@ import { isErrorCode } from '@pigeon-skin/shared';
 import { confirmAction } from '@/stores/dialog';
 import { accessToken } from '@/lib/token-store';
 import { useTheme } from '@/composables/theme';
-import AvatarPreview from '@/components/AvatarPreview.vue';
+import AvatarPreview from '@/components/texture/AvatarPreview.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { apiErrorMessage } from '@/lib/api-error';
 import SearchExpressionField from '@/components/search/SearchExpressionField.vue';

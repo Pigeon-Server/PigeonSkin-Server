@@ -5,7 +5,7 @@ import { adminApi } from '@/api';
 import { useSessionStore } from '@/stores/session';
 import { useI18n } from '@/stores/i18n';
 import { useSiteSettings } from '@/stores/site';
-import SettingField from '@/components/SettingField.vue';
+import SettingField from '@/components/settings/SettingField.vue';
 import { integrationModules } from '@/lib/integrations';
 import { useRoute, onBeforeRouteLeave } from 'vue-router';
 import { confirmAction } from '@/stores/dialog';

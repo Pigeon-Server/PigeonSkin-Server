@@ -14,11 +14,11 @@ import {
 import { useSessionStore } from '@/stores/session';
 import { useI18n } from '@/stores/i18n';
 import { useSiteSettings } from '@/stores/site';
-import TexturePreviewer from '@/components/TexturePreviewer.vue';
+import TexturePreviewer from '@/components/texture/TexturePreviewer.vue';
 import SkinlibLoading from '@/components/SkinlibLoading.vue';
-import ApplyTextureDialog from '@/components/ApplyTextureDialog.vue';
+import ApplyTextureDialog from '@/components/texture/ApplyTextureDialog.vue';
 import MarkdownEditor from '@/components/ui/MarkdownEditor.vue';
-import TextureComments from '@/components/TextureComments.vue';
+import TextureComments from '@/components/texture/TextureComments.vue';
 import VerificationChallenge from '@/components/VerificationChallenge.vue';
 import { applyPageMetadata, baseMetadata } from '@/lib/seo';
 import { plainDescription } from '@pigeon-skin/shared/seo';

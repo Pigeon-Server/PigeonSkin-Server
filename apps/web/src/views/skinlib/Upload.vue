@@ -6,7 +6,7 @@ import { apiErrorMessage } from '@/lib/api-error';
 import { useI18n } from '@/stores/i18n';
 import { useSiteSettings } from '@/stores/site';
 import { useSessionStore } from '@/stores/session';
-import TexturePreviewer from '@/components/TexturePreviewer.vue';
+import TexturePreviewer from '@/components/texture/TexturePreviewer.vue';
 import MarkdownEditor from '@/components/ui/MarkdownEditor.vue';
 
 const router = useRouter();

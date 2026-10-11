@@ -5,7 +5,7 @@ import { useI18n } from '@/stores/i18n';
 import { useSessionStore } from '@/stores/session';
 import { confirmAction } from '@/stores/dialog';
 import CopyField from '@/components/ui/CopyField.vue';
-import OAuthClients from '@/components/OAuthClients.vue';
+import OAuthClients from '@/components/auth/OAuthClients.vue';
 const i18n = useI18n();
 const session = useSessionStore();
 const data = ref<ConnectAdmin | null>(null);
