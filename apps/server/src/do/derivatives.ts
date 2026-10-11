@@ -13,12 +13,13 @@
 // LIMITS.maxDerivativeSourceArea 的源图直接拒绝（404 路径），
 // 防止解压炸弹吃掉 DO 内存。
 
+import { flag, type Bindings } from './../core/env.ts';
 import {
   decodePng, encodePng, renderAvatar2d, renderAvatar3d, renderPreview,
   avatarObjectKey, previewObjectKey, textureObjectKey, isAllowedDerivativeSize,
   type DecodedPng,
 } from '@pigeon-skin/minecraft';
-import { flag, type Bindings } from '../env.ts';
+
 import { textureRenderIdentity } from '../services/texture-access.ts';
 
 /** 一次生成请求的解析结果 */

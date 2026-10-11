@@ -1,6 +1,7 @@
-import { getSetting } from '../lib.ts';
-import type { Bindings } from '../env.ts';
 
+
+import { type Bindings } from './../core/env.ts';
+import { getSetting } from './../core/settings-reader.ts';
 export type EmailPolicyEnv = Pick<Bindings, 'DB'>;
 
 export async function readEmailDomainList(env: EmailPolicyEnv, key: 'restricted_email_allow' | 'restricted_email_deny'): Promise<string[]> {

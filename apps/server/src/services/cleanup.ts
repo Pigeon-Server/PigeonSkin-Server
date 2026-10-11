@@ -12,9 +12,9 @@
 //
 // 幂等且可重入：每条 DELETE 都以时间为条件，重跑只是少删几行，没有副作用。
 // 一次 cron 触发就是一批 D1 写，免费额度下每小时跑一次绰绰有余。
-import type { Bindings } from '../env.ts';
 
 /** 已消费令牌的保留时长（毫秒）。 */
+import { type Bindings } from './../core/env.ts';
 export const CONSUMED_TOKEN_RETENTION_MS = 24 * 60 * 60 * 1000;
 /** auth_attempts 的保留时长（毫秒）。失败计数窗口 15 分钟，7 天足够排查。 */
 export const ATTEMPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;

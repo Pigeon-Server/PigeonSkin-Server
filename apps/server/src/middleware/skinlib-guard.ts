@@ -21,10 +21,12 @@
 // 一切异常路径 fail-open：binding 缺失、校验服务故障、RATE_LIMIT_ENABLED
 // 或 SKINLIB_GUARD_ENABLED 关闭，都直接放行。纵深防御不缺一层不该打挂正常访问。
 
+import { flag, type Bindings } from './../core/env.ts';
+import { clientIp } from './../core/ip.ts';
+import { type AppContext, type AppEnv } from './../core/user.ts';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { MiddlewareHandler } from 'hono';
-import { flag, type Bindings } from '../env.ts';
-import { clientIp, type AppContext, type AppEnv } from '../lib.ts';
+
 import { captchaAllows, captchaDriver, verifyCaptcha } from '../services/captcha.ts';
 import { hmacSha256 } from '../services/captcha-internal.ts';
 

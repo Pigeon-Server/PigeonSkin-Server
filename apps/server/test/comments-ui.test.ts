@@ -1,18 +1,19 @@
+import { type Bindings } from './../src/core/env.ts';
 import { env, SELF, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
-import type { Bindings } from '../src/env.ts';
+
 import { runMigrations, makeAdmin } from './setup.ts';
 import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
 /** 临时开启评论 AI 审核：这两个用例自带 mock AI，依赖开关打开 */
 async function enableModeration() {
   await env.DB.prepare("UPDATE settings SET value='true' WHERE key='comments_ai_moderation' AND locale=''").run();
-  const { invalidateSettingsCache } = await import('../src/lib.ts');
+  const { invalidateSettingsCache } = await import('../src/core/settings-reader.ts');
   invalidateSettingsCache();
 }
 async function disableModeration() {
   await env.DB.prepare("UPDATE settings SET value='false' WHERE key='comments_ai_moderation' AND locale=''").run();
-  const { invalidateSettingsCache } = await import('../src/lib.ts');
+  const { invalidateSettingsCache } = await import('../src/core/settings-reader.ts');
   invalidateSettingsCache();
 }
 beforeAll(runMigrations);

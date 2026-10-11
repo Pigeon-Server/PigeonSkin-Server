@@ -1,4 +1,5 @@
-import type { Bindings } from '../env.ts';
+
+import { type Bindings } from './../core/env.ts';
 import { createT, type Locale } from '@pigeon-skin/shared/i18n';
 import type { TranslationOverride } from '@pigeon-skin/shared/messages';
 

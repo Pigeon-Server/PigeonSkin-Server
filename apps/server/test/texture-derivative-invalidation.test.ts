@@ -13,12 +13,13 @@
 // 重验证会拿到 304，继续用随后就被删掉的旧哈希（游戏里就是皮肤加载失败）。
 /// <reference types="@cloudflare/vitest-pool-workers" />
 
+import { invalidateSettingsCache } from './../src/core/settings-reader.ts';
 import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
 import { avatarObjectKey, previewObjectKey, textureObjectKey } from '../../../packages/minecraft/src/texture.ts';
 import { DERIVATIVE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, TEXTURE_CACHE_CONTROL } from '../../../packages/minecraft/src/csl.ts';
-import { invalidateSettingsCache } from '../src/lib.ts';
+
 import { makeAdmin, runMigrations } from './setup.ts';
 
 let seq = 0;

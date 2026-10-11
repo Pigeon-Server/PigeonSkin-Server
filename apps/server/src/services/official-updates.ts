@@ -1,4 +1,5 @@
-import type { Bindings } from '../env.ts';
+
+import { type Bindings } from './../core/env.ts';
 import { dialect, jsonArrayEachRows, boolToInt } from '@pigeon-skin/db';
 import { textureObjectKey } from '@pigeon-skin/minecraft';
 import { candidateTexture, type ResourceCandidate } from './official-sources.ts';

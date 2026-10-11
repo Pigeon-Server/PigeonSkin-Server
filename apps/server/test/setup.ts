@@ -76,7 +76,7 @@ export async function makeAdmin(userId: number): Promise<void> {
   await env.DB.prepare(`UPDATE users SET role = 'super_admin' WHERE id = ?`).bind(userId).run();
   // 直接写库绕过了 revokeSession 等失效入口，isolate 内的会话缓存必须手动作废，
   // 否则本用例里紧随其后的请求仍读到旧角色
-  const { invalidateCachedSessionsOf } = await import('../src/lib/auth-cache.ts');
+  const { invalidateCachedSessionsOf } = await import('../src/core/auth-cache.ts');
   invalidateCachedSessionsOf(userId);
 }
 
@@ -165,5 +165,5 @@ export async function verifyTestYggSignature(value: string, signatureB64: string
 
 // 会话缓存在 isolate 内跨用例存活（isolatedStorage 只重置存储不重置模块状态），
 // 每个用例前作废，否则前一个用例缓存的用户/会话会遮蔽本用例的库内变更。
-const { resetAuthCacheForTests } = await import('../src/lib/auth-cache.ts');
+const { resetAuthCacheForTests } = await import('../src/core/auth-cache.ts');
 beforeEach(() => { resetAuthCacheForTests(); });

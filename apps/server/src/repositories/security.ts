@@ -1,4 +1,5 @@
-import type { Bindings } from '../env.ts';
+
+import { type Bindings } from './../core/env.ts';
 import { randomToken } from '../services/security-crypto.ts';
 
 export interface SecurityRow {

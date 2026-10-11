@@ -1,3 +1,5 @@
+import { type Bindings } from './../src/core/env.ts';
+import { issueTokensFor } from './../src/core/session.ts';
 import { beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { env, createExecutionContext, waitOnExecutionContext, fetchMock } from 'cloudflare:test';
 import { hashPassword, hashToken } from '@pigeon-skin/auth';
@@ -5,8 +7,7 @@ import { base64url } from 'jose';
 import { isoCBOR } from '@simplewebauthn/server/helpers';
 import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON, AuthenticationResponseJSON } from '@simplewebauthn/server';
 import { createApp } from '../src/app.ts';
-import type { Bindings } from '../src/env.ts';
-import { issueTokensFor } from '../src/lib.ts';
+
 import { base32, decryptSecret, encryptSecret, totp, matchingStep } from '../src/services/security-crypto.ts';
 import { state } from '../src/repositories/security.ts';
 import { runMigrations, mintRawToken } from './setup.ts';

@@ -1,21 +1,24 @@
+import { isAdmin } from '../services/authorization.ts';
 // 纹理业务规则。
 //
 // 这一层不碰 HTTP：输入是类型化的值，失败用抛 AppError 表达。
 // 好处是它可以被路由、脚本、定时任务以同样的方式调用，
 // 也不需要为了测试它而去构造一个 Request。
+import { type Bindings } from './../core/env.ts';
+import { AppError, fail, type Pagination } from './../core/framework.ts';
+import { type AuthedUser } from './../core/user.ts';
 import { createDb, scalarMax } from '@pigeon-skin/db';
 import { canModifyUser, type Role, type TextureKind, type TextureModel, type TextureVisibility } from '@pigeon-skin/shared';
-import { isAdmin, type AuthedUser } from '../lib.ts';
+
 import {
   validateTexture, textureObjectKey, DEFAULT_TEXTURE_LIMITS, type TextureLimits,
 } from '@pigeon-skin/minecraft';
 import { bumpSitemap } from './sitemap-cache.ts';
-import { AppError, fail, type Pagination } from '../framework.ts';
+
 import { audit } from './audit.ts';
 import { queueTextureSubmission } from './search-submissions.ts';
 import * as repo from '../repositories/textures.ts';
 import type { SqlFragment } from '../search/compile.ts';
-import type { Bindings } from '../env.ts';
 
 export interface TextureEnv {
   DB: Bindings['DB'];

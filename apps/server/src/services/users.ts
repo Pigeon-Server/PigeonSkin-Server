@@ -1,17 +1,20 @@
+import { isAdmin } from '../services/authorization.ts';
 // 用户资料、偏好与积分。
 //
 // 签到规则照抄旧版 UserController@sign 的两种并行语义：
 //   rolling（默认）= 按 sign_gap_hours 滚动冷却；
 //   daily = 旧版 sign_after_zero —— 每日 0 点（UTC+8）后可再签。
+import { type Bindings } from './../core/env.ts';
+import { AppError, fail } from './../core/framework.ts';
+import { revokeAllSessions } from './../core/session.ts';
 import { eq } from 'drizzle-orm';
 import { createDb, users } from '@pigeon-skin/db';
 import { hashPassword, verifyStoredPassword } from '@pigeon-skin/auth';
-import { AppError, fail } from '../framework.ts';
-import { isAdmin, revokeAllSessions } from '../lib.ts';
+
 import { checkEmailDomain } from './email-policy.ts';
 import * as repo from '../repositories/users.ts';
 import * as textureRepo from '../repositories/textures.ts';
-import type { Bindings } from '../env.ts';
+
 import * as securityRepo from '../repositories/security.ts';
 import { revokePendingTokens } from './tokens.ts';
 

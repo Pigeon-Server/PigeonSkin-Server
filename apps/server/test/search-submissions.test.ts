@@ -1,13 +1,15 @@
+import { type Bindings } from './../src/core/env.ts';
+import { invalidateSettingsCache } from './../src/core/settings-reader.ts';
 import { env, SELF, fetchMock, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { generateKeyPair, exportPKCS8 } from 'jose';
 import { runMigrations, makeAdmin } from './setup.ts';
-import { invalidateSettingsCache } from '../src/lib.ts';
+
 import { queueTextureSubmission, queuePublicSubmissions, processSearchSubmissions, dispatchSearchSubmissions, searchSubmissionStatus, type SearchQueueMessage } from '../src/services/search-submissions.ts';
 import { writeMany } from '../src/services/settings.ts';
 import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
 import { createApp } from '../src/app.ts';
-import type { Bindings } from '../src/env.ts';
+
 import worker from '../src/index.ts';
 
 const root = 'https://skin.example.com';

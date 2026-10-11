@@ -1,7 +1,8 @@
+import { type Bindings } from './../src/core/env.ts';
 import { env, SELF, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
-import type { Bindings } from '../src/env.ts';
+
 import { runMigrations, makeAdmin } from './setup.ts';
 import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
 

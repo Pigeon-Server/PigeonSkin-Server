@@ -1,3 +1,9 @@
+import { type Bindings } from './../core/env.ts';
+import { AppError, currentUser, fail } from './../core/framework.ts';
+import { clientIp } from './../core/ip.ts';
+import { grantTokensForSession, type TokenGrant } from './../core/session.ts';
+import { getSetting } from './../core/settings-reader.ts';
+import { needsAccountInitialization, toPublicUser, type AppEnv } from './../core/user.ts';
 import type { Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { base64url } from 'jose';
@@ -10,9 +16,7 @@ import {
   verifyAuthenticationResponse, verifyRegistrationResponse,
   type AuthenticationResponseJSON, type RegistrationResponseJSON, type AuthenticatorTransportFuture,
 } from '@simplewebauthn/server';
-import { AppError, currentUser, fail } from '../framework.ts';
-import { clientIp, grantTokensForSession, needsAccountInitialization, getSetting, toPublicUser, type AppEnv, type TokenGrant } from '../lib.ts';
-import type { Bindings } from '../env.ts';
+
 import * as repo from '../repositories/security.ts';
 import { decryptSecret, encryptSecret, randomToken, base32, matchingStep, emailCode } from './security-crypto.ts';
 import { isEmailConfigured, sendEmail } from './email.ts';

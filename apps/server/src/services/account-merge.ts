@@ -1,6 +1,7 @@
-import type { Bindings } from '../env.ts';
+
+import { type Bindings } from './../core/env.ts';
+import { AppError } from './../core/framework.ts';
 import { jsonArrayInRows, noCaseEq } from '@pigeon-skin/db';
-import { AppError } from '../framework.ts';
 
 export async function mergeLegacyAccounts(env: { DB: Bindings['DB'] }, email: string, retainedId: number, mergedIds: number[], expected: Array<{ id: number; passwordHash: string; email: string; role: string; version: number }> = []) {
   const id = crypto.randomUUID();

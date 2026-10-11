@@ -4,12 +4,15 @@
 //   • 管理员不能操作自己，也不能操作同级或更高级别的用户
 //   • super_admin **不能通过界面授予**（只能由迁移工具或直接改库设置）
 //   • 封禁要连带撤销该用户全部会话，否则被封的人拿着旧 Cookie 还能继续用
+import { type Bindings } from './../core/env.ts';
+import { fail, type Pagination } from './../core/framework.ts';
+import { revokeAllSessions } from './../core/session.ts';
+import { getSetting, readSettings } from './../core/settings-reader.ts';
 import { createDb, notificationTranslations } from '@pigeon-skin/db';
 import { hashPassword } from '@pigeon-skin/auth';
 import { ASSIGNABLE_ROLES, canModifyUser, isSuperAdmin, type Role } from '@pigeon-skin/shared';
 import { and, eq, gt, isNull } from 'drizzle-orm';
-import { fail, type Pagination } from '../framework.ts';
-import { getSetting, readSettings, revokeAllSessions } from '../lib.ts';
+
 import { audit } from './audit.ts';
 import { bumpSitemap } from './sitemap-cache.ts';
 import { queueTextureSubmission } from './search-submissions.ts';
@@ -19,7 +22,7 @@ import { enqueueAiJob } from './ai-jobs.ts';
 import * as repo from '../repositories/admin.ts';
 import * as authRepo from '../repositories/auth.ts';
 import * as playerRepo from '../repositories/players.ts';
-import type { Bindings } from '../env.ts';
+
 import { checkEmailDomain } from './email-policy.ts';
 import type { SqlFragment } from '../search/compile.ts';
 import { revokePendingTokens } from './tokens.ts';
@@ -508,7 +511,7 @@ export async function patchAnyTexture(
 export async function listAuditLog(
   env: AdminEnv,
   filter: { action?: string; actorId?: number; search?: SqlFragment | null },
-  page: import('../framework.ts').Pagination,
+  page: import('../core/framework.ts').Pagination,
 ): Promise<{ items: unknown[]; total: number }> {
   const conditions: string[] = [];
   const binds: unknown[] = [];

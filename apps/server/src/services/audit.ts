@@ -6,9 +6,9 @@
 // 为什么只记管理员的动作：普通用户操作有业务表本身的记录可查，
 // 而管理员操作（封号、删用户、改设置）之前没有任何痕迹，出了争议无从对证。
 
+import { type Bindings } from './../core/env.ts';
 import { auditLog } from '@pigeon-skin/db';
 import { createDb } from '@pigeon-skin/db';
-import type { Bindings } from '../env.ts';
 
 export type AuditAction =
   | 'admin.search.submit'

@@ -1,8 +1,9 @@
 // Worker 入口：fetch（HTTP）+ scheduled（Cron Triggers）+ Durable Object 类。
+import { type Bindings } from '././core/env.ts';
 import { createApp } from './app.ts';
 import { DerivativeGenerator } from './do/derivatives.ts';
 import { OfficialResourceUpdater } from './do/official-resources.ts';
-import type { Bindings } from './env.ts';
+
 import { runScheduledTasks, processQueueBatch } from './tasks.ts';
 import { processDueJobs } from './services/ai-jobs.ts';
 import type { SearchQueueMessage } from './services/search-submissions.ts';

@@ -1,17 +1,5 @@
+import { AUTH_RATE_LIMIT_PREFIXES, BLOCKED_CRAWLER_AGENTS, CSRF_EXEMPT_PREFIXES, delegatedScopesForRoute, isAuthRateLimitedPath, isBlockedCrawler, isOAuthProtocolPath, isProtocolPath, ROBOTS_API_RULES, ROBOTS_PROTOCOL_DISALLOW, ROBOTS_RULES_REVISION } from './../src/core/route-metadata.ts';
 import { describe, expect, it } from 'vitest';
-import {
-  AUTH_RATE_LIMIT_PREFIXES,
-  BLOCKED_CRAWLER_AGENTS,
-  CSRF_EXEMPT_PREFIXES,
-  ROBOTS_API_RULES,
-  ROBOTS_PROTOCOL_DISALLOW,
-  ROBOTS_RULES_REVISION,
-  delegatedScopesForRoute,
-  isAuthRateLimitedPath,
-  isBlockedCrawler,
-  isOAuthProtocolPath,
-  isProtocolPath,
-} from '../src/route-metadata.ts';
 
 describe('shared route metadata', () => {
   it('preserves delegated scope boundaries by method and resource', () => {

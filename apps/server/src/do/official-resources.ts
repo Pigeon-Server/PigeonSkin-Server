@@ -1,5 +1,7 @@
-import type { Bindings } from '../env.ts';
-import { getSettingBool } from '../lib.ts';
+
+
+import { type Bindings } from './../core/env.ts';
+import { getSettingBool } from './../core/settings-reader.ts';
 import { ensureOfficialCatalog } from '../services/official-catalog.ts';
 import { discoverCapes, discoverDefaultSkins, downloadDefaultSkin, type DefaultSkinPlan, type ResourceCandidate } from '../services/official-sources.ts';
 import { applyOfficialUpdates, type SyncState } from '../services/official-updates.ts';

@@ -5,13 +5,13 @@
 // 的轮询 runner 调用这里。两边的语义必须一致：任务失败只记日志，下一次
 // 触发会补上。
 
+import { type Bindings } from '././core/env.ts';
 import { runCleanup } from './services/cleanup.ts';
 import { bumpSitemap } from './services/sitemap-cache.ts';
 import { resolveConfiguration } from './services/configuration.ts';
 import { syncOfficialResources } from './services/official-updates.ts';
 import { dispatchSearchSubmissions, processSearchSubmissions, searchEngines, type SearchQueueMessage } from './services/search-submissions.ts';
 import { processBroadcastEmail, type EmailQueueMessage } from './services/email.ts';
-import type { Bindings } from './env.ts';
 
 /**
  * 记录定时任务运行结果（后台任务页展示）。保留最近 50 条，避免表无限增长。

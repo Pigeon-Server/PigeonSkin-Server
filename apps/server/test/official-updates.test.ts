@@ -1,10 +1,11 @@
+import { type Bindings } from './../src/core/env.ts';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { env, fetchMock } from 'cloudflare:test';
 import { Buffer } from 'node:buffer';
 import { inflateRawSync } from 'node:zlib';
 import { officialTextures } from '@pigeon-skin/shared/official-textures';
 import { encodePng, sha256Hex } from '@pigeon-skin/minecraft';
-import type { Bindings } from '../src/env.ts';
+
 import { runMigrations } from './setup.ts';
 import { ensureDefaultCloset, ensureOfficialCatalog, resetOfficialCatalogCache } from '../src/services/official-catalog.ts';
 import { applyOfficialUpdates } from '../src/services/official-updates.ts';

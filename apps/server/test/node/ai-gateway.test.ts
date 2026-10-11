@@ -1,8 +1,8 @@
 // LLM 审核三驱动的单测：mock fetch 覆盖 allow / reject / fail-open。
 
+import { type Bindings } from './../../src/core/env.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseVerdict, moderateComment, isModerationConfigured } from '../../src/services/ai-gateway.ts';
-import type { Bindings } from '../../src/env.ts';
 
 const AI = { run: async () => ({ response: 'safe' }) };
 
@@ -145,7 +145,7 @@ describe('prompt injection guard', () => {
   it('管理员覆盖提示词后 GUARD 声明仍然附加', async () => {
     const { SqliteD1 } = await import('../../src/node/d1/sqlite.ts');
     const { runMigrationsForNode } = await import('../../src/node/migrate.ts');
-    const { invalidateSettingsCache } = await import('../../src/lib.ts');
+    const { invalidateSettingsCache } = await import('../../src/core/settings-reader.ts');
     const db = new SqliteD1({ path: ':memory:' });
     await runMigrationsForNode(db);
     await db.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES ('ai_comments_moderation_prompt', '', 'Custom admin prompt.', 0)").run();
@@ -344,7 +344,7 @@ describe('判别模型（systemone）驱动', () => {
   it('阈值按整数百分数生效：settings 写 80 → 判定阈值 0.8', async () => {
     const { SqliteD1 } = await import('../../src/node/d1/sqlite.ts');
     const { runMigrationsForNode } = await import('../../src/node/migrate.ts');
-    const { invalidateSettingsCache } = await import('../../src/lib.ts');
+    const { invalidateSettingsCache } = await import('../../src/core/settings-reader.ts');
     const db = new SqliteD1({ path: ':memory:' });
     await runMigrationsForNode(db);
     await db.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES ('ai_discriminative_threshold', '', '80', 0)").run();
@@ -370,7 +370,7 @@ describe('判别模型（systemone）驱动', () => {
   it('阈值缺省回落 0.5：settings 写越界值 5 → 用 0.5 判定', async () => {
     const { SqliteD1 } = await import('../../src/node/d1/sqlite.ts');
     const { runMigrationsForNode } = await import('../../src/node/migrate.ts');
-    const { invalidateSettingsCache } = await import('../../src/lib.ts');
+    const { invalidateSettingsCache } = await import('../../src/core/settings-reader.ts');
     const db = new SqliteD1({ path: ':memory:' });
     await runMigrationsForNode(db);
     await db.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES ('ai_discriminative_threshold', '', '5', 0)").run();
@@ -420,7 +420,7 @@ describe('判别模型（systemone）驱动', () => {
     } };
     const { SqliteD1 } = await import('../../src/node/d1/sqlite.ts');
     const { runMigrationsForNode } = await import('../../src/node/migrate.ts');
-    const { invalidateSettingsCache } = await import('../../src/lib.ts');
+    const { invalidateSettingsCache } = await import('../../src/core/settings-reader.ts');
     const db = new SqliteD1({ path: ':memory:' });
     await runMigrationsForNode(db);
     await db.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES ('ai_comments_moderation_model', '', '@cf/cloudflare/clef', 0)").run();
@@ -449,7 +449,7 @@ describe('判别模型（systemone）驱动', () => {
     } };
     const { SqliteD1 } = await import('../../src/node/d1/sqlite.ts');
     const { runMigrationsForNode } = await import('../../src/node/migrate.ts');
-    const { invalidateSettingsCache } = await import('../../src/lib.ts');
+    const { invalidateSettingsCache } = await import('../../src/core/settings-reader.ts');
     const db = new SqliteD1({ path: ':memory:' });
     await runMigrationsForNode(db);
     await db.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES ('ai_comments_moderation_model', '', '@cf/cloudflare/clef-flash', 0)").run();
@@ -471,7 +471,7 @@ describe('判别模型（systemone）驱动', () => {
   it('runAiJob 显式判别模式走判别驱动（settings 覆盖 ai_comments_moderation_mode）', async () => {
     const { SqliteD1 } = await import('../../src/node/d1/sqlite.ts');
     const { runMigrationsForNode } = await import('../../src/node/migrate.ts');
-    const { invalidateSettingsCache } = await import('../../src/lib.ts');
+    const { invalidateSettingsCache } = await import('../../src/core/settings-reader.ts');
     const db = new SqliteD1({ path: ':memory:' });
     await runMigrationsForNode(db);
     await db.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES ('ai_comments_moderation_mode', '', 'discriminative', 0)").run();
@@ -499,7 +499,7 @@ describe('判别模型（systemone）驱动', () => {
   it('runAiJob 显式生成模式走 LLM 驱动（settings 覆盖 mode=generative 且驱动为 systemone）', async () => {
     const { SqliteD1 } = await import('../../src/node/d1/sqlite.ts');
     const { runMigrationsForNode } = await import('../../src/node/migrate.ts');
-    const { invalidateSettingsCache } = await import('../../src/lib.ts');
+    const { invalidateSettingsCache } = await import('../../src/core/settings-reader.ts');
     const db = new SqliteD1({ path: ':memory:' });
     await runMigrationsForNode(db);
     await db.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES ('ai_comments_moderation_mode', '', 'generative', 0)").run();

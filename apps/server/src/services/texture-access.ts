@@ -1,7 +1,7 @@
+import { isAdmin } from '../services/authorization.ts';
+import { type Bindings } from './../core/env.ts';
+import { type AuthedUser } from './../core/user.ts';
 import { avatarObjectPrefix, previewObjectKey, type PreviewRenderIdentity } from '@pigeon-skin/minecraft';
-import type { AuthedUser } from '../lib.ts';
-import { isAdmin } from '../lib.ts';
-import type { Bindings } from '../env.ts';
 
 type TextureAccessEnv = Pick<Bindings, 'DB'> & { BUCKET?: Bindings['BUCKET']; APP_URL?: string };
 

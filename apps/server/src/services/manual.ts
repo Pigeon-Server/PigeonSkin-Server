@@ -1,6 +1,6 @@
+import { type Bindings } from './../core/env.ts';
 import { manualDocumentInput, manualPages, validManualSlug, resolveManualDocuments, type ManualDocument } from '@pigeon-skin/shared/manual';
 import { isLocale, type Locale } from '@pigeon-skin/shared/locales';
-import type { Bindings } from '../env.ts';
 
 export function manualStorageLocale(locale: Locale): string { return locale === 'zh_CN' ? '' : locale; }
 

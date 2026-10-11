@@ -11,10 +11,10 @@
 // 对 Minecraft 协议路由与 /api/health 这类无凭据读端点不生效 —— 它们
 // 不读 Cookie，CSRF 对它们没有意义。
 
+import { flag } from './../core/env.ts';
+import { CSRF_EXEMPT_PREFIXES, isAuthRateLimitedPath, isBlockedCrawler, isOAuthProtocolPath, isProtocolPath } from './../core/route-metadata.ts';
+import { type AppEnv } from './../core/user.ts';
 import type { MiddlewareHandler } from 'hono';
-import { flag } from '../env.ts';
-import type { AppEnv } from '../lib.ts';
-import { CSRF_EXEMPT_PREFIXES, isAuthRateLimitedPath, isBlockedCrawler, isOAuthProtocolPath, isProtocolPath } from '../route-metadata.ts';
 
 /** 哪些请求方法会改状态、需要校验来源 */
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);

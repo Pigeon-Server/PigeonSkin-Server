@@ -1,9 +1,10 @@
+import { type Bindings } from './../src/core/env.ts';
 import { beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { env, fetchMock, runInDurableObject, runDurableObjectAlarm } from 'cloudflare:test';
 import { encodePng, sha256Hex } from '@pigeon-skin/minecraft';
 import { officialTextures } from '@pigeon-skin/shared/official-textures';
 import { Buffer } from 'node:buffer';
-import type { Bindings } from '../src/env.ts';
+
 import { OfficialResourceUpdater } from '../src/do/official-resources.ts';
 import { applyOfficialUpdates, officialResourceStatus } from '../src/services/official-updates.ts';
 import { ensureOfficialCatalog, resetOfficialCatalogCache } from '../src/services/official-catalog.ts';

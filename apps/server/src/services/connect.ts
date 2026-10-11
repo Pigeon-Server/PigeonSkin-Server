@@ -1,7 +1,9 @@
+import { getSettingBool, getSettingInt } from './../core/settings-reader.ts';
+import { needsAccountInitialization, type AppEnv } from './../core/user.ts';
 import { SignJWT, importJWK, jwtVerify, base64url, type JWK } from 'jose';
 import { hashToken } from '@pigeon-skin/auth';
 import type { Context } from 'hono';
-import { getSettingBool, getSettingInt, needsAccountInitialization, type AppEnv } from '../lib.ts';
+
 import { gameProfiles, publicProfile, uuidForPlayer } from './ygg-profiles.ts';
 
 export type ConnectContext = Context<AppEnv>;

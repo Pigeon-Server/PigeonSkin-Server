@@ -4,6 +4,7 @@
 // Node 部署在这里逐一装配同形对象，createApp() 与全部业务代码无感。
 // 环境变量清单见 docs/node-deployment.md。
 
+import { type Bindings } from './../core/env.ts';
 import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -31,7 +32,6 @@ import { smtpTransport } from '../services/smtp.ts';
 import { runMigrationsForNode, runMigrationsPostgres, runMigrationsMysql } from './migrate.ts';
 import { runScheduledTasks } from '../tasks.ts';
 import { processDueJobs } from '../services/ai-jobs.ts';
-import type { Bindings } from '../env.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 

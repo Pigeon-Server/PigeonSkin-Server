@@ -16,9 +16,8 @@
 //    解析失败按"无结果"处理，绝不把自由文本拼进流程；
 // 3. 送审内容按调用方给定的上限截断。
 
-import type { Bindings } from '../env.ts';
-import { getSetting, readSettings } from '../lib.ts';
-import { flag } from '../env.ts';
+import { flag, type Bindings } from './../core/env.ts';
+import { getSetting, readSettings } from './../core/settings-reader.ts';
 import { SECRET_PLACEHOLDER } from './configuration.ts';
 
 // ── 任务定义注册表 ──────────────────────────────────────────────────────────

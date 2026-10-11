@@ -1,7 +1,8 @@
+import { invalidateSettingsCache } from './../src/core/settings-reader.ts';
 import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { makeAdmin, runMigrations } from './setup.ts';
-import { invalidateSettingsCache } from '../src/lib.ts';
+
 import type { ManualDocumentInput } from '@pigeon-skin/shared/manual';
 beforeAll(runMigrations);
 async function account(admin: boolean) {

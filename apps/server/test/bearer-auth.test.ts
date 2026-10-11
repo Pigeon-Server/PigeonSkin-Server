@@ -2,11 +2,11 @@
 //
 // 登录/令牌生命周期在 api.test.ts，OAuth web-exchange 全流程在 oauth-social.test.ts，
 // 这里只补改造后新增语义里没有被其他文件覆盖的分支。
+import { AUTH_BODY_PREFIXES, isAuthBodyPath } from './../src/core/route-metadata.ts';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import { hashPassword } from '@pigeon-skin/auth';
 import { runMigrations } from './setup.ts';
-import { AUTH_BODY_PREFIXES, isAuthBodyPath } from '../src/route-metadata.ts';
 
 const PASSWORD = 'bearer-check-pass-9';
 let uid = 0, cookie = '', refreshToken = '';
@@ -34,7 +34,7 @@ beforeAll(async () => {
 describe('web bearer 门禁', () => {
   it('封禁用户普通路径 403，白名单路径（session/logout）仍可用', async () => {
     await env.DB.prepare("UPDATE users SET role = 'banned' WHERE id = ?").bind(uid).run();
-    const { invalidateCachedSessionsOf } = await import('../src/lib/auth-cache.ts');
+    const { invalidateCachedSessionsOf } = await import('../src/core/auth-cache.ts');
     invalidateCachedSessionsOf(uid);
 
     const me = await json('/api/v1/me');

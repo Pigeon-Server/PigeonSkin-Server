@@ -9,20 +9,16 @@
 // 认证端点（login/refresh/2fa 挑战等）凭请求体或挑战 Cookie 自证身份：
 // 它们仍然尽力解析 Bearer（重授权挑战需要会话上下文做绑定校验），但解析
 // 失败不拦截 —— 带着过期令牌来换新令牌的请求不能在中间件就被 401 挡死。
+import { cacheAuthedUser, cachedAuthedUser } from './../core/auth-cache.ts';
+import { fail } from './../core/framework.ts';
+import { BANNED_ALLOWED_PATHS, INITIALIZATION_ALLOWED_PATHS, INITIALIZATION_PUBLIC_READ_PREFIXES, isAuthBodyPath } from './../core/route-metadata.ts';
+import { loadAuthedUser, renewSession } from './../core/session.ts';
+import { type AppEnv, type AuthedUser } from './../core/user.ts';
 import type { Context, MiddlewareHandler } from 'hono';
 import { decodeJwt } from 'jose';
 import { verifyWebAccessToken } from '@pigeon-skin/auth';
-import type { AppEnv, AuthedUser } from '../lib.ts';
-import { loadAuthedUser, renewSession } from '../lib.ts';
-import { fail } from '../framework.ts';
-import { cacheAuthedUser, cachedAuthedUser } from '../lib/auth-cache.ts';
+
 import { oauthAuthentication } from './oauth.ts';
-import {
-  BANNED_ALLOWED_PATHS,
-  INITIALIZATION_ALLOWED_PATHS,
-  INITIALIZATION_PUBLIC_READ_PREFIXES,
-  isAuthBodyPath,
-} from '../route-metadata.ts';
 
 /** payload 带 sid claim 的才是 web access token（Connect 令牌没有） */
 function isWebToken(token: string): boolean {

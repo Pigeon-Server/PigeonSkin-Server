@@ -3,10 +3,11 @@
 // 统计/审计查询、设置脱敏与 superAdminOnly 隐藏、广播。
 /// <reference types="@cloudflare/vitest-pool-workers" />
 
+import { invalidateSettingsCache } from './../src/core/settings-reader.ts';
 import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { hashToken } from '@pigeon-skin/auth';
-import { invalidateSettingsCache } from '../src/lib.ts';
+
 import { runMigrations, markVerified } from './setup.ts';
 
 let seq = 0;

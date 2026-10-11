@@ -9,18 +9,19 @@
 // 测试间通过唯一的 email/名字后缀隔离，不依赖执行顺序。
 /// <reference types="@cloudflare/vitest-pool-workers" />
 
-
+import { BLOCKED_CRAWLER_AGENTS } from './../src/core/route-metadata.ts';
+import { invalidateSettingsCache } from './../src/core/settings-reader.ts';
+import { type AppEnv } from './../src/core/user.ts';
 import { createExecutionContext, env, SELF, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
 import { sha256Hex } from '../../../packages/minecraft/src/png.ts';
 import { avatarObjectKey, previewObjectKey } from '../../../packages/minecraft/src/texture.ts';
-import { invalidateSettingsCache, type AppEnv } from '../src/lib.ts';
+
 import { createApp } from '../src/app.ts';
 import {
   runMigrations, markVerified, makeAdmin, readAudit,
 } from './setup.ts';
-import { BLOCKED_CRAWLER_AGENTS } from '../src/route-metadata.ts';
 
 let seq = 0;
 /**
@@ -302,7 +303,7 @@ describe('会话与资料', () => {
     // `__Host-` 前缀在 Cookie 序列化层强制要求 Secure；删除（过期化）也走
     // 同一条序列化路径，漏掉 Secure 会让登出在生产直接 500。
     const { Hono } = await import('hono');
-    const { clearSessionCookie, sessionCookieName } = await import('../src/lib.ts');
+    const { clearSessionCookie, sessionCookieName } = await import('../src/core/session.ts');
     const app = new Hono<AppEnv>();
     let setCookie = '';
     app.post('/', (c) => {

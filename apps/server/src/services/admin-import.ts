@@ -6,11 +6,11 @@
 //   • 幂等：同 hash + 同 uploader 的行已存在时返回 existing，不报冲突
 //   • uploader 可为空（元数据行 uploader_id NULL，展示为已注销用户）
 // 校验与哈希复用同一套 validateTexture —— 内容寻址不变量在此保证。
+import { type Bindings } from './../core/env.ts';
+import { AppError } from './../core/framework.ts';
+import { getSetting } from './../core/settings-reader.ts';
 import { validateTexture, textureObjectKey, DEFAULT_TEXTURE_LIMITS } from '@pigeon-skin/minecraft';
 import type { TextureKind, TextureModel, TextureVisibility } from '@pigeon-skin/shared';
-import type { Bindings } from '../env.ts';
-import { AppError } from '../framework.ts';
-import { getSetting } from '../lib.ts';
 
 export interface AdminImportInput {
   bytes: Uint8Array<ArrayBuffer>;

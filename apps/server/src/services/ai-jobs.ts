@@ -9,10 +9,11 @@
 // Node 走 setInterval；路由层入队后也 waitUntil 立即触发一次（廉价，cron 兜底）。
 // 失败任务按 attempts 指数退避（2^n 分钟），超过上限置 failed 等管理员处理。
 
+import { type Bindings } from './../core/env.ts';
+import { getSettingInt, readSettings } from './../core/settings-reader.ts';
 import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { aiJobs, createDb, notificationTranslations, textures, textureTranslations, texturesDescription } from '@pigeon-skin/db';
-import type { Bindings } from '../env.ts';
-import { getSettingInt, readSettings } from '../lib.ts';
+
 import { LOCALES } from '@pigeon-skin/shared/locale';
 import { AI_JOB_DEFINITIONS, parseJsonOutput, runAiJob, toVerdict, parseVerdict } from './ai-gateway.ts';
 

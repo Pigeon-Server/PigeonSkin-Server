@@ -1,9 +1,10 @@
+import { type Bindings } from './../src/core/env.ts';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { officialTextures } from '@pigeon-skin/shared/official-textures';
 import { textureObjectKey, validateTexture } from '@pigeon-skin/minecraft';
 import { createApp } from '../src/app.ts';
-import type { Bindings } from '../src/env.ts';
+
 import { runMigrations } from './setup.ts';
 import { ensureDefaultCloset, ensureOfficialCatalog } from '../src/services/official-catalog.ts';
 import { resetOfficialCatalogCache } from '../src/services/official-catalog.ts';

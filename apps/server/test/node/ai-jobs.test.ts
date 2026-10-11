@@ -1,12 +1,13 @@
 // AI 任务队列执行器单测：入队去重、到期认领、失败退避、任务实现。
 // 复用 Node 自托管的 SqliteD1 适配器 + 真实 migration。
 
+import { type Bindings } from './../../src/core/env.ts';
+import { invalidateSettingsCache } from './../../src/core/settings-reader.ts';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { SqliteD1 } from '../../src/node/d1/sqlite.ts';
 import { runMigrationsForNode } from '../../src/node/migrate.ts';
-import { invalidateSettingsCache } from '../../src/lib.ts';
+
 import { enqueueAiJob, processDueJobs, retryAiJob, cancelAiJob, backfillAiJobs } from '../../src/services/ai-jobs.ts';
-import type { Bindings } from '../../src/env.ts';
 
 const AI = {
   run: async () => {

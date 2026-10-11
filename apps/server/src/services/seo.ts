@@ -1,3 +1,4 @@
+import { type Bindings } from './../core/env.ts';
 import { and, desc, eq } from 'drizzle-orm';
 import { createDb, textures, texturesDescription } from '@pigeon-skin/db';
 import { canonicalPagePath, defaultSiteDescription, indexablePage, pageCanonical, languageAlternates, plainDescription, type PageMetadata } from '@pigeon-skin/shared/seo';
@@ -8,7 +9,6 @@ import { readLocalized } from './settings.ts';
 import { readManualDocuments } from './manual.ts';
 import { normalizeLocale, localeTag, DEFAULT_LOCALE, LOCALES, type Locale } from '@pigeon-skin/shared/locales';
 import { serviceTranslator } from './translations.ts';
-import type { Bindings } from '../env.ts';
 
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);

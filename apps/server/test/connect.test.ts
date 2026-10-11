@@ -1,10 +1,10 @@
+import { type Bindings } from './../src/core/env.ts';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { env, SELF, fetchMock, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { hashPassword, hashToken } from '@pigeon-skin/auth';
 import { jwtVerify, importJWK, base64url } from 'jose';
 import { runMigrations, setTestYggKey, verifyTestYggSignature } from './setup.ts';
 import { createApp } from '../src/app.ts';
-import type { Bindings } from '../src/env.ts';
 
 const PASSWORD = 'correct-horse-9';
 const GAME_SCOPES = 'openid profile email offline_access Yggdrasil.PlayerProfiles.Select Yggdrasil.Server.Join';

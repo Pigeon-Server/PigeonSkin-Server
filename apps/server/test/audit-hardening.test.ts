@@ -1,7 +1,8 @@
+import { invalidateSettingsCache } from './../src/core/settings-reader.ts';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { runMigrations } from './setup.ts';
-import { invalidateSettingsCache } from '../src/lib.ts';
+
 import { deleteTexture } from '../src/services/textures.ts';
 import { deletePlayer } from '../src/services/players.ts';
 import { createApp } from '../src/app.ts';

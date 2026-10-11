@@ -1,5 +1,7 @@
+import { getSetting } from './../core/settings-reader.ts';
+import { type AppEnv } from './../core/user.ts';
 import { hashToken } from '@pigeon-skin/auth';
-import { getSetting, type AppEnv } from '../lib.ts';
+
 import type { Context } from 'hono';
 
 export interface GameProfile { id: string; name: string; playerId: number; version: number }

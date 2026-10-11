@@ -6,13 +6,13 @@
 //
 // 新设计改成落库的一次性令牌，两个问题一起解决：可过期、可用一次、可撤销。
 // 原始令牌只出现在邮件链接里，库里存的是它的 SHA-256 —— 库被读走也拿不到可用令牌。
+import { type Bindings } from './../core/env.ts';
+import { fail } from './../core/framework.ts';
 import {
   createDb, passwordResetTokens, users, verificationTokens,
 } from '@pigeon-skin/db';
 import { mintTokenWithHash, hashToken } from '@pigeon-skin/auth';
 import { and, eq, isNull } from 'drizzle-orm';
-import { fail } from '../framework.ts';
-import type { Bindings } from '../env.ts';
 
 export interface TokenEnv {
   DB: Bindings['DB'];

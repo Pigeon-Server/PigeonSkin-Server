@@ -2,6 +2,7 @@
 //
 // 不连真实网络：连接器整体替换为内存假服务器，按收到的命令逐条回放
 // 标准响应，断言完整会话（EHLO/STARTTLS/AUTH/信封/DATA 报文/QUIT）。
+import { invalidateSettingsCache } from './../src/core/settings-reader.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import {
@@ -10,7 +11,7 @@ import {
 } from '../src/services/smtp.ts';
 import { isEmailConfigured, processBroadcastEmail, resolveMailFrom, sendEmail, type EmailEnv } from '../src/services/email.ts';
 import type { EmailQueueMessage } from '../src/services/email.ts';
-import { invalidateSettingsCache } from '../src/lib.ts';
+
 import { makeAdmin, runMigrations } from './setup.ts';
 
 const MAIL_KEYS = ['mail_driver', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_password', 'mail_from'] as const;

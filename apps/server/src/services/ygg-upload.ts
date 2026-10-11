@@ -1,8 +1,9 @@
+import { type Bindings } from './../core/env.ts';
+import { getSettingBool, getSettingInt } from './../core/settings-reader.ts';
 import type { TextureModel } from '@pigeon-skin/shared';
 import { uploadTexture } from './textures.ts';
-import { getSettingBool, getSettingInt } from '../lib.ts';
+
 import { DEFAULT_TEXTURE_LIMITS } from '@pigeon-skin/minecraft';
-import type { Bindings } from '../env.ts';
 
 export interface YggUploadEnv {
   DB: Bindings['DB'];

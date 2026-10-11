@@ -3,11 +3,12 @@
 // 运行在 workerd 里，路径经由真实 Hono 应用；限流 binding 用可注入的假实现
 // 精确控制阈值，验证码用 image 驱动（无外网依赖，题面可解析）。
 
+import { type Bindings } from './../src/core/env.ts';
+import { issueTokensFor } from './../src/core/session.ts';
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
-import { issueTokensFor } from '../src/lib.ts';
-import type { Bindings } from '../src/env.ts';
+
 import { issueSkinlibPass, verifySkinlibPass } from '../src/middleware/skinlib-guard.ts';
 import { runMigrations } from './setup.ts';
 

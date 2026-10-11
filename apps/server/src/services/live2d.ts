@@ -1,8 +1,8 @@
+import { type Bindings } from './../core/env.ts';
+import { fail } from './../core/framework.ts';
+import { invalidateSettingsCache } from './../core/settings-reader.ts';
 import { Unzip, UnzipInflate } from 'fflate';
 import { builtinLive2DModels, type Live2DModelInfo, type Live2DDisplay } from '@pigeon-skin/shared/live2d';
-import { fail } from '../framework.ts';
-import type { Bindings } from '../env.ts';
-import { invalidateSettingsCache } from '../lib.ts';
 
 const maxArchiveBytes = 20 * 1024 * 1024;
 const maxExpandedBytes = 32 * 1024 * 1024;

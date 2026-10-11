@@ -3,11 +3,12 @@
 // 表达式来自 URL：解析、校验与编译都必须发生在查询构造之前，且都不向用户报错 ——
 // 读不懂的输入退化成一个字面量短语，编译预算越界也退化成同样的字面量搜索。
 // 唯一会被拒绝的是超过长度上限的输入（输入体积限制，由请求校验兜住）。
+import { fail } from './../core/framework.ts';
+import { type AppEnv } from './../core/user.ts';
 import type { Context } from 'hono';
 import { SEARCH_LIMITS, SEARCH_SCHEMAS, literalSearchTerm, parseSearchExpressionLenient } from '@pigeon-skin/shared/search';
 import type { SearchNode } from '@pigeon-skin/shared/search';
-import { fail } from '../framework.ts';
-import type { AppEnv } from '../lib.ts';
+
 import { compileNode, SearchExpressionError, type SqlFragment } from './compile.ts';
 import { searchTarget, type ServerSearchKey } from './targets.ts';
 

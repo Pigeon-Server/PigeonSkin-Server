@@ -1,4 +1,5 @@
-import type { Bindings } from '../env.ts';
+
+import { type Bindings } from './../core/env.ts';
 import { scalarMax } from '@pigeon-skin/db';
 import { textureObjectKey } from '@pigeon-skin/minecraft';
 import { OFFICIAL_CATALOG_REVISION as revision } from '@pigeon-skin/shared/official-textures';

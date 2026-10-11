@@ -1,10 +1,12 @@
+import { type Bindings } from './../src/core/env.ts';
+import { invalidateSettingsCache } from './../src/core/settings-reader.ts';
 import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from './setup.ts';
 import { createApp } from '../src/app.ts';
-import { invalidateSettingsCache } from '../src/lib.ts';
+
 import { renderSearchContent } from '../src/services/seo.ts';
-import type { Bindings } from '../src/env.ts';
+
 import { bumpSitemap } from '../src/services/sitemap-cache.ts';
 
 beforeAll(runMigrations);

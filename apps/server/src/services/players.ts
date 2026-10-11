@@ -1,3 +1,4 @@
+import { isAdmin } from '../services/authorization.ts';
 // 玩家业务规则。
 //
 // 与旧版一致的语义：
@@ -5,13 +6,13 @@
 //   • 玩家名全局唯一且不区分大小写（旧版只在应用层保证，新 schema 是真约束）
 //   • 没有每用户玩家数量上限 —— 只有积分挡着（旧版就是这样）
 //   • tid 为 0/null 都表示"无皮肤/无披风"
+import { type Bindings } from './../core/env.ts';
+import { fail, type Pagination } from './../core/framework.ts';
 import { createDb } from '@pigeon-skin/db';
 import { isValidPlayerName, type PlayerNameRule } from '@pigeon-skin/shared';
-import { fail, type Pagination } from '../framework.ts';
-import { isAdmin } from '../lib.ts';
+
 import * as repo from '../repositories/players.ts';
 import { bumpSitemap } from './sitemap-cache.ts';
-import type { Bindings } from '../env.ts';
 
 export interface PlayerEnv {
   DB: Bindings['DB'];

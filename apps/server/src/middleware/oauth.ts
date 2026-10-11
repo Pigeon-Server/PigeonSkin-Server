@@ -1,9 +1,10 @@
+import { delegatedScopesForRoute } from './../core/route-metadata.ts';
+import { type AppEnv, type AuthedUser } from './../core/user.ts';
 import type { MiddlewareHandler } from 'hono';
 import { createDb, users } from '@pigeon-skin/db';
 import { eq } from 'drizzle-orm';
-import type { AppEnv, AuthedUser } from '../lib.ts';
+
 import { OAuthError, verifyConnectToken } from '../services/connect.ts';
-import { delegatedScopesForRoute } from '../route-metadata.ts';
 
 export function delegatedScopes(path: string, method: string): string[] | null {
   return delegatedScopesForRoute(path, method);

@@ -5,12 +5,14 @@
 // 所有写入都过 SETTING_REGISTRY 校验：类型、取值范围、枚举。没有注册表的话，
 // 一次后台误操作就能把 score_per_kb_public 写成 "abc"，而错误会在用户上传时
 // 才以"积分算错"的形式暴露出来。
+import { type Bindings, type SettingKey } from './../core/env.ts';
+import { fail } from './../core/framework.ts';
+import { invalidateSettingsCache, readSettings } from './../core/settings-reader.ts';
 import { createDb, settings } from '@pigeon-skin/db';
 import { and, eq } from 'drizzle-orm';
-import { fail } from '../framework.ts';
+
 import { restrictedEmailListSchema } from '@pigeon-skin/shared/schemas';
-import { type Bindings, type SettingKey } from '../env.ts';
-import { invalidateSettingsCache, readSettings } from '../lib.ts';
+
 import { isLocale, normalizeLocale } from '@pigeon-skin/shared/i18n';
 import { inspectSigningKey } from './ygg-key.ts';
 import { configurationValues, SECRET_PLACEHOLDER } from './configuration.ts';

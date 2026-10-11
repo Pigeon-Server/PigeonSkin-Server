@@ -10,13 +10,14 @@
 // 按收件人渲染变量 —— 翻译永远不接触个性化数据（邮箱/积分不会进入 AI），
 // 译文也不会带着过期值。无译文回退原文（已渲染变量的成品）。
 // 系统通知（举报结果、正版接管）的标题/正文是 i18n 键，由前端翻译，不走这套。
+import { type Bindings } from './../core/env.ts';
+import { fail } from './../core/framework.ts';
+import { getSetting, readSettings } from './../core/settings-reader.ts';
 import { createDb, notifications, notificationTranslations, players } from '@pigeon-skin/db';
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
-import { fail } from '../framework.ts';
+
 import { normalizeLocale } from '@pigeon-skin/shared/locale';
 import { renderNotificationTemplate } from './notification-template.ts';
-import { getSetting, readSettings } from '../lib.ts';
-import type { Bindings } from '../env.ts';
 
 export interface NotificationEnv {
   DB: Bindings['DB'];

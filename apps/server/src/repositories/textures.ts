@@ -2,12 +2,13 @@
 //
 // 这一层的存在意义：把 SQL 收在一处，service 里就不必出现 Drizzle 的写法细节；
 // 想换查询实现（加缓存、换索引）时只需改这里。
+import { type Pagination } from './../core/framework.ts';
 import { and, desc, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { closet, textures, textureTranslations, texturesDescription, users } from '@pigeon-skin/db';
 import type { TextureKind, TextureVisibility } from '@pigeon-skin/shared';
-import type { Pagination } from '../framework.ts';
+
 import { fragmentToSql, type SqlFragment } from '../search/compile.ts';
 import type * as schema from '@pigeon-skin/db/schema';
 

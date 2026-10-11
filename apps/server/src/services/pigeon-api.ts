@@ -1,8 +1,9 @@
+import { AppError } from './../core/framework.ts';
+import { getSettingInt } from './../core/settings-reader.ts';
+import { type AppEnv } from './../core/user.ts';
 import type { Context } from 'hono';
 import { hashToken } from '@pigeon-skin/auth';
 import { base64url } from 'jose';
-import { getSettingInt, type AppEnv } from '../lib.ts';
-import { AppError } from '../framework.ts';
 
 export const PIGEON_SCOPES = ['players.read', 'users.read', 'users.email', 'admin.texture.import', 'admin.users.write', 'admin.textures.write', 'admin.stats.read', 'admin.settings.write'] as const;
 export interface PigeonKey {

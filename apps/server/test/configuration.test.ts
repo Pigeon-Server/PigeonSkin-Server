@@ -1,8 +1,9 @@
+import { type Bindings } from './../src/core/env.ts';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { env, SELF, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { runMigrations, makeAdmin } from './setup.ts';
 import { createApp } from '../src/app.ts';
-import type { Bindings } from '../src/env.ts';
+
 import { CONFIGURATION, resolveConfiguration } from '../src/services/configuration.ts';
 
 let baselineCookie = '';

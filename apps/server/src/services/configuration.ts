@@ -1,7 +1,8 @@
-import type { Bindings } from '../env.ts';
-import { AppError } from '../framework.ts';
-import { currentCacheGeneration } from '../cache-generation.ts';
 
+
+import { currentCacheGeneration } from './../core/cache-generation.ts';
+import { type Bindings } from './../core/env.ts';
+import { AppError } from './../core/framework.ts';
 export const CONFIGURATION = {
   site_url: { binding: 'APP_URL', fallback: '' },
   mail_from: { binding: 'MAIL_FROM', fallback: 'noreply@example.com' },

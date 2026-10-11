@@ -1,5 +1,5 @@
+import { AppError } from './../core/framework.ts';
 import { base64url } from 'jose';
-import { AppError } from '../framework.ts';
 
 const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 export function base32(bytes: Uint8Array): string {

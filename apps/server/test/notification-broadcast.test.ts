@@ -5,6 +5,7 @@
 // AI 调用本身由 runAiJob 的驱动配置决定，这里通过关闭/开启开关与直接写入
 // 译文表分别覆盖「不入队」与「读取回退」两条路径；AI 成功路径由
 // notification translations 的写入形状约定覆盖（与 texture 翻译同构）。
+import { invalidateSettingsCache } from './../src/core/settings-reader.ts';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import { createDb, notifications, notificationTranslations } from '@pigeon-skin/db';
@@ -12,7 +13,7 @@ import { and, eq } from 'drizzle-orm';
 import { renderNotificationTemplate, extractTemplateVariables, NOTIFICATION_VARIABLES } from '../src/services/notification-template.ts';
 import { contentHash } from '../src/services/notifications.ts';
 import { enqueueAiJob } from '../src/services/ai-jobs.ts';
-import { invalidateSettingsCache } from '../src/lib.ts';
+
 import { makeAdmin, runMigrations } from './setup.ts';
 
 async function setSettings(values: Record<string, string>): Promise<void> {

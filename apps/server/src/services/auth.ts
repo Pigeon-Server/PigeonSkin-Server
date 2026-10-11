@@ -7,10 +7,12 @@
 //
 // 一条新架构带来的性质：旧格式的密码哈希在**首次成功登录**时立即升级为
 // PBKDF2，因此旧哈希会随真实流量逐步消失，不需要批处理也不需要强制重置。
+import { type Bindings } from './../core/env.ts';
+import { AppError, fail } from './../core/framework.ts';
 import { createDb, isUniqueViolation } from '@pigeon-skin/db';
 import { hashPassword, needsRehash, verifyStoredPassword } from '@pigeon-skin/auth';
 import { isValidPlayerName, type PlayerNameRule } from '@pigeon-skin/shared';
-import { AppError, fail } from '../framework.ts';
+
 import { checkEmailDomain } from './email-policy.ts';
 import * as repo from '../repositories/auth.ts';
 import { mergeLegacyAccounts } from './account-merge.ts';
@@ -25,7 +27,6 @@ export class EmailConflictError extends AppError {
     this.requiresPasswords = requiresPasswords;
   }
 }
-import type { Bindings } from '../env.ts';
 
 export interface AuthEnv {
   DB: Bindings['DB'];

@@ -1,8 +1,9 @@
+import { type Bindings } from './../src/core/env.ts';
+import { issueTokensFor } from './../src/core/session.ts';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import { hashPassword, hashToken, verifyStoredPassword } from '@pigeon-skin/auth';
-import { issueTokensFor } from '../src/lib.ts';
-import type { Bindings } from '../src/env.ts';
+
 import { runMigrations, mintRawToken } from './setup.ts';
 
 let uid = 0, cookie = '', otherCookie = '', adminCookie = '';

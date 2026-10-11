@@ -1,8 +1,9 @@
+import { type Bindings } from './../src/core/env.ts';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { env, SELF, fetchMock, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { hashPassword, hashToken } from '@pigeon-skin/auth';
 import { createApp } from '../src/app.ts';
-import type { Bindings } from '../src/env.ts';
+
 import { runMigrations } from './setup.ts';
 
 let uid = 0, cookie = '';

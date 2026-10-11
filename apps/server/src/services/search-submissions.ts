@@ -1,6 +1,6 @@
+import { type Bindings } from './../core/env.ts';
 import { importPKCS8, SignJWT } from 'jose';
 import { jsonArrayPairRows, leastOf, randomId32, supportsReturning } from '@pigeon-skin/db';
-import type { Bindings } from '../env.ts';
 
 type Env = { DB: Bindings['DB']; APP_URL?: string; SEARCH_SUBMISSIONS?: Pick<NonNullable<Bindings['SEARCH_SUBMISSIONS']>, 'sendBatch'> };
 export const searchEngines = ['google', 'bing', 'baidu'] as const;
