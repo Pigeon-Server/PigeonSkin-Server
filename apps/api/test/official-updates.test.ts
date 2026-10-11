@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { env, fetchMock } from 'cloudflare:test';
 import { Buffer } from 'node:buffer';
 import { inflateRawSync } from 'node:zlib';
@@ -6,10 +6,12 @@ import { officialTextures } from '@pigeon-skin/shared/official-textures';
 import { encodePng, sha256Hex } from '@pigeon-skin/minecraft';
 import type { Bindings } from '../src/env.ts';
 import { runMigrations } from './setup.ts';
-import { ensureDefaultCloset, ensureOfficialCatalog } from '../src/services/official-catalog.ts';
+import { ensureDefaultCloset, ensureOfficialCatalog, resetOfficialCatalogCache } from '../src/services/official-catalog.ts';
 import { applyOfficialUpdates } from '../src/services/official-updates.ts';
 import { capePageCandidates, candidateTexture, type ResourceCandidate } from '../src/services/official-sources.ts';
 
+// isolatedStorage 每用例重置存储但复用 env.DB；官方目录缓存要一并失效
+beforeEach(() => resetOfficialCatalogCache(env.DB));
 beforeAll(runMigrations);
 const configured = () => ({ ...env, OFFICIAL_CATALOG_ENABLED: 'true' } as Bindings);
 async function user(email: string) {

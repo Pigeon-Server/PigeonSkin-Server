@@ -140,6 +140,18 @@ export function registerConnectRoutes(app: Hono<AppEnv>) {
   };
   r.get('/.well-known/openid-configuration', discovery);
   r.get('/.well-known/oauth-authorization-server', discovery);
+  // 部分客户端（authlib-injector / Java 启动器）按惯例探测根路径的发现端点，
+  // 302 到实际挂载点，避免落进 SPA 404 渲染白耗一次配置查询。
+  // 开关检查与 /yggc 子应用内的行为保持一致。跳转允许客户端短缓存：
+  // 发现端点轮询量很大（启动器每 15 秒一次），客户端命中后 4 次里省 3 次
+  // 源站请求；Worker 响应默认不进 zone 边缘缓存，需要边缘拦截另配 Cache Rule。
+  const wellKnownRedirect = (mount: string) => async (c: ConnectContext) => {
+    await connectEnabled(c);
+    c.header('Cache-Control', 'public, max-age=60');
+    return c.redirect(`${issuer(c)}${mount}`, 302);
+  };
+  app.get('/.well-known/openid-configuration', wellKnownRedirect('/.well-known/openid-configuration'));
+  app.get('/.well-known/oauth-authorization-server', wellKnownRedirect('/.well-known/oauth-authorization-server'));
   app.get('/.well-known/openid-configuration/yggc', async c => { await connectEnabled(c); return discovery(c); });
   app.get('/.well-known/oauth-authorization-server/yggc', async c => { await connectEnabled(c); return discovery(c); });
   r.get('/jwks', async c => {

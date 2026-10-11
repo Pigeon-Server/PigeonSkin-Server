@@ -6,7 +6,7 @@ import { Buffer } from 'node:buffer';
 import type { Bindings } from '../src/env.ts';
 import { OfficialResourceUpdater } from '../src/do/official-resources.ts';
 import { applyOfficialUpdates, officialResourceStatus } from '../src/services/official-updates.ts';
-import { ensureOfficialCatalog } from '../src/services/official-catalog.ts';
+import { ensureOfficialCatalog, resetOfficialCatalogCache } from '../src/services/official-catalog.ts';
 import type { ResourceCandidate } from '../src/services/official-sources.ts';
 import { runMigrations } from './setup.ts';
 
@@ -14,7 +14,9 @@ const bindings = env as unknown as Bindings;
 const configured = () => ({ ...bindings, OFFICIAL_CATALOG_ENABLED: 'true' });
 const stub = () => bindings.OFFICIAL_RESOURCES.get(bindings.OFFICIAL_RESOURCES.idFromName('official-catalog'));
 beforeAll(runMigrations);
-beforeEach(() => { fetchMock.activate(); fetchMock.disableNetConnect(); });
+// isolatedStorage 每用例重置存储但复用 env.DB；官方目录完成态缓存要一并失效，
+// 否则上一用例的缓存让本用例的 ensureOfficialCatalog 跳过初始化
+beforeEach(() => { resetOfficialCatalogCache(bindings.DB); fetchMock.activate(); fetchMock.disableNetConnect(); });
 afterEach(async () => {
   await runInDurableObject(stub(), async (_instance, state) => { await state.storage.deleteAlarm(); await state.storage.delete('job'); });
   fetchMock.assertNoPendingInterceptors(); fetchMock.deactivate();

@@ -48,6 +48,10 @@ function splitSqlScript(script: string): string[] {
 
 /** 把迁移脚本应用到 miniflare 的 D1。幂等（表存在即跳过）。 */
 export async function runMigrations(): Promise<void> {
+  // isolatedStorage 每用例重置存储但复用 env.DB 对象；官方目录的完成态缓存按
+  // DB 键缓存，不重置会让后续用例跳过初始化直接断言空表
+  const { resetOfficialCatalogCache } = await import('../src/services/official-catalog.ts');
+  resetOfficialCatalogCache(env.DB);
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS test_migrations (name TEXT PRIMARY KEY)').run();
   for (const migration of migrations as Array<{ name: string; sql: string }>) {
     if (await env.DB.prepare('SELECT name FROM test_migrations WHERE name = ?').bind(migration.name).first()) continue;
@@ -56,6 +60,8 @@ export async function runMigrations(): Promise<void> {
       env.DB.prepare('INSERT INTO test_migrations (name) VALUES (?)').bind(migration.name),
     ]);
   }
+  // 测试环境无真实 AI 驱动语义依赖：默认关闭评论 AI 审核，评论用例直接落 published
+  await env.DB.prepare("INSERT OR IGNORE INTO settings (key, locale, value, updated_at) VALUES ('comments_ai_moderation', '', 'false', 0)").run();
 }
 
 

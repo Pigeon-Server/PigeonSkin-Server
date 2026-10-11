@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { env, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { officialTextures } from '@pigeon-skin/shared/official-textures';
 import { textureObjectKey, validateTexture } from '@pigeon-skin/minecraft';
@@ -6,10 +6,14 @@ import { createApp } from '../src/app.ts';
 import type { Bindings } from '../src/env.ts';
 import { runMigrations } from './setup.ts';
 import { ensureDefaultCloset, ensureOfficialCatalog } from '../src/services/official-catalog.ts';
+import { resetOfficialCatalogCache } from '../src/services/official-catalog.ts';
 import { collectTexture, removeClosetEntry } from '../src/services/social.ts';
 
 beforeAll(runMigrations);
 const configured = () => ({ ...env, OFFICIAL_CATALOG_ENABLED: 'true' } as Bindings);
+// isolatedStorage 每用例重置存储但复用 env.DB 对象；完成态缓存按 DB 键缓存，
+// 不清会让后续用例跳过初始化直接断言空表
+beforeEach(() => resetOfficialCatalogCache(env.DB));
 
 async function existingUser() {
   const now = Date.now();
@@ -61,5 +65,32 @@ describe('official catalogue', () => {
     expect((await env.DB.prepare('SELECT score FROM users WHERE id = ?').bind(userId).first<{ score: number }>())?.score).toBe(0);
     expect((await collectTexture(configured(), { id: userId, role: 'normal' }, id, undefined, rates)).scoreSpent).toBe(0);
     expect((await env.DB.prepare('SELECT likes FROM textures WHERE id = ?').bind(id).first<{ likes: number }>())?.likes).toBe(1);
+  });
+  it('rebuilds missing official rows even when the state revision claims the catalog is current', async () => {
+    await ensureOfficialCatalog(configured());
+    await env.DB.batch([
+      env.DB.prepare('UPDATE official_catalog_state SET revision = 6 WHERE id = 1'),
+      env.DB.prepare('DELETE FROM textures WHERE official_key IS NOT NULL'),
+    ]);
+    // 完成态缓存按 isolate 生命周期收敛；用例内模拟"运维绕过应用改库"，需手动失效
+    resetOfficialCatalogCache(env.DB);
+    await ensureOfficialCatalog(configured());
+    const count = await env.DB.prepare('SELECT count(*) AS n FROM textures WHERE official_key IS NOT NULL').first<{ n: number }>();
+    expect(count?.n).toBe(officialTextures.length);
+    for (const asset of officialTextures) expect((await env.BUCKET.head(textureObjectKey(asset.hash)))?.size).toBe(asset.sizeBytes);
+    // 重建不得把官方更新任务累计出的更高 revision 降级
+    const state = await env.DB.prepare('SELECT revision FROM official_catalog_state WHERE id = 1').first<{ revision: number }>();
+    expect(state?.revision).toBe(6);
+  });
+  it('rebuilds only the missing subset when part of the catalog is lost', async () => {
+    await ensureOfficialCatalog(configured());
+    const survivors = officialTextures.slice(0, 40).map(asset => asset.key);
+    await env.DB.prepare(`DELETE FROM textures WHERE official_key IS NOT NULL AND official_key NOT IN (${survivors.map(() => '?').join(',')})`)
+      .bind(...survivors).run();
+    await env.DB.prepare('UPDATE official_catalog_state SET revision = 1 WHERE id = 1').run();
+    resetOfficialCatalogCache(env.DB);
+    await ensureOfficialCatalog(configured());
+    const count = await env.DB.prepare('SELECT count(*) AS n FROM textures WHERE official_key IS NOT NULL').first<{ n: number }>();
+    expect(count?.n).toBe(officialTextures.length);
   });
 });
