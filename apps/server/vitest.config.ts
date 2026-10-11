@@ -43,6 +43,11 @@ export default defineWorkersConfig({
     setupFiles: ['./test/setup.ts'],
     poolOptions: {
       workers: {
+        // 测试只用本地模拟器（miniflare bindings 覆盖 + 本地 D1），
+        // 显式关掉 remote bindings：wrangler.jsonc 的 AI 绑定无本地模拟器，
+        // 默认行为会为它启动 remote proxy session（要求 wrangler 登录），
+        // CI 无凭据直接失败。
+        remoteBindings: false,
         miniflare: { bindings: { APP_URL: 'http://localhost:8787', SESSION_SECRET: 'test-session-secret', OFFICIAL_CATALOG_ENABLED: 'false', RATE_LIMIT_ENABLED: 'false' } },
         // 配置源已迁到仓库根目录（目录结构重组）
         wrangler: { configPath: path.resolve(__dirname, '../../wrangler.jsonc') },
