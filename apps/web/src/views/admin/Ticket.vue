@@ -103,13 +103,21 @@ async function load() {
   }
 }
 
+// 与后端 services/tickets.ts 的 MAX_FILE_BYTES 保持一致；前端拦截避免整包上传后才被 422
+const TICKET_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const TICKET_MAX_FILES = 5;
+
 function onFileChange(e: Event) {
   const target = e.target as HTMLInputElement;
   if (!target.files) return;
   const newFiles = Array.from(target.files);
+  if (newFiles.some(file => file.size > TICKET_FILE_MAX_BYTES)) {
+    error.value = i18n.t('ticket.file_too_large');
+    return;
+  }
   const combined = [...files.value, ...newFiles];
-  if (combined.length > 5) {
-    error.value = '最多上传 5 个附件';
+  if (combined.length > TICKET_MAX_FILES) {
+    error.value = i18n.t('ticket.too_many_files', { n: TICKET_MAX_FILES });
     return;
   }
   files.value = combined;
@@ -200,7 +208,7 @@ onMounted(load);
     </div>
   </AppAlert>
 
-  <AppSkeleton v-if="loading && !data" :count="4" />
+  <AppSkeleton v-if="loading && !data" variant="detail" :count="4" />
 
   <div v-if="data" class="space-y-6">
     <!-- 工单控制头与状态流转面板 -->
