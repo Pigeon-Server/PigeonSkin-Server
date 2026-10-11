@@ -8,7 +8,7 @@ Pigeon Skin Server 是专为 Minecraft 玩家、服主与创作者打造的现�
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Pigeon-Server/PigeonSkin-Server)
 
-点击按钮后，Cloudflare 会将仓库克隆到你自己的 GitHub 账号，读取 `apps/api/wrangler.jsonc` 引导你创建 D1、R2、Queues 等所需资源并完成首次部署。本项目为 monorepo，如果向导中预填的构建与部署命令不符合预期，请将根目录设为 `apps/api` 并按[部署上线](#部署上线)一节的命令调整。
+点击按钮后，Cloudflare 会将仓库克隆到你自己的 GitHub 账号，读取 `wrangler.jsonc` 引导你创建 D1、R2、Queues 等所需资源并完成首次部署。本项目为 monorepo，如果向导中预填的构建与部署命令不符合预期，请将根目录设为 `apps/api` 并按[部署上线](#部署上线)一节的命令调整。
 
 首次部署完成后，还需依次完成：
 
