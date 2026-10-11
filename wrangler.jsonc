@@ -1,41 +1,78 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "pigeon-skin-api",
-  "main": "src/index.ts",
+  "name": "pigeon-skin",
+  "main": "apps/api/src/index.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
+
+  // ── Smart Placement ────────────────────────────────────────────────────────
+  // D1 固定单一区域，每个请求至少一次 D1 往返（会话解析、设置缓存未命中）；
+  // smart 让 Worker 计算靠近 D1 部署。静态资产仍由边缘直接服务，不受影响。
+  "placement": { "mode": "smart" },
   "observability": {
-      "logs": {
-        "enabled": true,
-        "head_sampling_rate": 1,
-        "invocation_logs": true,
-        "persist": true
-      },
-      "traces": {
-        "enabled": true,
-        "head_sampling_rate": 1,
-        "persist": true
-      },
-      "issue_detection": {
-        "enabled": false
-      }
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "redact_query_string": false,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 0.25,
+      "invocation_logs": true,
+      "persist": true
     },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.25,
+      "persist": true
+    },
+    "issues": {
+      "enabled": true
+    }
+  },
   "queues": {
     "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-dev" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-dev" }],
-    "consumers": [{ "queue": "pigeon-search-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1 }, { "queue": "pigeon-email-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-dev" }]
+    "consumers": [{ "queue": "pigeon-search-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1, "dead_letter_queue": "pigeon-search-dlq-dev" }, { "queue": "pigeon-email-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-dev" }]
   },
 
   // ── 静态资源（前端 SPA）──────────────────────────────────────────────────
   // 前端构建产物直接挂在 Worker 上：API 与 SPA 同源，Cookie/协议路径零 CORS。
-  // not_found_handling = single-page-application：非资产路径回 index.html。
-  // run_worker_first 保持 true（每个请求先过 Worker 代码）：反爬守卫要在
-  // 请求层拦截被禁爬虫，覆盖包括 SPA 深链在内的全部路径；协议与 SEO 端点
-  // （/{player}.json、/sitemap-N.xml 等）也依赖 Worker 处理非资产路径。
+  // not_found_handling = none：资产层对缺失文件回 404，不回 index.html ——
+  // 否则 /assets/过期hash.js 这类缺失文件会拿到被 _headers 标 immutable 的
+  // 回退 HTML。SPA 深链由 Worker 的 notFound 处理器显式取 index.html 做
+  // SEO 预渲染（Node 自托管侧 shim 语义见 src/node/assets.ts）。
+  // run_worker_first 用「包含一切、按目录排除」的数组：HTML 深链、协议与 SEO
+  // 端点（/{player}.json、/sitemap-N.xml 等）仍先过 Worker（SEO 预渲染与反爬
+  // 守卫依赖它），而 hashed 产物、blockbench 静态页、live2d 模型、手册截图等
+  // 纯静态文件由资产层直接服务，不计 Worker 请求。被排除路径的安全头与
+  // /assets 的 immutable 缓存声明在 apps/web/public/_headers 里。
   "assets": {
-    "directory": "../web/dist",
+    "directory": "apps/web/dist",
     "binding": "ASSETS",
-    "run_worker_first": true,
-    "not_found_handling": "single-page-application"
+    "run_worker_first": [
+      "/*",
+      "!/assets/*",
+      "!/blockbench/*",
+      "!/live2d/*",
+      "!/manual/*.jpg",
+      "!/manual/*.png",
+      "!/manual/*.webp",
+      "!/manual-content.json",
+      "!/manual-content.en.json",
+      "!/manual-content.zh_TW.json",
+      "!/manual-content.es_ES.json",
+      "!/manual-content.ru_RU.json",
+      "!/manual-content.ja_JP.json",
+      "!/third-party/*",
+      "!/beian.svg",
+      "!/editor-bridge.js",
+      "!/editor-language.js",
+      "!/skin-editor.css"
+    ],
+    "not_found_handling": "none"
+  },
+
+  // ── AI（Workers AI，按请求计费，无固定费用）────────────────────────────────
+  "ai": {
+    "binding": "AI"
   },
 
   // ── 衍生图生成（SQLite DO，免费层可用）────────────────────────────────────
@@ -60,7 +97,7 @@
       "binding": "DB",
       "database_name": "bs-dev",
       "database_id": "local-dev-placeholder",
-      "migrations_dir": "../../packages/db/migrations"
+      "migrations_dir": "packages/db/migrations"
     }
   ],
   "r2_buckets": [
@@ -86,22 +123,23 @@
   // 硬规则：预览环境绝不绑定生产的 D1 或 R2（见 docs/rewrite/02-architecture.md §7）。
   "env": {
     "preview": {
-      "name": "pigeon-skin-api-preview",
+      "name": "pigeon-skin-preview",
       "queues": {
         "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-preview" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-preview" }],
-        "consumers": [{ "queue": "pigeon-search-preview", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1 }, { "queue": "pigeon-email-preview", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-preview" }]
+        "consumers": [{ "queue": "pigeon-search-preview", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1, "dead_letter_queue": "pigeon-search-dlq-preview" }, { "queue": "pigeon-email-preview", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-preview" }]
       },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "bs-preview",
           "database_id": "REPLACE_WITH_PREVIEW_D1_ID",
-          "migrations_dir": "../../packages/db/migrations"
+          "migrations_dir": "packages/db/migrations"
         }
       ],
       "r2_buckets": [
         { "binding": "BUCKET", "bucket_name": "bs-preview-textures" }
       ],
+      "ai": { "binding": "AI" },
       // durable_objects binding 不被 wrangler 环境继承，必须每个 env 显式声明
       "durable_objects": {
         "bindings": [
@@ -123,22 +161,23 @@
 
     // ── 生产环境 ──────────────────────────────────────────────────────────────
     "production": {
-      "name": "pigeon-skin-api",
+      "name": "pigeon-skin",
       "queues": {
         "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-prod" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-prod" }],
-        "consumers": [{ "queue": "pigeon-search-prod", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1 }, { "queue": "pigeon-email-prod", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-prod" }]
+        "consumers": [{ "queue": "pigeon-search-prod", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1, "dead_letter_queue": "pigeon-search-dlq-prod" }, { "queue": "pigeon-email-prod", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-prod" }]
       },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "bs-prod",
           "database_id": "REPLACE_WITH_PRODUCTION_D1_ID",
-          "migrations_dir": "../../packages/db/migrations"
+          "migrations_dir": "packages/db/migrations"
         }
       ],
       "r2_buckets": [
         { "binding": "BUCKET", "bucket_name": "bs-prod-textures" }
       ],
+      "ai": { "binding": "AI" },
       // durable_objects binding 不被 wrangler 环境继承，必须每个 env 显式声明
       "durable_objects": {
         "bindings": [
