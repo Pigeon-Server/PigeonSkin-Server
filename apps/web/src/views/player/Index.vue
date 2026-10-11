@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   playerApi,
   closetApi,
@@ -384,6 +384,80 @@ watch(currentId, () => {
   pendingCape.value = undefined;
 });
 
+// ── 材质网格虚拟滚动 ─────────────────────────────────────────────────────────
+// 列表可达数百项（衣柜 + 官方目录），每张卡片含 SkinPreview（canvas 渲染），
+// 全量渲染会把面板撑到数千像素且拖慢滚动。方案：面板定高 + 按行窗口化，
+// 只渲染可见行及其上下各一行的卡片。卡片结构定高，行高恒定。
+
+const LIST_HEIGHT_PX = 580;
+
+/** 卡片总高：标签行 26 + 预览 144(h-36) + 名称区 ~54 + 边框 2 ≈ 226，gap 12 */
+const CARD_EST_HEIGHT = 226;
+const GRID_GAP_PX = 12;
+
+const listViewport = ref<HTMLElement | null>(null);
+const scrollTop = ref(0);
+const viewportWidth = ref(0);
+
+/** 响应式列数：与模板的 grid-cols-2 sm:3 2xl:4 对齐（列表区约 612px 宽时 4 列起效由容器宽决定） */
+const columnCount = computed(() => {
+  const w = viewportWidth.value;
+  if (w >= 780) return 4;
+  if (w >= 480) return 3;
+  return 2;
+});
+
+const rowHeight = computed(() => CARD_EST_HEIGHT + GRID_GAP_PX);
+
+const totalRows = computed(() => Math.ceil(choices.value.length / columnCount.value));
+
+const visibleRange = computed(() => {
+  const first = Math.max(0, Math.floor(scrollTop.value / rowHeight.value) - 1);
+  const count = Math.ceil(LIST_HEIGHT_PX / rowHeight.value) + 2;
+  const last = Math.min(totalRows.value, first + count);
+  return { first, last };
+});
+
+const visibleItems = computed(() => {
+  const { first, last } = visibleRange.value;
+  const start = first * columnCount.value;
+  const end = last * columnCount.value;
+  return { start, items: choices.value.slice(start, end) };
+});
+
+let widthObserver: ResizeObserver | null = null;
+
+function onListScroll(event: Event) {
+  scrollTop.value = (event.target as HTMLElement).scrollTop;
+}
+
+// 列表容器由 v-if 控制渲染（数据加载完成才出现），观察它的挂载时机而非组件 onMounted
+watch(listViewport, (el, old) => {
+  widthObserver?.disconnect();
+  if (old) old.removeEventListener('scroll', onListScroll);
+  if (!el) return;
+  el.addEventListener('scroll', onListScroll, { passive: true });
+  if (!('ResizeObserver' in window)) return;
+  widthObserver = new ResizeObserver(entries => {
+    for (const entry of entries) viewportWidth.value = entry.contentRect.width;
+  });
+  widthObserver.observe(el);
+  viewportWidth.value = el.clientWidth;
+});
+
+onBeforeUnmount(() => widthObserver?.disconnect());
+
+// 数据或列数变化后把滚动位置钳回有效范围（如搜索过滤后列表变短）
+watch([choices, columnCount], () => {
+  const el = listViewport.value;
+  if (!el) return;
+  const max = Math.max(0, totalRows.value * rowHeight.value - LIST_HEIGHT_PX);
+  if (el.scrollTop > max) {
+    el.scrollTop = max;
+    scrollTop.value = max;
+  }
+});
+
 onMounted(() => {
   void site.fetch();
   void load();
@@ -629,18 +703,24 @@ onMounted(() => {
           />
         </div>
 
-        <!-- 材质网格列表：滚动容器吃满面板剩余高度（面板 h-full 与左列同高），
-             min-h 防左列过短时塌缩；外层 flex-1 就是天然的高度上限，不再用固定 max-h -->
-        <div class="flex-1 min-h-[360px] flex flex-col">
-          <div
-            v-if="choices.length"
-            class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-3 content-start flex-1 overflow-y-auto pr-1"
-          >
+        <!-- 材质网格列表：定高滚动区（与左列 3D 预览面板大致等高），按行虚拟滚动——
+             只渲染可见窗口内的卡片。列高链路（面板 h-full）依赖左列高度，内容加载前
+             后会跳动，因此列表用固定高度而非跟随面板。
+             上方 spacer 撑出被跳过的行高，窗口卡片按自然 grid 流排列（行间不跳号，
+             显式 grid-row 跳号会让被跳过的行塌缩、滚动定位失准），下方 spacer 补尾高 -->
+        <div
+          v-if="choices.length"
+          ref="listViewport"
+          class="grid gap-3 content-start overflow-y-auto pr-1"
+          :style="{ height: `${LIST_HEIGHT_PX}px`, gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }"
+        >
+            <div :style="{ gridColumn: `1 / -1`, height: `${visibleRange.first * rowHeight}px` }" aria-hidden="true"></div>
             <button
-              v-for="t in choices"
+              v-for="t in visibleItems.items"
               :key="t.id"
               type="button"
               class="group relative flex flex-col rounded-lg border text-left transition text-foreground bg-surface hover:border-brand-400 hover:shadow-sm overflow-hidden"
+              :style="{ height: `${CARD_EST_HEIGHT}px` }"
               :class="[
                 isTexturePreviewing(t)
                   ? '!border-brand-500 !bg-brand-50/50 dark:!bg-brand-950/30 ring-2 ring-brand-500'
@@ -704,11 +784,15 @@ onMounted(() => {
                 </span>
               </div>
             </button>
+            <div
+              :style="{ gridColumn: '1 / -1', height: `${Math.max(0, (totalRows - visibleRange.last) * rowHeight)}px` }"
+              aria-hidden="true"
+            ></div>
           </div>
 
           <!-- 空结果状态 -->
           <EmptyState
-            v-else
+            v-if="!choices.length"
             :title="i18n.t('user.no_textures_ext')"
             icon="checkroom"
           >
@@ -717,7 +801,6 @@ onMounted(() => {
               {{ i18n.t('home.cta_browse') }}
             </router-link>
           </EmptyState>
-        </div>
       </section>
     </div>
   </div>
