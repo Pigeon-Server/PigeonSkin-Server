@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { repoRoot, serverDir, wranglerConfig } from './paths.mjs';
+import { repoRoot } from './paths.mjs';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 

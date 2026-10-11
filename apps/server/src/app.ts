@@ -3,7 +3,7 @@
 // 分层刻意保持浅：路由 → service 逻辑 → repository（Drizzle）。
 // 没有 Laravel 那样的容器、Provider、Facade —— service 以参数接收依赖，
 // 因此可以直接在测试和脚本里调用，不需要引导步骤。
-import { currentAdmin, toErrorResponse } from '././core/framework.ts';
+import { currentAdmin, toErrorResponse } from './core/framework.ts';
 import { getSettingBool } from './core/settings-reader.ts';
 import { type AppEnv } from './core/user.ts';
 import { Hono } from 'hono';

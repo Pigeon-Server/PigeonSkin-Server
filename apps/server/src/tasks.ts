@@ -5,7 +5,7 @@
 // 的轮询 runner 调用这里。两边的语义必须一致：任务失败只记日志，下一次
 // 触发会补上。
 
-import { type Bindings } from '././core/env.ts';
+import { type Bindings } from './core/env.ts';
 import { runCleanup } from './services/cleanup.ts';
 import { bumpSitemap } from './services/sitemap-cache.ts';
 import { resolveConfiguration } from './services/configuration.ts';

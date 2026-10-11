@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { spawnNpm } from '../../../../tools/scripts/npm.mjs';
+import { spawnNpm } from '../../../tools/scripts/npm.mjs';
 
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const siteRoot = path.resolve(webRoot, '../..');

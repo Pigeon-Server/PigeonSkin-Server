@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { deploymentConfig } from './deployment-config.mjs';
 import { spawnNpm } from './npm.mjs';
 import { resolve } from 'node:path';
-import { repoRoot, serverDir, webDir } from './paths.mjs';
+import { repoRoot, serverDir } from './paths.mjs';
 
 const [environment, operation] = process.argv.slice(2);
 if (!['configure', 'migrate', 'deploy'].includes(operation)) {

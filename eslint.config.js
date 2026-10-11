@@ -23,6 +23,7 @@ export default tseslint.config(
       'old/**',           // 旧 Laravel 项目不检查
       'apps/web/dist/**',
       'tools/cpu-probe/**', // 一次性探针
+      'work/**',          // 本地会话工作区（gitignore），非仓库内容
     ],
   },
   eslint.configs.recommended,

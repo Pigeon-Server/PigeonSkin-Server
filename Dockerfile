@@ -49,7 +49,7 @@ COPY vendor/ vendor/
 COPY .git/ .git/
 
 # 前端（vue-tsc + vite，含 blockbench 与第三方许可清单）与 API bundle
-RUN npm run build && npm run build:node --workspace @pigeon-skin/api
+RUN npm run build && npm run build:node --workspace @pigeon-skin/server
 
 # ── 运行阶段 ─────────────────────────────────────────────────────────────────
 FROM node:22-bookworm-slim

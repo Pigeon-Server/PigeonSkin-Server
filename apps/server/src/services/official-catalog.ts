@@ -69,7 +69,7 @@ export async function ensureDefaultCloset(env: Pick<Bindings, 'DB' | 'OFFICIAL_C
   if (env.OFFICIAL_CATALOG_ENABLED === 'false') return;
   const settled = defaultClosetSettled.get(env.DB);
   const now = Date.now();
-  if (settled?.get(userId)! > now) return;
+  if ((settled?.get(userId) ?? 0) > now) return;
   const current = await env.DB.prepare('SELECT revision FROM user_default_catalog WHERE user_id = ?').bind(userId).first<{ revision: number }>();
   const latest = await env.DB.prepare('SELECT revision FROM official_catalog_state WHERE id = 1').first<{ revision: number }>();
   const target = latest?.revision ?? revision;

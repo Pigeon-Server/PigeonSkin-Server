@@ -1,8 +1,7 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { repoRoot, serverDir, wranglerConfig } from './paths.mjs';
+import { serverDir } from './paths.mjs';
 import { demoAccounts, demoSql, validateDemoTargets, validateDemoResult } from './demo-data.mjs';
 import { spawnNpm } from './npm.mjs';
 

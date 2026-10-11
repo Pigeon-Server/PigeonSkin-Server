@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { repoRoot, serverDir, wranglerConfig } from './paths.mjs';
+import { repoRoot } from './paths.mjs';
 import { publicFiles, unsafePath, scanText, symlinkPath } from './public-files.mjs';
 
 const root = repoRoot;

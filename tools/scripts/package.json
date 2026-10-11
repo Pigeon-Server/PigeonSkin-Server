@@ -3,10 +3,5 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "仓库维护脚本：部署、本地初始化、数据填充。路径经 #root/#server 别名解析，不依赖脚本自身位置。",
-  "imports": {
-    "#root/*": "../../*",
-    "#release/*": "../release/*",
-    "#npm": "./npm.mjs"
-  }
+  "description": "仓库维护脚本：部署、本地初始化、数据填充与发布检查。仓库路径统一经 paths.mjs 解析。"
 }

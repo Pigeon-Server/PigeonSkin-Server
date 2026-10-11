@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { repoRoot, serverDir, wranglerConfig } from './paths.mjs';
+import { serverDir } from './paths.mjs';
 
 const example = readFileSync(new URL('file://' + serverDir + '/.dev.vars.example'), 'utf8');
 const content = example.replace(/^(SESSION_SECRET|SETUP_TOKEN|MFA_ENCRYPTION_KEY)=$/gm, (_, key) => `${key}=${randomBytes(32).toString('base64url')}`);

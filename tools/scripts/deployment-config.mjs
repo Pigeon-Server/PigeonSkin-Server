@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { repoRoot, serverDir, wranglerConfig } from './paths.mjs';
+import { wranglerConfig } from './paths.mjs';
 import ts from 'typescript';
 
 export function deploymentConfig(environment, variables) {
