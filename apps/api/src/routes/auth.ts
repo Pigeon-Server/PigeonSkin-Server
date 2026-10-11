@@ -2,6 +2,7 @@
 //
 // 注册与登录的业务规则在 services/auth.ts，会话的创建与撤销在 lib.ts。
 import { Hono } from 'hono';
+import { z } from 'zod';
 import {
   forgotPasswordInputSchema, loginInputSchema, registerInputSchema,
   resetPasswordInputSchema, verifyEmailInputSchema,
@@ -21,11 +22,23 @@ import * as securityRepo from '../repositories/security.ts';
 import { captchaAllows, verifyCaptcha, isCaptchaEnabled, captchaDriver } from '../services/captcha.ts';
 import { issueImageCaptcha } from '../services/image-captcha.ts';
 import {
-  clearSessionCookie, clientIp, createSession, getSetting, getSettingBool, getSettingInt,
-  revokeAllSessions, revokeSession, setSessionCookie, type AppEnv, type AuthedUser,
+  clearSessionCookie, clientIp, getSetting, getSettingBool, getSettingInt,
+  issueTokensFor, loadAuthedUser, mintWebToken, toPublicUser,
+  renewSession, revokeAllSessions, revokeSession, type AppEnv, type AuthedUser,
 } from '../lib.ts';
 
 export const authRoutes = new Hono<AppEnv>();
+
+/** 登录成功响应的形状：LoginResult 的非 2FA 分支 + 令牌对。 */
+function tokenPayload(grant: { accessToken: string; refreshToken: string; expiresIn: number; user: AuthedUser }) {
+  return {
+    id: grant.user.id,
+    accessToken: grant.accessToken,
+    refreshToken: grant.refreshToken,
+    expiresIn: grant.expiresIn,
+    user: toPublicUser(grant.user),
+  };
+}
 
 // 自绘图案验证码出题：driver 为 image 时前端拉取新题。
 // 未登录可访问（登录/注册页都要用）；driver 不是 image 时返回空题面，
@@ -49,23 +62,7 @@ async function readRegistrationSettings(env: AppEnv['Bindings']): Promise<auth.R
   };
 }
 
-/** 对外暴露的用户字段。密码哈希等敏感列绝不在这里出现。 */
-function toPublicUser(user: AuthedUser): Record<string, unknown> {
-  return {
-    id: user.id,
-    email: user.email,
-    nickname: user.nickname,
-    role: user.role,
-    score: user.score,
-    emailVerified: user.emailVerifiedAt !== null,
-    locale: user.locale,
-    isDarkMode: user.isDarkMode,
-    avatarTextureId: user.avatarTextureId,
-    needsInitialization: user.needsInitialization,
-    reportingDisabled: user.reportingDisabled,
-    commentsDisabled: user.commentsDisabled,
-  };
-}
+// 对外暴露的用户字段序列化统一在 lib.ts 的 toPublicUser。
 
 // ── 注册 ─────────────────────────────────────────────────────────────────────
 
@@ -79,12 +76,11 @@ authRoutes.post('/register', async (c) => {
 
   const { userId } = await auth.register(c.env, body, await readRegistrationSettings(c.env), ip);
 
-  // 注册成功即自动登录（与旧版行为一致）
-  const { token, maxAgeSeconds } = await createSession(c.env, userId, {
+  // 注册成功即自动登录（与旧版行为一致），令牌随响应交给前端保存
+  const grant = await issueTokensFor(c.env, userId, {
     ip,
     userAgent: c.req.header('user-agent') ?? null,
   });
-  setSessionCookie(c, token, maxAgeSeconds);
 
   // 站点开启了"必须验证邮箱"时，注册成功就顺手把验证信发出去。
   // 失败不回滚注册 —— 用户可以随时从设置页重新请求（该端点有节流）。
@@ -103,7 +99,7 @@ authRoutes.post('/register', async (c) => {
     })());
   }
 
-  return c.json({ id: userId }, 201);
+  return c.json(tokenPayload(grant), 201);
 });
 
 // ── 登录 ─────────────────────────────────────────────────────────────────────
@@ -143,17 +139,16 @@ authRoutes.post('/login', async (c) => {
 
     // 会话轮换：登录成功后撤销该用户此前的一切会话。旧会话要么属于
     // 同一个人的旧设备（换设备登录踢下线，与旧版"登录即挤掉旧会话"的
-    // 体验一致），要么属于偷到 Cookie 的攻击者 —— 两种情况都该失效。
+    // 体验一致），要么属于偷到令牌的攻击者 —— 两种情况都该失效。
     await revokeAllSessions(c.env, user.id);
 
-    const { token, maxAgeSeconds } = await createSession(c.env, user.id, {
+    const grant = await issueTokensFor(c.env, user.id, {
       ip,
       userAgent: c.req.header('user-agent') ?? null,
       remember: body.keep === true,
     });
-    setSessionCookie(c, token, maxAgeSeconds);
 
-    return c.json({ id: user.id });
+    return c.json(tokenPayload(grant));
   } catch (e) {
     if (e instanceof auth.EmailConflictError) return c.json({ error: e.code, accounts: e.accounts, requiresPasswords: e.requiresPasswords }, 409);
     // 告诉前端：下一次尝试需要带验证码。只在**确实已达到阈值**时暴露 ——
@@ -171,15 +166,66 @@ authRoutes.post('/logout', async (c) => {
   const sessionId = c.get('sessionId');
   if (sessionId) await revokeSession(c.env, sessionId);
   security.clearChallenge(c);
+  // 一次性切换前签发的存量会话 Cookie 不再被读取，登出时顺手清掉
   clearSessionCookie(c);
   return c.body(null, 204);
+});
+
+// ── 令牌刷新 ─────────────────────────────────────────────────────────────────
+
+/**
+ * 用 refresh 令牌换新的 access token。
+ *
+ * refresh 令牌就是 sessions 表里的不透明会话令牌：直接查库校验（刷新是低频
+ * 操作，不走缓存），通过后沿用滑动续期节流。不轮换 refresh 令牌 —— 与旧
+ * cookie 会话的暴露面一致，还让多标签页并发刷新天然安全。
+ */
+authRoutes.post('/refresh', async (c) => {
+  c.header('Cache-Control', 'no-store');
+  const body = await readJson(c, z.object({ refreshToken: z.string().min(20).max(128) }));
+  const sessionId = await hashToken(body.refreshToken);
+  const record = await loadAuthedUser(c.env, sessionId);
+  if (!record) throw fail.unauthorized();
+  await renewSession(c.env, sessionId, record.lastSeenAt);
+  const accessToken = await mintWebToken(c.env, record.user.id, sessionId);
+  return c.json({
+    accessToken,
+    refreshToken: body.refreshToken,
+    expiresIn: LIMITS.webAccessTokenSeconds,
+    user: toPublicUser(record.user),
+  });
+});
+
+// ── 一次性 code 换令牌（OAuth 社交登录回调用）───────────────────────────────
+
+/**
+ * 服务端在 OAuth 提供商回调处签发一次性 code，前端路由换成令牌对。
+ * code 复用 oauth_login_states 表（provider='web-exchange'，消费即删），
+ * 单次有效、5 分钟过期；换发时才真正建会话，撤销窗口最小。
+ */
+authRoutes.post('/token', async (c) => {
+  c.header('Cache-Control', 'no-store');
+  const body = await readJson(c, z.object({ code: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }));
+  const row = await c.env.DB.prepare("DELETE FROM oauth_login_states WHERE id = ? AND provider = 'web-exchange' AND expires_at > ? RETURNING user_id, destination")
+    .bind(await hashToken(body.code), Date.now())
+    .first<{ user_id: number; destination: string }>();
+  if (!row) throw fail.unauthorized();
+  const grant = await issueTokensFor(c.env, row.user_id, {
+    ip: clientIp(c),
+    userAgent: c.req.header('user-agent') ?? null,
+  });
+  return c.json({ ...tokenPayload(grant), destination: security.destination(row.destination) });
 });
 
 // ── 当前会话 ─────────────────────────────────────────────────────────────────
 
 authRoutes.get('/session', async (c) => {
-  const user = currentUser(c);
-  return c.json(toPublicUser(user));
+  // 会话端点是前端显式的状态刷新入口（登录态变化后强制拉取最新资料），
+  // 绕过 isolate 缓存直接读库 —— 与旧 cookie 会话的每请求读行为对齐。
+  const sessionId = c.get('sessionId');
+  const record = sessionId ? await loadAuthedUser(c.env, sessionId) : null;
+  if (record) await renewSession(c.env, record.sessionId, record.lastSeenAt);
+  return c.json(toPublicUser(record?.user ?? currentUser(c)));
 });
 authRoutes.get('/initialize', async c => {
   const user = currentUser(c), status = await initializationStatus(c.env, user.id);
@@ -197,9 +243,8 @@ authRoutes.post('/initialize', async c => {
   if (!sessionId) throw fail.unauthorized();
   const result = await initializeAccount(c.env, user.id, sessionId, body);
   await revokeAllSessions(c.env, user.id);
-  const { token, maxAgeSeconds } = await createSession(c.env, user.id, { ip: clientIp(c), userAgent: c.req.header('user-agent') ?? null });
-  setSessionCookie(c, token, maxAgeSeconds);
-  return c.json(result);
+  const grant = await issueTokensFor(c.env, user.id, { ip: clientIp(c), userAgent: c.req.header('user-agent') ?? null });
+  return c.json({ ...result, ...tokenPayload(grant) });
 });
 
 // ── 邮箱验证 ─────────────────────────────────────────────────────────────────

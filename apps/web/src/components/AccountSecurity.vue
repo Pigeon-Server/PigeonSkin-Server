@@ -8,6 +8,7 @@ import { useI18n } from '@/stores/i18n';
 import { useSessionStore } from '@/stores/session';
 import { confirmAction } from '@/stores/dialog';
 import { securityError, passkeysSupported } from '@/lib/security';
+import { accessToken } from '@/lib/token-store';
 import SecondFactorForm from './SecondFactorForm.vue';
 
 // heading 为 false 时只保留状态徽标：作为独立页面内容时，标题由页面页头承担。
@@ -18,6 +19,9 @@ const data = ref<SecurityStatus | null>(null);
 const busy = ref(false), loading = ref(true), error = ref(''), notice = ref('');
 const password = ref(''), verifying = ref(false);
 const providers = ref<Array<{ provider: string }>>([]);
+// 整页导航带不上 Authorization 头，以 web_token 把当前身份带给发起端点
+const oauthHref = (provider: string, destination: string) =>
+  `/auth/oauth/${encodeURIComponent(provider)}?redirect=${encodeURIComponent(destination)}&web_token=${encodeURIComponent(accessToken.value)}`;
 const enrollment = ref<'email' | 'totp' | 'change-email' | ''>('');
 const code = ref(''), secret = ref(''), qr = ref('');
 const keyName = ref(''), email = ref('');
@@ -124,7 +128,7 @@ function downloadCodes() {
           <AppButton class="btn" type="submit" :loading="busy">{{ i18n.t('security.verify_identity') }}</AppButton>
         </AppForm>
         <div v-else class="flex flex-wrap gap-2">
-          <a v-for="provider in providers" :key="provider.provider" class="btn" :href="`/auth/oauth/${encodeURIComponent(provider.provider)}?redirect=${encodeURIComponent(reauthDestination)}`">{{ i18n.t('security.reauth_provider', { provider: provider.provider }) }}</a>
+          <a v-for="provider in providers" :key="provider.provider" class="btn" :href="oauthHref(provider.provider, reauthDestination)">{{ i18n.t('security.reauth_provider', { provider: provider.provider }) }}</a>
         </div>
       </div>
       <p v-else class="text-sm text-muted">{{ i18n.t('security.verified') }}</p>

@@ -6,7 +6,7 @@ import { base64url } from 'jose';
 import { normalizeLocale } from '@pigeon-skin/shared/locales';
 import { serviceTranslator } from '../services/translations.ts';
 import { currentAdmin, currentUser, readJson } from '../framework.ts';
-import { getSettingInt, type AppEnv } from '../lib.ts';
+import { actorFromWebToken, getSettingInt, type AppEnv } from '../lib.ts';
 import { gameProfiles, publicProfile } from '../services/ygg-profiles.ts';
 import {
   CONNECT_SCOPES, OAuthError, issuer, randomSecret, connectEnabled, clientById, authenticateClient,
@@ -160,6 +160,11 @@ export function registerConnectRoutes(app: Hono<AppEnv>) {
     return c.json({ keys: results.map(k => JSON.parse(k.public_jwk)) });
   });
   r.get('/response/:id', async c => {
+    if (!c.get('user')) {
+      // 表单回执页是整页导航；SPA 跳转时以 web_token 附带身份
+      const actor = await actorFromWebToken(c.env, c.req.query('web_token'));
+      if (actor) { c.set('user', actor.user); c.set('sessionId', actor.sessionId); }
+    }
     const row = await c.env.DB.prepare('DELETE FROM connect_responses WHERE id = ? AND user_id IS ? AND expires_at > ? RETURNING body').bind(await hashToken(c.req.param('id')), c.get('user')?.id ?? null, Date.now()).first<{ body: string }>();
     if (!row) throw new OAuthError('invalid_request', 'Response expired.');
     const body = JSON.parse(row.body) as { uri: string; values: Record<string, string> };
@@ -174,6 +179,12 @@ export function registerConnectRoutes(app: Hono<AppEnv>) {
     const search = c.req.method === 'POST' ? await form(c) : new URL(c.req.url).searchParams;
     for (const key of new Set(search.keys())) if (search.getAll(key).length !== 1) throw new OAuthError('invalid_request', 'Duplicate parameter.');
     const params = Object.fromEntries(search);
+    // 启动器发起的是整页浏览器导航，Authorization 头带不上；发起链接可以
+    // 以 web_token 查询参数携带已登录站内身份（与 OAuth 登录入口同机制）。
+    if (!c.get('user')) {
+      const actor = await actorFromWebToken(c.env, search.get('web_token') ?? undefined);
+      if (actor) { c.set('user', actor.user); c.set('sessionId', actor.sessionId); }
+    }
     const client = await clientById(c, params.client_id || '');
     if (!matchRedirect(client, params.redirect_uri || '')) throw new OAuthError('invalid_request', 'Unregistered redirect URI.');
     try {
@@ -213,7 +224,12 @@ export function registerConnectRoutes(app: Hono<AppEnv>) {
         const row = await interaction(c, raw);
         return c.redirect(await completeAuthorization(c, row, params, scopes.includes('Yggdrasil.PlayerProfiles.Select') ? previous.player_id : null));
       }
-      return c.redirect(freshRequired || !c.get('user') ? `/login?redirect=${encodeURIComponent(destination)}` : destination);
+      if (!c.get('user')) return c.redirect(`/login?redirect=${encodeURIComponent(destination)}`);
+      // fresh=1 标记强制重认证：前端 /login 对已登录用户会自动续走 redirect，
+      // prompt=login / max_age 场景必须真正重新输入凭据，不能被绕过
+      return c.redirect(freshRequired
+        ? `/login?redirect=${encodeURIComponent(destination)}&fresh=1`
+        : destination);
     } catch (error) {
       if (!(error instanceof OAuthError)) throw error;
       return c.redirect(await reply(c, { ...params, response_mode: ['query', 'fragment', 'form_post'].includes(params.response_mode || '') ? params.response_mode! : '', response_type: ['code', 'id_token', 'code id_token'].includes(params.response_type || '') ? params.response_type! : 'code' }, { error: error.code, error_description: error.message }));

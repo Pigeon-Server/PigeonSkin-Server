@@ -11,17 +11,11 @@ import type { Context } from 'hono';
 import { and, desc, eq, gt, isNull } from 'drizzle-orm';
 import { createDb, players, sessions, yggTokens } from '@pigeon-skin/db';
 import { currentUser, fail } from '../framework.ts';
-import { revokeSession, sessionToken, type AppEnv } from '../lib.ts';
+import { revokeSession, type AppEnv } from '../lib.ts';
 
 type Ctx = Context<AppEnv>;
 
 export const deviceRoutes = new Hono<AppEnv>();
-
-async function currentSessionIdOf(token: string | undefined): Promise<string> {
-  if (!token) return '';
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
-  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 deviceRoutes.get('/devices', async (c: Ctx) => {
   const user = currentUser(c);
@@ -55,7 +49,7 @@ deviceRoutes.get('/devices', async (c: Ctx) => {
       .limit(50),
   ]);
 
-  const currentSessionId = await currentSessionIdOf(sessionToken(c) ?? '');
+  const currentSessionId = c.get('sessionId') ?? '';
   return c.json({
     browser: browserRows.map(row => ({
       kind: 'browser' as const,
@@ -87,7 +81,7 @@ deviceRoutes.delete('/devices/session/:id', async (c: Ctx) => {
     .where(and(eq(sessions.id, id), isNull(sessions.revokedAt)))
     .limit(1);
   if (!row || row.userId !== user.id) throw fail.notFound();
-  const currentSessionId = await currentSessionIdOf(sessionToken(c) ?? '');
+  const currentSessionId = c.get('sessionId') ?? '';
   await revokeSession(c.env, id);
   return c.json({ ok: true, current: id === currentSessionId });
 });

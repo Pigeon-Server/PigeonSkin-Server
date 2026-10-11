@@ -4,6 +4,7 @@ import { oauthApi, type OAuthProvider } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import { useRoute } from 'vue-router';
 import { apiErrorMessage } from '@/lib/api-error';
+import { accessToken } from '@/lib/token-store';
 const route = useRoute();
 const i18n = useI18n();
 const providers = ref<OAuthProvider[]>([]);
@@ -20,6 +21,14 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+// 整页导航带不上 Authorization 头：已登录时以 web_token 把身份带给发起端点
+function href(providerId: string): string {
+  const params = new URLSearchParams();
+  if (typeof route.query.redirect === 'string') params.set('redirect', route.query.redirect);
+  if (accessToken.value) params.set('web_token', accessToken.value);
+  const qs = params.toString();
+  return `/auth/oauth/${providerId}${qs ? `?${qs}` : ''}`;
 }
 onMounted(load);
 </script>
@@ -45,7 +54,7 @@ onMounted(load);
         v-for="provider in providers"
         :key="provider.id"
         class="btn w-full"
-        :href="`/auth/oauth/${provider.id}${typeof route.query.redirect === 'string' ? `?redirect=${encodeURIComponent(route.query.redirect)}` : ''}`"
+        :href="href(provider.id)"
       >
         <AppIcon :name="icons[provider.id] || 'public'" />
         {{ i18n.t('auth.with_provider', { provider: provider.displayName }) }}

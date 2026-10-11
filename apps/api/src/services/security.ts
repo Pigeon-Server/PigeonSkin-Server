@@ -11,7 +11,7 @@ import {
   type AuthenticationResponseJSON, type RegistrationResponseJSON, type AuthenticatorTransportFuture,
 } from '@simplewebauthn/server';
 import { AppError, currentUser, fail } from '../framework.ts';
-import { clientIp, setSessionCookie, needsAccountInitialization, getSetting, type AppEnv } from '../lib.ts';
+import { clientIp, grantTokensForSession, needsAccountInitialization, getSetting, toPublicUser, type AppEnv, type TokenGrant } from '../lib.ts';
 import type { Bindings } from '../env.ts';
 import * as repo from '../repositories/security.ts';
 import { decryptSecret, encryptSecret, randomToken, base32, matchingStep, emailCode } from './security-crypto.ts';
@@ -209,7 +209,7 @@ export async function beginLogin(c: Ctx, userId: number, payload: Payload): Prom
   await newChallenge(c, userId, 'login', payload);
   return true;
 }
-export async function finishLogin(c: Ctx, row: repo.ChallengeRow) {
+export async function finishLogin(c: Ctx, row: repo.ChallengeRow): Promise<Omit<TokenGrant, 'user'> & { user: Record<string, unknown>; id: number; redirect: string }> {
   const payload = JSON.parse(row.payload) as Payload;
   const user = (await repo.user(c.env, row.user_id!))!;
   if (await credentialsHash(c.env, user.id) !== row.credentials_hash || (await repo.state(c.env, user.id)).version !== row.version) throw new AppError('security.challenge_expired', 401);
@@ -222,10 +222,12 @@ export async function finishLogin(c: Ctx, row: repo.ChallengeRow) {
   statements.push(c.env.DB.prepare('DELETE FROM security_challenges WHERE id = ?').bind(row.id));
   const result = await c.env.DB.batch(statements);
   if (!result[0]!.results.length) throw new AppError('security.challenge_expired', 401);
-  setSessionCookie(c, token, absoluteSeconds);
+  const grant = await grantTokensForSession(c.env, tokenHash, token);
   clearChallenge(c);
   const target = destination(payload.destination);
-  return { id: user.id, redirect: needsAccountInitialization(user.email, user.password_hash, !!user.needs_initialization) ? `/auth/initialize?redirect=${encodeURIComponent(target)}` : target };
+  // user 必须走公开序列化：finishLogin 是 2FA/passkey 登录的响应出口，
+  // 直接透传 AuthedUser 会让 emailVerifiedAt 时间戳顶替前端的 emailVerified 布尔
+  return { ...grant, user: toPublicUser(grant.user), id: user.id, redirect: needsAccountInitialization(user.email, user.password_hash, !!user.needs_initialization) ? `/auth/initialize?redirect=${encodeURIComponent(target)}` : target };
 }
 export async function verifyChallenge(c: Ctx, method: SecondFactor, code: string, response?: AuthenticationResponseJSON) {
   const row = await challenge(c, ['login', 'reauth']);
@@ -314,6 +316,7 @@ export async function beginEnrollment(c: Ctx, method: 'email' | 'totp') {
     return { ok: true };
   }
   if (config.totp_secret) throw fail.conflict('security.method_exists');
+  if (!c.env.MFA_ENCRYPTION_KEY) throw new AppError('security.unavailable', 503);
   const secret = base32(crypto.getRandomValues(new Uint8Array(20)));
   await newChallenge(c, user.id, 'totp-enroll', { secret: await encryptSecret(secret, c.env.MFA_ENCRYPTION_KEY, user.id) });
   const issuer = await getSetting(c.env, 'site_name');

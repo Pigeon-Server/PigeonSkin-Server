@@ -6,6 +6,7 @@
 /// <reference types="@cloudflare/vitest-pool-workers" />
 
 import { env, SELF } from 'cloudflare:test';
+import { beforeEach } from 'vitest';
 
 declare module 'cloudflare:test' {
   interface ProvidedEnv {
@@ -73,6 +74,10 @@ export async function markVerified(email: string): Promise<void> {
 
 export async function makeAdmin(userId: number): Promise<void> {
   await env.DB.prepare(`UPDATE users SET role = 'super_admin' WHERE id = ?`).bind(userId).run();
+  // 直接写库绕过了 revokeSession 等失效入口，isolate 内的会话缓存必须手动作废，
+  // 否则本用例里紧随其后的请求仍读到旧角色
+  const { invalidateCachedSessionsOf } = await import('../src/lib/auth-cache.ts');
+  invalidateCachedSessionsOf(userId);
 }
 
 /** 造一枚明文已知的密码重置令牌（模拟"邮件已送达"） */
@@ -137,10 +142,10 @@ export async function setTestYggKey(): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ identifier: 'yggkey-admin@example.com', password: 'correct-horse-9' }),
   });
-  const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = (await login.json<{ accessToken: string }>()).accessToken;
   const patched = await SELF.fetch('https://x/api/v1/admin/settings', {
     method: 'PATCH',
-    headers: { cookie, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+    headers: { authorization: `Bearer ${cookie}`, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
     body: JSON.stringify({ settings: [{ key: 'ygg_private_key', value: pem }] }),
   });
   if (patched.status !== 200) throw new Error(`ygg_private_key 写入失败: ${patched.status}`);
@@ -157,3 +162,8 @@ export async function verifyTestYggSignature(value: string, signatureB64: string
     return false;
   }
 }
+
+// 会话缓存在 isolate 内跨用例存活（isolatedStorage 只重置存储不重置模块状态），
+// 每个用例前作废，否则前一个用例缓存的用户/会话会遮蔽本用例的库内变更。
+const { resetAuthCacheForTests } = await import('../src/lib/auth-cache.ts');
+beforeEach(() => { resetAuthCacheForTests(); });

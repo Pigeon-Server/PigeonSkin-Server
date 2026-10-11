@@ -154,7 +154,7 @@ vi.mock('@/api', () => ({
     submit: vi.fn().mockResolvedValue(undefined),
   },
   textureUrl: (hash: string) => `/textures/${hash}.png`,
-  previewUrl: (hash: string) => `/preview/${hash}?render=3`,
+  previewUrl: (hash: string, texture: { kind: 'skin' | 'cape' }) => `/preview/${hash}?render=3&kind=${texture.kind}`,
 }));
 
 vi.mock('@/components/TexturePreviewer.vue', () => ({
@@ -269,7 +269,8 @@ describe('Skinlib Show View', () => {
     sessionState.user.value = { id: 777, role: 'user' };
     const wrapper = createShowWrapper();
     await flushPromises();
-    expect(wrapper.find('a[href="/raw/42"]').exists()).toBe(true);
+    // 下载已改为带 Bearer 的 blob 按钮，不再有 /raw 直链
+    expect(wrapper.findAll('button').some(b => b.text().includes('下载'))).toBe(true);
   });
 
   it('hides the download link from anonymous visitors when anonymous downloads are off', async () => {
@@ -277,14 +278,14 @@ describe('Skinlib Show View', () => {
     siteValues.allow_anonymous_download = 'false';
     const wrapper = createShowWrapper();
     await flushPromises();
-    expect(wrapper.find('a[href="/raw/42"]').exists()).toBe(false);
+    expect(wrapper.findAll('button').some(b => b.text().includes('下载'))).toBe(false);
   });
 
   it('keeps the download link for signed-in users when anonymous downloads are off', async () => {
     siteValues.allow_anonymous_download = 'false';
     const wrapper = createShowWrapper();
     await flushPromises();
-    expect(wrapper.find('a[href="/raw/42"]').exists()).toBe(true);
+    expect(wrapper.findAll('button').some(b => b.text().includes('下载'))).toBe(true);
   });
 
   it('hides the download link for everyone when downloads are disabled', async () => {

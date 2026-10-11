@@ -24,6 +24,8 @@ export {
   type LegacyVerifier,
 } from './legacy.ts';
 
+export { mintWebAccessToken, verifyWebAccessToken, type WebTokenClaims } from './jwt.ts';
+
 /**
  * 存储格式：`<algo>:<payload>`，以**第一个** `:` 分割。
  *

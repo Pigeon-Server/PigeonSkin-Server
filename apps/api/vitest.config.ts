@@ -43,8 +43,9 @@ export default defineWorkersConfig({
     setupFiles: ['./test/setup.ts'],
     poolOptions: {
       workers: {
-        miniflare: { bindings: { APP_URL: 'http://localhost:8787', OFFICIAL_CATALOG_ENABLED: 'false', RATE_LIMIT_ENABLED: 'false' } },
-        wrangler: { configPath: path.resolve(__dirname, 'wrangler.jsonc') },
+        miniflare: { bindings: { APP_URL: 'http://localhost:8787', SESSION_SECRET: 'test-session-secret', OFFICIAL_CATALOG_ENABLED: 'false', RATE_LIMIT_ENABLED: 'false' } },
+        // 配置源已迁到仓库根目录（目录结构重组）
+        wrangler: { configPath: path.resolve(__dirname, '../../wrangler.jsonc') },
       },
     },
   },

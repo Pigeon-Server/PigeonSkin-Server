@@ -1,5 +1,8 @@
 export type SecondFactor = 'email' | 'totp' | 'passkey' | 'recovery';
-export type LoginResult = { id: number; requiresTwoFactor?: false } | { requiresTwoFactor: true; methods: SecondFactor[] };
+/** 登录成功响应：携带令牌对与最新用户资料（user 形状由消费端定义） */
+export type LoginResult =
+  | { id: number; requiresTwoFactor?: false; accessToken: string; refreshToken: string; expiresIn: number; user: Record<string, unknown> }
+  | { requiresTwoFactor: true; methods: SecondFactor[] };
 export interface SecurityStatus {
   enabled: boolean;
   email: boolean;

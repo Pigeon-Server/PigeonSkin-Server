@@ -1,11 +1,13 @@
 // 共享工具：错误响应、会话、设置读取。
 import type { Context } from 'hono';
-import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import { hashToken, mintTokenWithHash } from '@pigeon-skin/auth';
+import { deleteCookie } from 'hono/cookie';
+import { mintTokenWithHash, mintWebAccessToken, verifyWebAccessToken } from '@pigeon-skin/auth';
 import { LIMITS, type Role } from '@pigeon-skin/shared';
 import { createDb, settings, users, sessions } from '@pigeon-skin/db';
 import { and, eq, isNull, gt } from 'drizzle-orm';
 import { flag, SETTING_DEFAULTS, type Bindings, type SettingKey } from './env.ts';
+import { bumpCacheGeneration, currentCacheGeneration } from './cache-generation.ts';
+import { invalidateCachedSession, invalidateCachedSessionsOf } from './lib/auth-cache.ts';
 import { EXTRA_DEFAULTS } from './services/settings.ts';
 export { isAdmin } from './services/authorization.ts';
 
@@ -42,44 +44,71 @@ export function needsAccountInitialization(email: string, passwordHash: string, 
   return !!pending || !email || !passwordHash || /@oauth\.(?:invalid|local)$/i.test(email);
 }
 
-// ── 会话 Cookie ──────────────────────────────────────────────────────────────
-// 生产环境用 `__Host-` 前缀：它强制 Secure、Path=/，并**禁止 Domain 属性**，
-// 从而防止被攻破的同级子域设置或读取会话 Cookie。
-// 本地开发是 http，浏览器会拒绝带 Secure 的 `__Host-` Cookie，所以换一个名字。
+/**
+ * 对外暴露的用户字段序列化 —— **所有**把 user 放进 JSON 响应的出口都必须
+ * 经过它。密码哈希等敏感列绝不出现；前端期望的是 emailVerified 布尔
+ * （AuthedUser 的 emailVerifiedAt 是内部时间戳，直接透传会变成字段缺失）。
+ */
+export function toPublicUser(user: AuthedUser): Record<string, unknown> {
+  return {
+    id: user.id,
+    email: user.email,
+    nickname: user.nickname,
+    role: user.role,
+    score: user.score,
+    emailVerified: user.emailVerifiedAt !== null,
+    locale: user.locale,
+    isDarkMode: user.isDarkMode,
+    avatarTextureId: user.avatarTextureId,
+    needsInitialization: user.needsInitialization,
+    reportingDisabled: user.reportingDisabled,
+    commentsDisabled: user.commentsDisabled,
+  };
+}
+
+// ── 会话令牌 ─────────────────────────────────────────────────────────────────
+// Web 前端认证是双令牌：
+//   • access token —— 短时效 JWT（HS256 / SESSION_SECRET），前端存 localStorage，
+//     每请求经 Authorization 头本地验签，不查库；
+//   • refresh token —— 不透明随机令牌，SHA-256 存 D1 sessions 表（沿用旧表），
+//     前端凭它换新 access token。
+// 撤销/封禁/改密等会话语义全部落在 sessions 行上，与旧 cookie 方案一致。
+//
+// 旧方案遗留的 Cookie 名称仅保留给登出清理存量 `__Host-bs_session` 用，
+// 服务端不再读写它。
 
 export function sessionCookieName(env: Bindings): string {
   return env.ENVIRONMENT === 'production' ? '__Host-bs_session' : 'bs_session';
 }
 
-export function setSessionCookie(c: AppContext, token: string, maxAgeSeconds: number): void {
-  setCookie(c, sessionCookieName(c.env), token, {
-    httpOnly: true,
-    secure: c.env.ENVIRONMENT === 'production',
-    sameSite: 'Lax',
-    path: '/',
-    maxAge: maxAgeSeconds,
-  });
-}
-
 export function clearSessionCookie(c: AppContext): void {
-  deleteCookie(c, sessionCookieName(c.env), { path: '/' });
+  const secure = c.env.ENVIRONMENT === 'production';
+  // `__Host-` 前缀的 Cookie 在 cookie 序列化层强制要求 Secure 属性，
+  // 删除时也必须带上，否则序列化直接抛错导致登出 500。
+  deleteCookie(c, sessionCookieName(c.env), { path: '/', secure });
 }
 
 // ── 会话读写 ─────────────────────────────────────────────────────────────────
 
+export interface SessionRecord {
+  user: AuthedUser;
+  /** 会话 id = refresh 令牌的 SHA-256（sessions.id），JWT 的 sid claim */
+  sessionId: string;
+  lastSeenAt: number;
+}
+
 /**
- * 从 Cookie 解析会话。
+ * 按会话 id 加载认证用户。
  *
- * 每一次认证判定都是**一次带索引的 D1 查询** —— 这是有意接受的成本：
- * 会话存在 D1 是为了强一致性（撤销即生效），把它缓存到 isolate 里
- * 会让撤销延迟一个 TTL，正好抵消选择 D1 的意义。
+ * 这是认证路径里唯一需要查库的调用：Bearer 请求先本地验 JWT 签名，
+ * 再经 isolate 缓存（lib/auth-cache.ts）把这里的调用频率压到
+ * 每用户每 isolate 每 30 秒一次。
  */
-export async function resolveSession(
+export async function loadAuthedUser(
   env: Bindings,
-  token: string | undefined,
-): Promise<{ user: AuthedUser; sessionId: string } | null> {
-  if (!token) return null;
-  const sessionId = await hashToken(token);
+  sessionId: string,
+): Promise<SessionRecord | null> {
+  if (!sessionId) return null;
   const db = createDb(env.DB);
   const now = Date.now();
 
@@ -115,14 +144,6 @@ export async function resolveSession(
   const row = rows[0];
   if (!row) return null;
 
-  // 滑动续期：**最多每 15 分钟写一次**。
-  // 没有这个节流的话，每个已认证请求都会写 D1，免费额度会瞬间打爆。
-  if (now - row.lastSeenAt > LIMITS.sessionRenewIntervalSeconds * 1000) {
-    await db.update(sessions)
-      .set({ lastSeenAt: now, expiresAt: now + LIMITS.sessionIdleSeconds * 1000 })
-      .where(eq(sessions.id, sessionId));
-  }
-
   return {
     user: {
       id: row.userId,
@@ -140,18 +161,70 @@ export async function resolveSession(
       needsInitialization: needsAccountInitialization(row.email, row.passwordHash, row.storedNeedsInitialization),
     },
     sessionId,
+    lastSeenAt: row.lastSeenAt,
   };
 }
 
+/** 滑动续期：最多每 15 分钟写一次 —— 没到节流点就跳过写入。 */
+export async function renewSession(env: Bindings, sessionId: string, lastSeenAt: number): Promise<void> {
+  const now = Date.now();
+  if (now - lastSeenAt <= LIMITS.sessionRenewIntervalSeconds * 1000) return;
+  await createDb(env.DB).update(sessions)
+    .set({ lastSeenAt: now, expiresAt: now + LIMITS.sessionIdleSeconds * 1000 })
+    .where(eq(sessions.id, sessionId));
+}
+
+/** 签发 web access token。密钥缺失是部署错误，直接失败而不是降级。 */
+export async function mintWebToken(env: Pick<Bindings, 'SESSION_SECRET'>, userId: number, sessionId: string): Promise<string> {
+  if (!env.SESSION_SECRET) throw new Error('SESSION_SECRET 未配置，无法签发访问令牌');
+  return mintWebAccessToken(env.SESSION_SECRET, userId, sessionId, LIMITS.webAccessTokenSeconds);
+}
+
 /**
- * 创建会话。
+ * 整页导航（OAuth 登录、Connect authorize）不带 Authorization 头，
+ * 发起链接以 web_token 查询参数携带当前身份；服务器验签后走常规会话校验。
+ * 返回的 sessionId 可直接挂回 context，供下游会话新鲜度检查使用。
+ */
+export async function actorFromWebToken(
+  env: Bindings,
+  token: string | undefined,
+): Promise<{ user: AuthedUser; sessionId: string } | null> {
+  if (!token || !env.SESSION_SECRET) return null;
+  const claims = await verifyWebAccessToken(env.SESSION_SECRET, token);
+  if (!claims) return null;
+  const record = await loadAuthedUser(env, claims.sid);
+  return record ? { user: record.user, sessionId: record.sessionId } : null;
+}
+
+export interface TokenGrant {
+  accessToken: string;
+  refreshToken: string;
+  /** access token 有效期（秒），前端据此安排主动刷新 */
+  expiresIn: number;
+  user: AuthedUser;
+}
+
+/** 会话行已存在时组装令牌响应（登录完成与刷新共用） */
+export async function grantTokensForSession(
+  env: Bindings,
+  sessionId: string,
+  refreshToken: string,
+): Promise<TokenGrant> {
+  const record = await loadAuthedUser(env, sessionId);
+  if (!record) throw new Error('刚创建的会话无法读取，检查数据库一致性');
+  const accessToken = await mintWebToken(env, record.user.id, sessionId);
+  return { accessToken, refreshToken, expiresIn: LIMITS.webAccessTokenSeconds, user: record.user };
+}
+
+/**
+ * 创建会话并签发一对令牌。
  * 登录时**必须新建**会话而不是复用已有的 —— 这是防会话固定攻击。
  */
-export async function createSession(
+export async function issueTokensFor(
   env: Bindings,
   userId: number,
   meta: { ip?: string | null; userAgent?: string | null; remember?: boolean },
-): Promise<{ token: string; maxAgeSeconds: number }> {
+): Promise<TokenGrant> {
   const db = createDb(env.DB);
   const now = Date.now();
   const absoluteSeconds = meta.remember
@@ -172,12 +245,13 @@ export async function createSession(
     ip: meta.ip ?? null,
     userAgent: meta.userAgent ?? null,
   });
-  return { token, maxAgeSeconds: absoluteSeconds };
+  return grantTokensForSession(env, tokenHash, token);
 }
 
 export async function revokeSession(env: Bindings, sessionId: string): Promise<void> {
   const db = createDb(env.DB);
   await db.update(sessions).set({ revokedAt: Date.now() }).where(eq(sessions.id, sessionId));
+  invalidateCachedSession(sessionId);
 }
 
 /** 撤销某用户的全部会话（改密、重置密码、封禁时用） */
@@ -188,13 +262,17 @@ export async function revokeAllSessions(
   const db = createDb(env.DB);
   await db.update(sessions).set({ revokedAt: Date.now() })
     .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+  invalidateCachedSessionsOf(userId);
 }
 
 // ── 设置读取 ─────────────────────────────────────────────────────────────────
 // 设置几乎每个请求都要读，因此在 isolate 内缓存 60 秒。
 // 写入时递增版本号、缓存键包含版本，所以管理员改动会立即在所有 isolate 生效。
 
-let settingsCache: { values: Record<string, string>; expiresAt: number } | null = null;
+let settingsCache: { values: Record<string, string>; generation: number; expiresAt: number } | null = null;
+// 冷缓存并发去重：同一 isolate 上多个调用方同时未命中时，只有首个真正查库，
+// 其余等待同一份结果（避免冷启动风暴放大 D1 读取）。
+let settingsInflight: Promise<Record<string, string>> | null = null;
 
 /**
  * 让本 isolate 的设置缓存立即失效。
@@ -208,26 +286,41 @@ let settingsCache: { values: Record<string, string>; expiresAt: number } | null 
  */
 export function invalidateSettingsCache(): void {
   settingsCache = null;
+  // 配置读缓存（configuration.ts）与设置同源：任何 settings 写入都要一并失效。
+  // 代数计数器是零依赖模块，两处缓存同步读取它；递增后配置缓存条目因
+  // 代数不匹配立即过期，不需要（也不能）静态导入 configuration.ts —— 会成环。
+  bumpCacheGeneration();
 }
 
 export async function readSettings(env: Pick<Bindings, 'DB'>): Promise<Record<string, string>> {
   const now = Date.now();
-  if (settingsCache && settingsCache.expiresAt > now) return settingsCache.values;
+  if (settingsCache && settingsCache.generation === currentCacheGeneration() && settingsCache.expiresAt > now) return settingsCache.values;
+  if (settingsInflight) return settingsInflight;
 
-  const db = createDb(env.DB);
-  const rows = await db
-    .select({ key: settings.key, value: settings.value })
-    .from(settings)
-    .where(eq(settings.locale, ''));
+  settingsInflight = (async () => {
+    // 快照代数：查询飞行期间若发生失效，旧结果带着旧代数入缓存，
+    // 下个请求会立即判过期重新查库，不会把旧设置当成新值缓存 60 秒。
+    const generation = currentCacheGeneration();
+    const db = createDb(env.DB);
+    const rows = await db
+      .select({ key: settings.key, value: settings.value })
+      .from(settings)
+      .where(eq(settings.locale, ''));
 
-  // EXTRA_DEFAULTS（settings.ts 里仅超管可见项的默认值）也要兜底：
-  // 网关等直接走 readSettings 的读取方拿不到 settings.ts 的合并结果，
-  // 缺了它 ai_driver 这类 EXTRA 键会变 undefined 而不是 ''。
-  const values: Record<string, string> = { ...SETTING_DEFAULTS, ...EXTRA_DEFAULTS };
-  for (const r of rows) values[r.key] = r.value;
+    // EXTRA_DEFAULTS（settings.ts 里仅超管可见项的默认值）也要兜底：
+    // 网关等直接走 readSettings 的读取方拿不到 settings.ts 的合并结果，
+    // 缺了它 ai_driver 这类 EXTRA 键会变 undefined 而不是 ''。
+    const values: Record<string, string> = { ...SETTING_DEFAULTS, ...EXTRA_DEFAULTS };
+    for (const r of rows) values[r.key] = r.value;
 
-  settingsCache = { values, expiresAt: now + 60_000 };
-  return values;
+    settingsCache = { values, generation, expiresAt: Date.now() + 60_000 };
+    return values;
+  })();
+  try {
+    return await settingsInflight;
+  } finally {
+    settingsInflight = null;
+  }
 }
 
 export async function getSetting(env: Pick<Bindings, 'DB'>, key: SettingKey): Promise<string> {
@@ -253,9 +346,4 @@ export function clientIp(c: AppContext): string {
   const forwarded = c.req.header('x-forwarded-for');
   if (forwarded) return forwarded.split(',')[0]!.trim();
   return c.req.header('cf-connecting-ip') ?? 'unknown';
-}
-
-/** 读取当前请求的会话 Cookie 令牌 */
-export function sessionToken(c: AppContext): string | undefined {
-  return getCookie(c, sessionCookieName(c.env));
 }

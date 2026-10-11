@@ -42,6 +42,8 @@ export function isOAuthProtocolPath(pathname: string): boolean {
 export const AUTH_RATE_LIMIT_PREFIXES = [
   '/api/v1/auth/',
   '/auth/oauth/',
+  // PHP 版回调别名：与 /auth/oauth 同强度，避免同一流程按路径分流到不同桶
+  '/auth/login/',
   '/oauth/',
   '/yggc/',
   '/api/v1/connect/',
@@ -96,6 +98,28 @@ export const ROBOTS_RULES_REVISION = 3;
 
 /** 被封禁用户仍可访问的路径：登出与读取自身会话。 */
 export const BANNED_ALLOWED_PATHS = ['/api/v1/auth/logout', '/api/v1/auth/session'] as const;
+
+/**
+ * 凭请求体或挑战 Cookie 自证的认证端点：Authorization 头在这里被忽略。
+ * 否则前端带着**过期的** access token 访问它们会在中间件就被 401 挡住 ——
+ * 登录、刷新、换取令牌、2FA 挑战这些流程本身就是为了获取/续期有效令牌。
+ */
+export const AUTH_BODY_PREFIXES = [
+  '/api/v1/auth/login',
+  '/api/v1/auth/register',
+  '/api/v1/auth/refresh',
+  '/api/v1/auth/token',
+  '/api/v1/auth/forgot-password',
+  '/api/v1/auth/reset-password',
+  '/api/v1/auth/captcha/',
+  '/api/v1/auth/2fa',
+  '/api/v1/auth/passkeys',
+  '/api/v1/auth/verify-email/confirm',
+] as const;
+
+export function isAuthBodyPath(pathname: string): boolean {
+  return AUTH_BODY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
 
 /** 账号未初始化时可访问的写路径（PATCH /me 等有独立的 method 条件，不在此列）。 */
 export const INITIALIZATION_ALLOWED_PATHS = [

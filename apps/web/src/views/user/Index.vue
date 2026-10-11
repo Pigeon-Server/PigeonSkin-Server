@@ -7,6 +7,7 @@ import { useSiteSettings } from '@/stores/site';
 import LauncherSetup from '@/components/LauncherSetup.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { apiErrorMessage } from '@/lib/api-error';
+import { accessToken } from '@/lib/token-store';
 
 const session = useSessionStore();
 const i18n = useI18n();
@@ -412,7 +413,7 @@ onBeforeUnmount(() => cancelAnimationFrame(scoreAnimation));
           </div>
         </AppAlert>
 
-        <AppSkeleton v-if="loading && !info" class="p-4" :count="2" />
+        <AppSkeleton v-if="loading && !info" variant="stats" :count="2" :columns="2" class="p-4 sm:p-5" />
 
         <div v-else-if="info" class="p-4 sm:p-5 space-y-4">
           <div class="grid gap-4 sm:grid-cols-2">
@@ -562,7 +563,7 @@ onBeforeUnmount(() => cancelAnimationFrame(scoreAnimation));
             <div class="pt-1">
               <a
                 v-if="mojang.available"
-                href="/mojang/verify"
+                :href="`/mojang/verify?web_token=${encodeURIComponent(accessToken)}`"
                 class="btn btn-primary w-full justify-center inline-flex items-center gap-2"
               >
                 <AppIcon name="verified_user" />

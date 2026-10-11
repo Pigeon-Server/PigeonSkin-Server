@@ -10,6 +10,7 @@ export const router = createRouter({
     { path: '/account/security', meta: { requiresAuth: true, title: 'security.title' }, component: () => import('@/views/user/Security.vue') },
     { path: '/account/devices', alias: '/user/devices', meta: { requiresAuth: true, title: 'devices.title' }, component: () => import('@/views/user/Devices.vue') },
     { path: '/auth/two-factor', meta: { layout: 'auth', title: 'security.two_factor' }, component: () => import('@/views/auth/TwoFactor.vue') },
+    { path: '/auth/exchange', meta: { layout: 'auth', title: 'auth.login' }, component: () => import('@/views/auth/OAuthCallback.vue') },
     { path: '/manual/:slug?', meta: { layout: 'manual', title: 'manual.title' }, component: () => import('@/views/Manual.vue') },
     { path: '/', component: () => import('@/views/Home.vue') },
     { path: '/votes', alias: '/user/ps_vote', meta: { requiresAuth: true, title: 'votes.title' }, component: () => import('@/views/user/Votes.vue') },

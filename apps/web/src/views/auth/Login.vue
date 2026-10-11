@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import VerificationChallenge from '@/components/VerificationChallenge.vue';
 import { useSiteSettings } from '@/stores/site';
-import { ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ApiError, securityApi } from '@/api';
 import { startAuthentication } from '@simplewebauthn/browser';
@@ -35,6 +35,17 @@ const retainedId = ref<number | null>(null);
 const mergeConfirmed = ref(false);
 const passkeySupported = passkeysSupported();
 
+// Connect/OAuth 的匿名 authorize 会把已登录用户送到 /login?redirect=…：
+// 会话就绪后直接续走目标页；fresh=1（prompt=login 强制重认证）除外
+function redirectIfAuthenticated() {
+  const target = route.query.redirect;
+  if (!session.loaded.value || !session.user.value) return;
+  if (typeof target !== 'string' || !target.startsWith('/') || target.startsWith('//') || route.query.fresh) return;
+  void router.replace(target);
+}
+watch(() => session.loaded.value, redirectIfAuthenticated, { immediate: true });
+onMounted(redirectIfAuthenticated);
+
 async function passkeyLogin() {
   if (busy.value) return;
   busy.value = true; error.value = '';
@@ -42,7 +53,7 @@ async function passkeyLogin() {
     const target = typeof route.query.redirect === 'string' ? route.query.redirect : '/user';
     const response = await startAuthentication({ optionsJSON: await securityApi.loginOptions(keep.value, target) });
     const result = await securityApi.passkeyLogin(response);
-    await session.fetchSession(true);
+    session.applyGrant(result);
     await router.push(result.redirect);
   } catch (e) { error.value = i18n.t(securityError(e)); }
   finally { busy.value = false; }

@@ -3,9 +3,19 @@
 // 后端只返回机器码（如 auth.invalid_credentials），本地化文案由前端负责 ——
 // 所以这里把错误码包装成一个带 code 的异常，交给调用方或 i18n 层映射。
 import type { ErrorCode } from '@pigeon-skin/shared';
+import { previewRenderQuery } from '@pigeon-skin/minecraft';
 import { normalizeLocale, type Locale } from '@pigeon-skin/shared/locales';
 import type { LoginResult, SecurityStatus, SecurityChallenge, SecondFactor } from '@pigeon-skin/shared/security';
 import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON, AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/browser';
+import { accessToken, refreshTokens } from '@/lib/token-store';
+
+/** 登录/注册/换取令牌等成功响应的公共形状（user 由 CurrentUser 约束） */
+export interface AuthTokenBody {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  user: CurrentUser;
+}
 
 export const securityApi = {
   status: () => request<SecurityStatus>('/api/v1/me/security'),
@@ -13,9 +23,9 @@ export const securityApi = {
   challenge: () => request<SecurityChallenge>('/api/v1/auth/2fa'),
   sendEmail: () => request<{ ok: boolean }>('/api/v1/auth/2fa/email', { method: 'POST', json: {} }),
   authenticationOptions: () => request<PublicKeyCredentialRequestOptionsJSON>('/api/v1/auth/2fa/passkey/options', { method: 'POST', json: {} }),
-  verify: (method: SecondFactor, code = '', response?: AuthenticationResponseJSON) => request<{ requiresTwoFactor?: boolean; redirect?: string }>('/api/v1/auth/2fa/verify', { method: 'POST', json: { method, code, response } }),
+  verify: (method: SecondFactor, code = '', response?: AuthenticationResponseJSON) => request<{ requiresTwoFactor?: boolean; redirect?: string } & Partial<AuthTokenBody>>('/api/v1/auth/2fa/verify', { method: 'POST', json: { method, code, response } }),
   loginOptions: (remember: boolean, destination: string) => request<PublicKeyCredentialRequestOptionsJSON>('/api/v1/auth/passkeys/options', { method: 'POST', json: { remember, destination } }),
-  passkeyLogin: (response: AuthenticationResponseJSON) => request<{ id: number; redirect: string }>('/api/v1/auth/passkeys/verify', { method: 'POST', json: response }),
+  passkeyLogin: (response: AuthenticationResponseJSON) => request<{ id: number; redirect: string } & AuthTokenBody>('/api/v1/auth/passkeys/verify', { method: 'POST', json: response }),
   begin: (method: 'email' | 'totp') => request<{ secret?: string; uri?: string }>(`/api/v1/me/security/${method}/begin`, { method: 'POST', json: {} }),
   confirm: (method: 'email' | 'totp' | 'change-email', code: string) => request<{ recoveryCodes: string[] }>(`/api/v1/me/security/${method}/confirm`, { method: 'POST', json: { code } }),
   resend: (method: 'email' | 'change-email') => request<{ ok: boolean }>(`/api/v1/me/security/${method}/email`, { method: 'POST', json: {} }),
@@ -88,7 +98,9 @@ export const voteApi = {
   action: (id: string, action: string, version: number) => request<VoteDetail>(`/api/v1/admin/votes/${encodeURIComponent(id)}/${action}`, { method: 'POST', json: { version } }),
   records: (page = 1, vote = '', user = '') => request<Paged<VoteRecord>>(`/api/v1/admin/votes/records?page=${page}&vote=${encodeURIComponent(vote)}&user=${encodeURIComponent(user)}`),
   exportRecords: async (vote = '', user = '') => {
-    const response = await fetch(`/api/v1/admin/votes/export?vote=${encodeURIComponent(vote)}&user=${encodeURIComponent(user)}`, { credentials: 'same-origin', signal: AbortSignal.timeout(30000) });
+    const headers = new Headers();
+    if (accessToken.value) headers.set('authorization', `Bearer ${accessToken.value}`);
+    const response = await fetch(`/api/v1/admin/votes/export?vote=${encodeURIComponent(vote)}&user=${encodeURIComponent(user)}`, { credentials: 'same-origin', headers, signal: AbortSignal.timeout(30000) });
     if (!response.ok) throw new ApiError(response.status, await response.json() as ApiErrorBody);
     return response.blob();
   },
@@ -125,23 +137,43 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(
-  path: string,
-  init: RequestInit & { json?: unknown } = {},
-): Promise<T> {
+/** 凭请求体自证的端点：401 时刷新重试没有意义（它们本身就是获取令牌的入口）。
+ * logout 不在此列——过期令牌下登出也要先刷新再重试，保证服务端会话被撤销 */
+const AUTH_BODY_PREFIXES = [
+  '/api/v1/auth/login', '/api/v1/auth/register', '/api/v1/auth/refresh', '/api/v1/auth/token',
+  '/api/v1/auth/forgot-password', '/api/v1/auth/reset-password', '/api/v1/auth/captcha/',
+  '/api/v1/auth/2fa', '/api/v1/auth/passkeys', '/api/v1/auth/verify-email/confirm',
+] as const;
+
+async function doRequest(path: string, init: RequestInit & { json?: unknown }): Promise<Response> {
   const { json, ...rest } = init;
   const headers = new Headers(rest.headers);
   if (typeof document !== 'undefined') headers.set('X-Locale', normalizeLocale(document.documentElement.lang));
   if (json !== undefined) headers.set('content-type', 'application/json');
+  if (accessToken.value) headers.set('authorization', `Bearer ${accessToken.value}`);
 
-  const response = await fetch(path, {
+  return fetch(path, {
     signal: AbortSignal.timeout(30000),
     ...rest,
     headers,
-    // 会话靠 HttpOnly Cookie 传递；同源部署所以不需要 CORS 凭据配置
+    // 2FA 挑战等辅助 Cookie 仍是会话机制的一部分，保留同源凭据
     credentials: 'same-origin',
     ...(json !== undefined ? { body: JSON.stringify(json) } : {}),
   });
+}
+
+async function request<T>(
+  path: string,
+  init: RequestInit & { json?: unknown } = {},
+): Promise<T> {
+  let response = await doRequest(path, init);
+
+  // access token 过期：静默刷新后重试一次。原请求在 401 时未进入业务层，
+  // 幂等性不受影响。刷新失败按原 401 抛出，由会话层走登出。
+  if (response.status === 401 && accessToken.value && !AUTH_BODY_PREFIXES.some(prefix => path.startsWith(prefix))) {
+    const refreshed = await refreshTokens();
+    if (refreshed) response = await doRequest(path, init);
+  }
 
   if (response.status === 204) return undefined as T;
 
@@ -155,6 +187,24 @@ async function request<T>(
   if (parsed === null) throw new ApiError(502, { error: 'common.internal_error' });
 
   return parsed as T;
+}
+
+/**
+ * 带认证的 blob 请求：img/a 直链带不上 Authorization 头（工单附件等
+ * 需要登录的资源），经此取回 blob 后用 object URL 渲染/下载。
+ * 与 request 相同的 401 静默刷新 + 重试语义。
+ */
+export async function requestBlob(path: string): Promise<Blob> {
+  let response = await doRequest(path, {});
+  if (response.status === 401 && accessToken.value && !AUTH_BODY_PREFIXES.some(prefix => path.startsWith(prefix))) {
+    const refreshed = await refreshTokens();
+    if (refreshed) response = await doRequest(path, {});
+  }
+  if (!response.ok) {
+    const body = await response.text().then(safeParse).catch(() => null);
+    throw new ApiError(response.status, (body ?? { error: 'common.internal_error' }) as ApiErrorBody);
+  }
+  return response.blob();
 }
 
 export interface ConnectAuthorization {
@@ -228,7 +278,7 @@ export interface AccountInitialization {
 }
 export const initializationApi = {
   status: () => request<AccountInitialization>('/api/v1/auth/initialize'),
-  submit: (body: { email: string; nickname: string; password: string; playerName?: string; redirect: string; ticket: string }) => request<{ redirect: string; needsEmailVerification: boolean }>('/api/v1/auth/initialize', { method: 'POST', json: body }),
+  submit: (body: { email: string; nickname: string; password: string; playerName?: string; redirect: string; ticket: string }) => request<{ redirect: string; needsEmailVerification: boolean } & AuthTokenBody>('/api/v1/auth/initialize', { method: 'POST', json: body }),
 };
 
 export const api = {
@@ -245,12 +295,16 @@ export const api = {
   revokeDeviceLauncher: (id: string) => request<{ ok: boolean }>(`/api/v1/me/devices/launcher/${id}`, { method: 'DELETE' }),
 
   register: (input: { email: string; password: string; playerName?: string; nickname?: string; captchaToken?: string; captchaRandstr?: string }) =>
-    request<{ id: number }>('/api/v1/auth/register', { method: 'POST', json: input }),
+    request<{ id: number } & AuthTokenBody>('/api/v1/auth/register', { method: 'POST', json: input }),
 
   login: (input: { identifier: string; password: string; keep?: boolean; destination?: string; captchaToken?: string; captchaRandstr?: string; retainUserId?: number; conflictPasswords?: Array<{ userId: number; password: string }> }) =>
     request<LoginResult>('/api/v1/auth/login', { method: 'POST', json: input }),
 
   logout: () => request<void>('/api/v1/auth/logout', { method: 'POST' }),
+
+  /** OAuth 社交登录回调页：一次性 code 换令牌对 */
+  exchangeToken: (code: string) =>
+    request<{ id: number } & AuthTokenBody & { destination: string }>('/api/v1/auth/token', { method: 'POST', json: { code } }),
 
   /** 自绘图案验证码出题（driver=image 时使用） */
   captchaChallenge: () =>
@@ -292,9 +346,19 @@ export function userAvatarUrl(userId: number, options: { version?: number; mode?
   return `/avatar/user/${userId}?${params}`;
 }
 
-/** 全身预览 */
-export function previewUrl(hash: string): string {
-  return `/preview/${hash}?render=3`;
+/**
+ * 全身预览。
+ *
+ * 预览的渲染结果取决于 (哈希, 类型, 模型)，而类型与模型是可以改的：只按哈希拼
+ * URL，改过模型之后浏览器还会命中旧模型那张图。所以把渲染签名放进查询串，
+ * 让 URL 随模型/类型一起变 —— 服务端也据此决定这条 URL 能否 immutable 缓存
+ * （规则单一来源：@pigeon-skin/minecraft 的 previewRenderQuery）。
+ */
+export function previewUrl(
+  hash: string,
+  texture: { kind: 'skin' | 'cape'; model?: 'default' | 'slim' | null | undefined },
+): string {
+  return `/preview/${hash}?${previewRenderQuery(texture.kind, texture.model)}`;
 }
 
 /** 原始纹理字节（协议路径，客户端也在用） */
@@ -334,7 +398,7 @@ export interface Paged<T> {
 
 export interface AiJobItem {
   id: number;
-  kind: 'translate_texture' | 'moderate_texture_name' | 'moderate_texture_description';
+  kind: 'translate_texture' | 'moderate_texture_name' | 'moderate_texture_description' | 'translate_notification';
   tid: number;
   status: 'pending' | 'processing' | 'done' | 'failed' | 'cancelled';
   attempts: number;
@@ -450,7 +514,9 @@ export const textureApi = {
     ),
 
   content: async (id: number) => {
-    const response = await fetch(`/api/v1/textures/${id}/content`, { credentials: 'same-origin' });
+    const headers = new Headers();
+    if (accessToken.value) headers.set('authorization', `Bearer ${accessToken.value}`);
+    const response = await fetch(`/api/v1/textures/${id}/content`, { credentials: 'same-origin', headers });
     if (!response.ok) throw new ApiError(response.status, { error: response.status === 404 ? 'texture.not_found' : 'common.internal_error' });
     return response.blob();
   },
@@ -668,6 +734,8 @@ export const ticketApi = {
   create: (input: { title: string; categoryId: number; description: string; files?: File[] }) => request<{ id: number; ticketNumber: string }>('/api/v1/tickets', { method: 'POST', body: ticketForm(input) }),
   reply: (id: number, body: string, files?: File[]) => request<{ ok: boolean; messageId: number }>('/api/v1/tickets/' + id + '/messages', { method: 'POST', body: ticketForm(files ? { body, files } : { body }) }),
   attachmentUrl: (id: number, attachmentId: number) => `/api/v1/tickets/${id}/attachments/${attachmentId}`,
+  /** 附件内容需 Bearer 认证（img/a 直链带不上头），经 blob object URL 使用 */
+  attachmentBlob: (id: number, attachmentId: number) => requestBlob(`/api/v1/tickets/${id}/attachments/${attachmentId}`),
 };
 
 // ── 通知 ─────────────────────────────────────────────────────────────────────
@@ -791,6 +859,7 @@ export interface AdminTextureRow {
   likes: number;
   uploaderId: number | null;
   uploaderName: string | null;
+  official: boolean;
   createdAt: number;
 }
 
@@ -944,6 +1013,7 @@ export const adminApi = {
     ai_api_key?: string | undefined;
     openai_base_url?: string | undefined;
     ai_systemone_api_key?: string | undefined;
+    ai_systemone_base_url?: string | undefined;
     ai_cloudflare_account_id?: string | undefined;
     ai_cloudflare_api_token?: string | undefined;
   }) => {
@@ -952,6 +1022,7 @@ export const adminApi = {
     if (edits?.ai_api_key) p.set('ai_api_key', edits.ai_api_key);
     if (edits?.openai_base_url) p.set('openai_base_url', edits.openai_base_url);
     if (edits?.ai_systemone_api_key) p.set('ai_systemone_api_key', edits.ai_systemone_api_key);
+    if (edits?.ai_systemone_base_url) p.set('ai_systemone_base_url', edits.ai_systemone_base_url);
     if (edits?.ai_cloudflare_account_id) p.set('ai_cloudflare_account_id', edits.ai_cloudflare_account_id);
     if (edits?.ai_cloudflare_api_token) p.set('ai_cloudflare_api_token', edits.ai_cloudflare_api_token);
     return request<{ models: string[] | null }>(`/api/v1/admin/ai-models?${p}`);
@@ -993,7 +1064,7 @@ export const adminApi = {
     const p = new URLSearchParams();
     if (q.keyword) p.set('q', q.keyword);
     if (q.page) p.set('page', String(q.page));
-    return request<Paged<{ id: number; name: string; ownerId: number; ownerName: string | null; skinTextureId: number | null; capeTextureId: number | null; updatedAt: number }>>(`/api/v1/admin/players?${p}`);
+    return request<Paged<{ id: number; name: string; ownerId: number; ownerName: string | null; skinTextureId: number | null; capeTextureId: number | null; skinHash: string | null; capeHash: string | null; skinModel: string | null; updatedAt: number }>>(`/api/v1/admin/players?${p}`);
   },
 
   patchPlayer: (id: number, body: { name?: string; ownerId?: number; skin?: number | null; cape?: number | null }) =>

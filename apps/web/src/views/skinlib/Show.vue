@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router';
 import {
   ApiError,
   textureApi,
+  previewUrl,
   textureUrl,
   closetApi,
   reportApi,
@@ -23,6 +24,7 @@ import { applyPageMetadata, baseMetadata } from '@/lib/seo';
 import { plainDescription } from '@pigeon-skin/shared/seo';
 import { apiErrorMessage } from '@/lib/api-error';
 import { withSkinlibChallenge } from '@/stores/skinlib-challenge';
+import { accessToken } from '@/lib/token-store';
 
 const route = useRoute();
 const router = useRouter();
@@ -31,6 +33,28 @@ const i18n = useI18n();
 const site = useSiteSettings();
 
 const tid = Number(route.params.tid);
+const downloading = ref(false);
+async function downloadTexture() {
+  if (downloading.value) return;
+  downloading.value = true;
+  try {
+    const headers = new Headers();
+    if (accessToken.value) headers.set('authorization', `Bearer ${accessToken.value}`);
+    const response = await fetch(`/raw/${tid}`, { headers });
+    if (!response.ok) throw new ApiError(response.status, { error: 'common.internal_error' });
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${texture.value?.name || 'texture'}.png`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    errMsg.value = apiErrorMessage(e);
+  } finally {
+    downloading.value = false;
+  }
+}
 const applyOpen = ref(false);
 const loading = ref(true);
 const busy = ref(false);
@@ -105,7 +129,7 @@ watch(
           }),
       );
       metadata.image = new URL(
-        `/preview/${item.hash}`,
+        previewUrl(item.hash, item),
         site.get('site_url') || location.origin,
       ).href;
       metadata.structuredData = [
@@ -582,16 +606,17 @@ async function removeTexture() {
                   <span>{{ collected ? i18n.t('skinlib.removeFromCloset') : i18n.t('skinlib.addToCloset') }}</span>
                 </AppButton>
 
-                <!-- 下载材质 -->
-                <a
+                <!-- 下载材质：整页导航带不上 Bearer，用 blob 下载携带身份 -->
+                <button
                   v-if="canDownload"
+                  type="button"
                   class="btn !text-xs justify-center"
-                  :href="`/raw/${tid}`"
-                  :download="`${texture.name || 'texture'}.png`"
+                  :disabled="downloading"
+                  @click="downloadTexture"
                 >
                   <AppIcon name="download" class="!text-base" />
                   <span>{{ i18n.t('skinlib.show.download') }}</span>
-                </a>
+                </button>
               </div>
 
               <!-- 辅助行动栏 -->

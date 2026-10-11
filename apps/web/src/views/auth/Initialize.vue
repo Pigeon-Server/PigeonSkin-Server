@@ -62,7 +62,7 @@ onMounted(load);
 <template>
   <div class="space-y-4">
     <h1>{{ i18n.t('auth.initialize.title') }}</h1>
-    <AppSkeleton v-if="loading || redirecting" :count="3" />
+    <AppSkeleton v-if="loading || redirecting" variant="form" :count="4" />
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}<AppButton v-if="retryable" class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
     <AppForm v-if="!loading && !redirecting && status?.needsInitialization" class="space-y-4" @submit.prevent="submit">
       <label class="block text-sm font-medium" for="init-nickname">{{ i18n.t('auth.nickname') }}<AppInput id="init-nickname" v-model="nickname" class="mt-1" required maxlength="50" autocomplete="nickname" :disabled="busy" /></label>

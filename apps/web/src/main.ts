@@ -56,9 +56,13 @@ for (const [name, component] of Object.entries({
   app.component(name, component);
 startGlobalInjection();
 void prepareLocale(normalizeLocale(i18nPlugin.global.locale.value)).catch(() => {}).then(() => {
-  app.mount('#app');
-  // 解除 Worker 注入的 SEO 回退隐藏（见 services/seo.ts 的 data-seo-fallback）
-  document.documentElement.removeAttribute('data-seo-fallback');
+  // 解除 Worker 注入的 SEO 回退隐藏（见 services/seo.ts 的 seoFallbackGuard）；
+  // mount 失败也要解除，否则页面在 8 秒兜底前一直空白
+  try {
+    app.mount('#app');
+  } finally {
+    document.documentElement.removeAttribute('data-seo-fallback');
+  }
 });
 watch(() => router.currentRoute.value.query.lang, async value => {
   if (typeof value !== 'string') return;
@@ -79,4 +83,5 @@ watch(
     useTheme().isDark.value = user.isDarkMode;
   },
 );
-void session.fetchSession();
+// 启动引导：本地持有令牌才拉会话；匿名访问零请求
+void session.initAuth();

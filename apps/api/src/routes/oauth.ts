@@ -5,7 +5,7 @@ import { createDb, userIdentities } from '@pigeon-skin/db';
 import { and, eq, ne } from 'drizzle-orm';
 import { hashToken } from '@pigeon-skin/auth';
 import { base64url, createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
-import { createSession, getSettingInt, getSettingBool, setSessionCookie, clientIp, needsAccountInitialization, revokeAllSessions, type AppEnv } from '../lib.ts';
+import { actorFromWebToken, clientIp, getSettingInt, getSettingBool, loadAuthedUser, needsAccountInitialization, revokeAllSessions, type AppEnv } from '../lib.ts';
 import * as security from '../services/security.ts';
 import * as securityRepo from '../repositories/security.ts';
 import * as authRepo from '../repositories/auth.ts';
@@ -40,7 +40,15 @@ export function enabledProviders(c: Ctx) {
 }
 const randomSecret = () => base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
 const microsoftJwks = createRemoteJWKSet(new URL('https://login.microsoftonline.com/common/discovery/v2.0/keys'));
-const callbackUri = (c: Ctx, p: ProviderConfig) => `${c.env.APP_URL.replace(/\/$/, '')}/auth/oauth/${p.id}/callback`;
+/**
+ * 授权回调地址：设置/部署 env 覆盖优先（对应 PHP 版 .env 的 *_REDIRECT_URI），
+ * 留空回落 APP_URL 拼接的默认值。发起授权与换取令牌必须用同一个值，
+ * 因此两条路径都经过这里。CONFIGURATION 已在请求入口把 DB 设置解析进绑定。
+ */
+const callbackUri = (c: Ctx, p: ProviderConfig) => {
+  const override = { github: c.env.GITHUB_REDIRECT_URI, littleskin: c.env.LITTLESKIN_REDIRECT_URI, microsoft: c.env.MICROSOFT_REDIRECT_URI }[p.id];
+  return override || `${c.env.APP_URL.replace(/\/$/, '')}/auth/oauth/${p.id}/callback`;
+};
 function destination(value: string) {
   return /^\/(?!\/)[A-Za-z0-9/_?=&%+.,~-]*$/.test(value) && !value.startsWith('/auth/') ? value : '/user';
 }
@@ -92,14 +100,29 @@ async function fetchRemoteUser(c: Ctx, p: ProviderConfig, code: string, verifier
   const name = typeof body.name === 'string' ? body.name : typeof body.nickname === 'string' ? body.nickname : typeof body.displayName === 'string' ? body.displayName : typeof body.login === 'string' ? body.login : null;
   return { id, email, verified: !!email && verified, name };
 }
+const WEB_EXCHANGE_TTL_MS = 300000;
+
+/**
+ * 签发一次性 code 并 302 回前端回调路由，由 SPA 用 code 换令牌对。
+ * 服务器到 SPA 的整页跳转无法带 Authorization 头，也不能再把会话放进
+ * Cookie，所以用一次性 code 桥接（SPA 落地后 POST /api/v1/auth/token）。
+ */
+async function issueLoginRedirect(c: Ctx, userId: number, target: string): Promise<Response> {
+  const code = randomSecret();
+  await c.env.DB.prepare("INSERT INTO oauth_login_states (id, provider, browser_hash, user_id, session_id, verifier, destination, expires_at) VALUES (?, 'web-exchange', '', ?, NULL, '', ?, ?)")
+    .bind(await hashToken(code), userId, target, Date.now() + WEB_EXCHANGE_TTL_MS).run();
+  // 落地页必须是 SPA 路径：/auth/oauth/* 下的单段路径会被发起路由（/:provider）截获
+  return c.redirect(`${c.env.APP_URL.replace(/\/$/, '')}/auth/exchange?code=${code}`);
+}
+
 async function issueSession(c: Ctx, userId: number, target: string) {
   if (await security.beginLogin(c, userId, { destination: target, loginSource: 'oauth' })) return c.redirect('/auth/two-factor');
   await revokeAllSessions(c.env, userId);
-  const { token, maxAgeSeconds } = await createSession(c.env, userId, { ip: clientIp(c), userAgent: c.req.header('user-agent') ?? null });
-  setSessionCookie(c, token, maxAgeSeconds);
   const credentials = await c.env.DB.prepare('SELECT email, password_hash, needs_initialization FROM users WHERE id = ?').bind(userId).first<{ email: string; password_hash: string; needs_initialization: number }>();
-  if (credentials && needsAccountInitialization(credentials.email, credentials.password_hash, credentials.needs_initialization)) return c.redirect(`/auth/initialize?redirect=${encodeURIComponent(target)}`);
-  return c.redirect(target);
+  const destination = credentials && needsAccountInitialization(credentials.email, credentials.password_hash, credentials.needs_initialization)
+    ? `/auth/initialize?redirect=${encodeURIComponent(target)}`
+    : target;
+  return issueLoginRedirect(c, userId, destination);
 }
 export function registerOAuthRoutes(app: Hono<AppEnv>): void {
   const oauth = new Hono<AppEnv>();
@@ -111,90 +134,17 @@ export function registerOAuthRoutes(app: Hono<AppEnv>): void {
     if (!p) throw new AppError('auth.oauth_unavailable', 404);
     const state = randomSecret(), browser = randomSecret(), verifier = randomSecret();
     const cookieName = `oauth_${state}`;
-    setCookie(c, cookieName, browser, { path: '/auth/oauth', maxAge: 600, httpOnly: true, sameSite: 'Lax', secure: c.env.ENVIRONMENT !== 'development' });
+    // path 用 / 而不是 /auth/oauth：回调可能走 /auth/login 别名，浏览器按
+    // 前缀匹配 Cookie，窄 path 会让别名回调读不到 state。值是一次性随机
+    // token 且 10 分钟过期，放宽 path 不扩大攻击面。
+    setCookie(c, cookieName, browser, { path: '/', maxAge: 600, httpOnly: true, sameSite: 'Lax', secure: c.env.ENVIRONMENT !== 'development' });
+    const actor = c.get('user') ? { user: c.get('user')!, sessionId: c.get('sessionId') } : await actorFromWebToken(c.env, c.req.query('web_token'));
     await c.env.DB.prepare('INSERT INTO oauth_login_states (id, provider, browser_hash, user_id, session_id, verifier, destination, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(await hashToken(state), p.id, await hashToken(browser), c.get('user')?.id ?? null, c.get('sessionId'), verifier, destination(c.req.query('redirect') || '/user'), Date.now() + 600000).run();
+      .bind(await hashToken(state), p.id, await hashToken(browser), actor?.user.id ?? null, actor?.sessionId ?? null, verifier, destination(c.req.query('redirect') || '/user'), Date.now() + 600000).run();
     const challenge = base64url.encode(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
     return c.redirect(`${p.authorizeUrl}?${new URLSearchParams({ client_id: p.secrets.clientId, redirect_uri: callbackUri(c, p), response_type: 'code', scope: p.scope, state, ...(p.id !== 'littleskin' ? { code_challenge: challenge, code_challenge_method: 'S256' } : {}), ...(p.id === 'microsoft' ? { nonce: verifier } : {}) })}`);
   });
-  oauth.get('/:provider/callback', async c => {
-    const p = providers(c).find(p => p.id === c.req.param('provider') && p.secrets.clientId && p.secrets.clientSecret);
-    if (!p) throw new AppError('auth.oauth_unavailable', 404);
-    const query = new URL(c.req.url).searchParams;
-    for (const name of ['state', 'code', 'error']) if (query.getAll(name).length > 1) throw new AppError('auth.oauth_failed', 400);
-    const state = query.get('state') || '';
-    if (!/^[A-Za-z0-9_-]{43}$/.test(state)) throw new AppError('auth.oauth_failed', 400);
-    const cookieName = `oauth_${state}`, browser = getCookie(c, cookieName);
-    if (!browser) throw new AppError('auth.oauth_failed', 400);
-    const actor = c.get('user');
-    const login = await c.env.DB.prepare('DELETE FROM oauth_login_states WHERE id = ? AND provider = ? AND browser_hash = ? AND user_id IS ? AND session_id IS ? AND expires_at > ? RETURNING provider, user_id, session_id, verifier, destination')
-      .bind(await hashToken(state), p.id, await hashToken(browser), actor?.id ?? null, c.get('sessionId'), Date.now()).first<LoginState>();
-    deleteCookie(c, cookieName, { path: '/auth/oauth' });
-    if (!login) throw new AppError('auth.oauth_failed', 400);
-    if (query.has('error')) throw new AppError('auth.oauth_denied', 400);
-    const code = query.get('code');
-    if (!code) throw new AppError('auth.oauth_failed', 400);
-    const remote = await fetchRemoteUser(c, p, code, login.verifier);
-    const db = createDb(c.env.DB);
-    const identity = await c.env.DB.prepare('SELECT user_id FROM user_identities WHERE provider = ? AND provider_user_id = ?').bind(p.id, remote.id).first<{ user_id: number }>();
-    if (identity) {
-      if (actor && identity.user_id !== actor.id) throw new AppError('auth.oauth_identity_taken', 409);
-      const user = await c.env.DB.prepare('SELECT role FROM users WHERE id = ?').bind(identity.user_id).first<{ role: string }>();
-      if (!user || user.role === 'banned') throw new AppError('auth.account_banned', 403);
-      if (actor && securityReauthDestination(login.destination)) {
-        const config = await securityRepo.state(c.env, actor.id);
-        const credentials = (await securityRepo.user(c.env, actor.id))!;
-        if (credentials.password_hash || (await securityRepo.methods(c.env, actor.id)).length) throw new AppError('security.reauth_required', 403);
-        await security.grantReauth(c, actor.id, { version: config.version, credentialsHash: await hashToken(`${credentials.password_hash}\n${credentials.email}\n${credentials.role}`) });
-        return c.redirect(login.destination);
-      }
-      return actor && !login.destination.startsWith('/connect/') ? c.redirect('/profile?oauth_success=1') : issueSession(c, identity.user_id, login.destination);
-    }
-    if (actor) {
-      if (securityReauthDestination(login.destination)) throw new AppError('security.reauth_required', 403);
-      const bound = await c.env.DB.prepare('SELECT provider_user_id FROM user_identities WHERE user_id = ? AND provider = ?').bind(actor.id, p.id).first();
-      if (bound) throw new AppError('auth.oauth_identity_taken', 409);
-      try {
-        const linked = await c.env.DB.prepare('INSERT INTO user_identities (provider, provider_user_id, user_id, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM user_identities WHERE provider = ? AND user_id = ?) RETURNING user_id').bind(p.id, remote.id, actor.id, Date.now(), p.id, actor.id).first();
-        if (!linked) throw new AppError('auth.oauth_identity_taken', 409);
-      }
-      catch { throw new AppError('auth.oauth_identity_taken', 409); }
-      return c.redirect('/profile?oauth_success=1');
-    }
-    let userId: number;
-    const existing = remote.email ? await authRepo.findUserByEmail(db, remote.email) : null;
-    if (existing) {
-      if (existing.role === 'banned') throw new AppError('auth.account_banned', 403);
-      if (!remote.verified || !existing.emailVerifiedAt) throw new AppError('auth.oauth_link_required', 409);
-      userId = existing.id;
-      try {
-        const linked = await c.env.DB.prepare('INSERT INTO user_identities (provider, provider_user_id, user_id, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM user_identities WHERE provider = ? AND user_id = ?) RETURNING user_id').bind(p.id, remote.id, userId, Date.now(), p.id, userId).first();
-        if (!linked) throw new AppError('auth.oauth_identity_taken', 409);
-      }
-      catch { throw new AppError('auth.oauth_identity_taken', 409); }
-    } else {
-      if (!await getSettingBool(c.env, 'registration_enabled')) throw new AppError('auth.registration_disabled', 403);
-      const limit = await getSettingInt(c.env, 'regs_per_ip');
-      if (remote.email) {
-        const verdict = await checkEmailDomain(c.env, remote.email);
-        if (verdict) throw new AppError(verdict, 403);
-      }
-      const email = remote.email ?? `${p.id}_${await hashToken(remote.id)}@oauth.invalid`;
-      const now = Date.now(), score = await getSettingInt(c.env, 'initial_score');
-      const nickname = (remote.name || remote.email?.split('@')[0] || '').slice(0, 50);
-      let result;
-      try {
-        result = await c.env.DB.batch([
-          c.env.DB.prepare("INSERT INTO users (email,nickname,password_hash,needs_initialization,role,score,registration_ip,email_verified_at,created_at,updated_at) SELECT ?,?,'',1,'normal',?,?,?,?,? WHERE ?<0 OR (SELECT COUNT(*) FROM users WHERE registration_ip=?)<? RETURNING id").bind(email, nickname, score, clientIp(c), remote.verified ? now : null, now, now, limit, clientIp(c), limit),
-          c.env.DB.prepare('INSERT INTO user_identities (provider,provider_user_id,user_id,created_at) SELECT ?,?,last_insert_rowid(),? WHERE changes()>0').bind(p.id, remote.id, now),
-        ]);
-      } catch { throw new AppError('auth.oauth_identity_taken', 409); }
-      const created = (result[0]!.results[0] as { id: number } | undefined);
-      if (!created) throw new AppError('auth.too_many_registrations', 403);
-      userId = created.id;
-    }
-    return issueSession(c, userId, login.destination);
-  });
+  oauth.get('/:provider/callback', oauthCallback);
   app.post('/api/v1/me/oauth/:provider/unbind', async c => {
     const user = c.get('user');
     if (!user) throw new AppError('common.unauthorized', 401);
@@ -213,4 +163,105 @@ export function registerOAuthRoutes(app: Hono<AppEnv>): void {
     return c.json({ bindings: rows, available: enabledProviders(c), hasPassword: !!credentials?.password_hash });
   });
   app.route('/auth/oauth', oauth);
+
+  // PHP 版风格的回调别名（/auth/login/{provider}/callback）：旧站 OAuth 应用
+  // 登记的回调就是这个形状（Microsoft 社交登录旧标识为 live），别名让既有
+  // 登记无需修改；处理器与 /auth/oauth 完全共用，state Cookie 的 path 必须
+  // 同时覆盖两种回调路径。中间件与 onError 也要对齐，否则错误路径会以
+  // JSON 落到全局 onError 而不是重定向回登录页。
+  const legacy = new Hono<AppEnv>();
+  legacy.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); await next(); });
+  legacy.onError((error, c) => c.redirect(`${c.get('user') ? '/profile' : '/login'}?oauth_error=${encodeURIComponent(error instanceof AppError ? error.code : 'auth.oauth_failed')}`));
+  legacy.get('/:provider/callback', oauthCallback);
+  app.route('/auth/login', legacy);
+}
+
+async function oauthCallback(c: Ctx): Promise<Response> {
+  // 旧站 Microsoft 社交登录的 provider 标识是 live，归一化到内置的 microsoft
+  const providerId = c.req.param('provider') === 'live' ? 'microsoft' : c.req.param('provider');
+  const p = providers(c).find(p => p.id === providerId && p.secrets.clientId && p.secrets.clientSecret);
+  if (!p) throw new AppError('auth.oauth_unavailable', 404);
+  const query = new URL(c.req.url).searchParams;
+  for (const name of ['state', 'code', 'error']) if (query.getAll(name).length > 1) throw new AppError('auth.oauth_failed', 400);
+  const state = query.get('state') || '';
+  if (!/^[A-Za-z0-9_-]{43}$/.test(state)) throw new AppError('auth.oauth_failed', 400);
+  const cookieName = `oauth_${state}`, browser = getCookie(c, cookieName);
+  if (!browser) throw new AppError('auth.oauth_failed', 400);
+  // 回调整页导航不带会话凭据，发起方的身份与会话都以 state 行为准
+  // （发起时绑定，state Cookie 绑定浏览器防 CSRF）。
+  const login = await c.env.DB.prepare('DELETE FROM oauth_login_states WHERE id = ? AND provider = ? AND browser_hash = ? AND expires_at > ? RETURNING provider, user_id, session_id, verifier, destination')
+    .bind(await hashToken(state), p.id, await hashToken(browser), Date.now()).first<LoginState>();
+  deleteCookie(c, cookieName, { path: '/' });
+  if (!login) throw new AppError('auth.oauth_failed', 400);
+  const actor = login.user_id !== null && login.session_id !== null
+    ? (await loadAuthedUser(c.env, login.session_id))?.user ?? null
+    : null;
+  if (actor) {
+    // 重授权（绑定身份作为 2FA 证明）依赖会话上下文，按 state 行恢复
+    c.set('user', actor);
+    c.set('sessionId', login.session_id);
+  }
+  if (query.has('error')) throw new AppError('auth.oauth_denied', 400);
+  const code = query.get('code');
+  if (!code) throw new AppError('auth.oauth_failed', 400);
+  const remote = await fetchRemoteUser(c, p, code, login.verifier);
+  const db = createDb(c.env.DB);
+  const identity = await c.env.DB.prepare('SELECT user_id FROM user_identities WHERE provider = ? AND provider_user_id = ?').bind(p.id, remote.id).first<{ user_id: number }>();
+  if (identity) {
+    if (actor && identity.user_id !== actor.id) throw new AppError('auth.oauth_identity_taken', 409);
+    const user = await c.env.DB.prepare('SELECT role FROM users WHERE id = ?').bind(identity.user_id).first<{ role: string }>();
+    if (!user || user.role === 'banned') throw new AppError('auth.account_banned', 403);
+    if (actor && securityReauthDestination(login.destination)) {
+      const config = await securityRepo.state(c.env, actor.id);
+      const credentials = (await securityRepo.user(c.env, actor.id))!;
+      if (credentials.password_hash || (await securityRepo.methods(c.env, actor.id)).length) throw new AppError('security.reauth_required', 403);
+      await security.grantReauth(c, actor.id, { version: config.version, credentialsHash: await hashToken(`${credentials.password_hash}\n${credentials.email}\n${credentials.role}`) });
+      return c.redirect(login.destination);
+    }
+    return actor && !login.destination.startsWith('/connect/') ? c.redirect('/profile?oauth_success=1') : issueSession(c, identity.user_id, login.destination);
+  }
+  if (actor) {
+    if (securityReauthDestination(login.destination)) throw new AppError('security.reauth_required', 403);
+    const bound = await c.env.DB.prepare('SELECT provider_user_id FROM user_identities WHERE user_id = ? AND provider = ?').bind(actor.id, p.id).first();
+    if (bound) throw new AppError('auth.oauth_identity_taken', 409);
+    try {
+      const linked = await c.env.DB.prepare('INSERT INTO user_identities (provider, provider_user_id, user_id, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM user_identities WHERE provider = ? AND user_id = ?) RETURNING user_id').bind(p.id, remote.id, actor.id, Date.now(), p.id, actor.id).first();
+      if (!linked) throw new AppError('auth.oauth_identity_taken', 409);
+    }
+    catch { throw new AppError('auth.oauth_identity_taken', 409); }
+    return c.redirect('/profile?oauth_success=1');
+  }
+  let userId: number;
+  const existing = remote.email ? await authRepo.findUserByEmail(db, remote.email) : null;
+  if (existing) {
+    if (existing.role === 'banned') throw new AppError('auth.account_banned', 403);
+    if (!remote.verified || !existing.emailVerifiedAt) throw new AppError('auth.oauth_link_required', 409);
+    userId = existing.id;
+    try {
+      const linked = await c.env.DB.prepare('INSERT INTO user_identities (provider, provider_user_id, user_id, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM user_identities WHERE provider = ? AND user_id = ?) RETURNING user_id').bind(p.id, remote.id, userId, Date.now(), p.id, userId).first();
+      if (!linked) throw new AppError('auth.oauth_identity_taken', 409);
+    }
+    catch { throw new AppError('auth.oauth_identity_taken', 409); }
+  } else {
+    if (!await getSettingBool(c.env, 'registration_enabled')) throw new AppError('auth.registration_disabled', 403);
+    const limit = await getSettingInt(c.env, 'regs_per_ip');
+    if (remote.email) {
+      const verdict = await checkEmailDomain(c.env, remote.email);
+      if (verdict) throw new AppError(verdict, 403);
+    }
+    const email = remote.email ?? `${p.id}_${await hashToken(remote.id)}@oauth.invalid`;
+    const now = Date.now(), score = await getSettingInt(c.env, 'initial_score');
+    const nickname = (remote.name || remote.email?.split('@')[0] || '').slice(0, 50);
+    let result;
+    try {
+      result = await c.env.DB.batch([
+        c.env.DB.prepare("INSERT INTO users (email,nickname,password_hash,needs_initialization,role,score,registration_ip,email_verified_at,created_at,updated_at) SELECT ?,?,'',1,'normal',?,?,?,?,? WHERE ?<0 OR (SELECT COUNT(*) FROM users WHERE registration_ip=?)<? RETURNING id").bind(email, nickname, score, clientIp(c), remote.verified ? now : null, now, now, limit, clientIp(c), limit),
+        c.env.DB.prepare('INSERT INTO user_identities (provider,provider_user_id,user_id,created_at) SELECT ?,?,last_insert_rowid(),? WHERE changes()>0').bind(p.id, remote.id, now),
+      ]);
+    } catch { throw new AppError('auth.oauth_identity_taken', 409); }
+    const created = (result[0]!.results[0] as { id: number } | undefined);
+    if (!created) throw new AppError('auth.too_many_registrations', 403);
+    userId = created.id;
+  }
+  return issueSession(c, userId, login.destination);
 }

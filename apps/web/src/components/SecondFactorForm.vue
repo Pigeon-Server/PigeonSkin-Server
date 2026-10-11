@@ -7,7 +7,7 @@ import { useI18n } from '@/stores/i18n';
 import { passkeysSupported, securityError } from '@/lib/security';
 
 defineProps<{ reauth?: boolean }>();
-const emit = defineEmits<{ complete: [redirect: string]; restart: [] }>();
+const emit = defineEmits<{ complete: [redirect: string, grant?: import('@/api').AuthTokenBody]; restart: [] }>();
 const i18n = useI18n();
 const info = ref<SecurityChallenge | null>(null);
 const method = ref<SecondFactor>('totp');
@@ -44,7 +44,7 @@ async function submit() {
     const result = await securityApi.verify(method.value, code.value, response);
     code.value = '';
     if (result.requiresTwoFactor) { await load(); notice.value = i18n.t('security.next_account'); }
-    else emit('complete', result.redirect ?? '/user');
+    else emit('complete', result.redirect ?? '/user', result.accessToken ? result as import('@/api').AuthTokenBody : undefined);
   } catch (e) {
     const key = securityError(e); error.value = i18n.t(key);
     if (key === 'security.challenge_expired') expired.value = true;

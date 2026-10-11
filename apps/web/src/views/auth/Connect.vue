@@ -58,7 +58,7 @@ onMounted(() => { if (!device.value || code.value) void load(); });
         <AppInput id="device-code" v-model="code" class="uppercase" maxlength="20" autocomplete="off" required />
         <AppButton type="submit" class="btn-primary" :disabled="loading">{{ i18n.t('connect.continue') }}</AppButton>
       </AppForm>
-      <AppSkeleton v-if="loading && !data" :count="2" />
+      <AppSkeleton v-if="loading && !data" variant="detail" :count="2" />
       <template v-if="data">
         <p class="text-lg font-semibold">{{ data.client.name }}</p>
         <p v-if="session.user.value" class="text-sm text-muted break-words">{{ i18n.t('oauth.authorizing_as', { name: session.user.value.nickname, email: session.user.value.email }) }}</p>

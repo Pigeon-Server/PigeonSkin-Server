@@ -1,6 +1,8 @@
 // Worker 绑定与环境配置的类型。
 //
-import type { D1Database, DurableObjectNamespace, R2Bucket, Queue } from '@cloudflare/workers-types';
+// 运行时类型（D1Database、R2Bucket、Queue 等）来自 `wrangler types` 生成的
+// worker-configuration.d.ts（tsconfig types 全局注入）；改 wrangler.jsonc 绑定后
+// 需重跑 `npx wrangler types` 重新生成。
 import type { SearchQueueMessage } from './services/search-submissions.ts';
 import type { EmailQueueMessage } from './services/email.ts';
 
@@ -83,6 +85,17 @@ export interface Bindings {
   /** mojang-verification 独立凭据（缺省回落 MICROSOFT_*） */
   MOJANG_CLIENT_ID?: string;
   MOJANG_CLIENT_SECRET?: string;
+  /**
+   * 授权回调地址覆盖（对应 PHP 版 .env 的 *_REDIRECT_URI）。留空用
+   * APP_URL 拼接的默认值；第三方应用登记的回调与部署地址不一致时配置。
+   * 命名与 PHP 版的差异：PHP 版社交登录 Microsoft 用 LIVE_REDIRECT_URI、
+   * 正版验证用 MICROSOFT_REDIRECT_URI；这里统一改为按提供商标识命名，
+   * MICROSOFT_REDIRECT_URI 指社交登录回调，正版验证用 MOJANG_REDIRECT_URI。
+   */
+  GITHUB_REDIRECT_URI?: string;
+  LITTLESKIN_REDIRECT_URI?: string;
+  MICROSOFT_REDIRECT_URI?: string;
+  MOJANG_REDIRECT_URI?: string;
 
   /** Workers AI 审核评论用的绑定（wrangler ai） */
   AI?: { run(model: string, input: unknown): Promise<unknown> };
@@ -98,6 +111,8 @@ export interface Bindings {
   ANTHROPIC_MODERATION_MODEL?: string;
   /** TypeSafe System One（Jev 判别模型）API Key */
   TYPESAFE_API_KEY?: string;
+  /** System One API 根地址（自托管/代理网关）；缺省官方 https://api.typesafe.ai/v1 */
+  SYSTEMONE_BASE_URL?: string;
   /** Node 自托管经 Cloudflare REST API 调用 Clef 判别模型时的账户与凭据 */
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;
@@ -208,16 +223,22 @@ export const SETTING_DEFAULTS = {
   sitemap_max_urls: '20000',
 
   // ── AI 网关每任务的可覆盖项 ────────────────────────────────────────────────
-  // 键形如 ai_<task>_model / ai_<task>_prompt / ai_<task>_mode，空 = 用
-  // ai-gateway.ts AI_JOB_DEFINITIONS 里的内置默认。
+  // 键形如 ai_<task>_model / ai_<task>_prompt / ai_<task>_mode / ai_<task>_reasoning，
+  // 空 = 用 ai-gateway.ts AI_JOB_DEFINITIONS 里的内置默认（reasoning 空再回落全局 ai_reasoning）。
   ai_comments_moderation_model: '',
   ai_comments_moderation_prompt: '',
   ai_comments_moderation_mode: '',
+  ai_comments_moderation_reasoning: '',
   ai_texture_translate_model: '',
   ai_texture_translate_prompt: '',
+  ai_texture_translate_reasoning: '',
   ai_texture_moderate_model: '',
   ai_texture_moderate_prompt: '',
   ai_texture_moderate_mode: '',
+  ai_texture_moderate_reasoning: '',
+  ai_notification_translate_model: '',
+  ai_notification_translate_prompt: '',
+  ai_notification_translate_reasoning: '',
   // ── 判别模型驱动（System One / Clef）──────────────────────────────────────
   // 判别模型 noul 概率 ≥ 阈值判定违规。按整数百分数存储（10–90），50 = 0.5
   ai_discriminative_threshold: '50',

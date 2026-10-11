@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { LOCALE_OPTIONS, normalizeLocale, type Locale } from '@pigeon-skin/shared/locales';
 import AccountSecurity from '@/components/AccountSecurity.vue';
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import {
   api,
   meApi,
@@ -18,6 +18,7 @@ import { useI18n } from '@/stores/i18n';
 import { useRouter, useRoute } from 'vue-router';
 import { isErrorCode } from '@pigeon-skin/shared';
 import { confirmAction } from '@/stores/dialog';
+import { accessToken } from '@/lib/token-store';
 import { useTheme } from '@/composables/theme';
 import AvatarPreview from '@/components/AvatarPreview.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
@@ -42,19 +43,11 @@ const oldPassword = ref('');
 const newPassword = ref('');
 const newPassword2 = ref('');
 const myTextures = ref<Array<Pick<TextureSummary, 'id' | 'hash' | 'name'>>>([]);
-const avatarPage = ref(1);
 const avatarKeyword = ref('');
 const avatarSearch = useSearchExpression(avatarKeyword, 'avatars');
 const avatarSchema = searchSchema('avatars');
 const filteredAvatars = computed(() => myTextures.value.filter(item =>
   matchSearch(avatarSearch.value, avatarSchema, { name: item.name, id: item.id })));
-const avatarPages = computed(() => Math.ceil(filteredAvatars.value.length / 18));
-const visibleAvatars = computed(() =>
-  filteredAvatars.value.slice((avatarPage.value - 1) * 18, avatarPage.value * 18),
-);
-watch(avatarKeyword, () => {
-  avatarPage.value = 1;
-});
 const profileErr = ref('');
 const profileNotice = ref('');
 const pwdErr = ref('');
@@ -73,11 +66,28 @@ const avatarLoading = ref(true);
 const avatarErr = ref('');
 
 const mojang = ref<MojangStatus | null>(null);
-const mojangCallbackError = String(route.query.mojang_error || '');
-const mojangErr = ref(isErrorCode(mojangCallbackError) ? i18n.t(mojangCallbackError) : '');
+const mojangErr = ref(readCallbackError());
 const mojangNotice = ref('');
 const mojangBusy = ref(false);
 const needsMojangRefresh = ref(false);
+
+/** 回调错误随 query 到达；SPA 内导航（守卫改写 query）也要能捕获 */
+function readCallbackError(): string {
+  const code = String(route.query.mojang_error || '');
+  return isErrorCode(code) ? i18n.t(code) : '';
+}
+watch(() => route.query.mojang_error, () => { setMojangError(readCallbackError()); });
+watch(() => route.query.oauth_error, () => {
+  const code = String(route.query.oauth_error || '');
+  oauthErr.value = isErrorCode(code) ? i18n.t(code) : '';
+});
+
+/** 错误写入后滚到验证卡片，避免长页面底部提示不可见 */
+const mojangCard = ref<HTMLElement | null>(null);
+function setMojangError(message: string) {
+  mojangErr.value = message;
+  if (message) void nextTick(() => mojangCard.value?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+}
 
 const user = computed(() => session.user.value);
 watch(() => user.value?.email, value => { if (value) email.value = value; });
@@ -102,15 +112,23 @@ onMounted(async () => {
   signature.value = user.value?.signature ?? '';
   void loadAvatars();
   void loadOauth(!!oauthCallbackError);
-  void loadMojang(!!mojangCallbackError);
+  void loadMojang(mojangErr.value !== '');
 });
 
 async function loadAvatars() {
   avatarLoading.value = true;
   avatarErr.value = '';
   try {
-    const data = await closetApi.list({ category: 'skin' });
-    myTextures.value = data.items.map((item) => ({
+    const items: Awaited<ReturnType<typeof closetApi.list>>['items'] = [];
+    let page = 1;
+    let hasMore = true;
+    while (hasMore) {
+      const data = await closetApi.list({ category: 'skin', page });
+      items.push(...data.items);
+      hasMore = data.hasMore;
+      page += 1;
+    }
+    myTextures.value = items.map((item) => ({
       id: item.textureId,
       hash: item.hash,
       name: item.itemName || item.textureName,
@@ -159,7 +177,7 @@ async function loadMojang(preserveError = false) {
   try {
     mojang.value = await mojangApi.status();
   } catch (e) {
-    mojangErr.value = apiErrorMessage(e);
+    setMojangError(apiErrorMessage(e));
   } finally {
     mojangLoading.value = false;
   }
@@ -242,7 +260,7 @@ async function unbindMojang() {
     await mojangApi.unbind();
     await loadMojang();
   } catch (e) {
-    mojangErr.value = apiErrorMessage(e);
+    setMojangError(apiErrorMessage(e));
   } finally {
     mojangBusy.value = false;
   }
@@ -255,10 +273,10 @@ async function updateMojangUuid() {
   try {
     const result = await mojangApi.updateUuid();
     needsMojangRefresh.value = result.needsReverify;
-    if (result.needsReverify) mojangErr.value = i18n.t('integration.mojang.needs_reverify');
+    if (result.needsReverify) setMojangError(i18n.t('integration.mojang.needs_reverify'));
     else mojangNotice.value = i18n.t('settings.mojang_update_ok', { name: result.name });
   } catch (e) {
-    mojangErr.value = apiErrorMessage(e);
+    setMojangError(apiErrorMessage(e));
   } finally {
     mojangBusy.value = false;
   }
@@ -279,8 +297,8 @@ async function deleteAccount() {
 </script>
 
 <template>
-  <div class="page" v-if="user">
-    <PageHeader :title="i18n.t('general.profile')" />
+  <div class="page xl:grid xl:grid-cols-2" v-if="user">
+    <PageHeader class="xl:col-span-2" :title="i18n.t('general.profile')" />
 
     <AppForm class="panel" @submit.prevent="saveProfile">
       <h2 class="font-semibold">{{ i18n.t('settings.profile') }}</h2>
@@ -343,7 +361,7 @@ async function deleteAccount() {
     <div class="rounded-xl border border-line bg-surface p-5">
       <AppForm @submit.prevent="changePassword">
         <h2 class="font-semibold">{{ i18n.t(hasPassword ? 'settings.change_password' : 'oauth.set_password') }}</h2>
-        <div class="mt-3 grid gap-4 sm:grid-cols-3">
+        <div class="mt-3 grid gap-4 2xl:grid-cols-3">
           <div v-if="hasPassword">
             <label class="mb-1 block text-sm font-medium" for="cp-old">
               {{ i18n.t('settings.old_password') }}
@@ -422,7 +440,7 @@ async function deleteAccount() {
           >
             {{ i18n.t('settings.oauth_unbind') }}
           </AppButton>
-          <a v-else class="btn btn-sm" :href="`/auth/oauth/${p.id}`">
+          <a v-else class="btn btn-sm" :href="`/auth/oauth/${p.id}?web_token=${encodeURIComponent(accessToken)}`">
             {{ i18n.t('settings.oauth_bind') }}
           </a>
         </div>
@@ -432,11 +450,11 @@ async function deleteAccount() {
       </div>
     </div>
 
-    <div class="rounded-xl border border-line bg-surface p-5">
+    <div ref="mojangCard" class="rounded-xl border border-line bg-surface p-5 xl:col-span-2">
       <h2 class="font-semibold">{{ i18n.t('settings.mojang') }}</h2>
       <p v-if="mojangErr" class="alert alert-danger mt-3">
         {{ mojangErr }}
-        <a v-if="needsMojangRefresh" class="btn btn-sm ml-2" href="/mojang/verify?refresh=true">
+        <a v-if="needsMojangRefresh" class="btn btn-sm ml-2" :href="`/mojang/verify?refresh=true&web_token=${encodeURIComponent(accessToken)}`">
           {{ i18n.t('integration.mojang.reverify') }}
         </a>
         <AppButton class="btn-sm ml-2" @click="loadMojang()">
@@ -472,7 +490,7 @@ async function deleteAccount() {
       <template v-else-if="!mojangErr">
         <p class="mt-3 text-sm text-muted">{{ i18n.t('settings.mojang_none') }}</p>
         <p class="mt-2 text-sm text-muted">{{ i18n.t('integration.mojang.verify_notice') }}</p>
-        <a v-if="mojang?.available" class="btn btn-primary mt-3 inline-block" href="/mojang/verify">
+        <a v-if="mojang?.available" class="btn btn-primary mt-3 inline-block" :href="`/mojang/verify?web_token=${encodeURIComponent(accessToken)}`">
           {{ i18n.t('settings.mojang_go_verify') }}
         </a>
         <p v-else-if="mojang" class="mt-3 text-sm text-muted">
@@ -481,7 +499,7 @@ async function deleteAccount() {
       </template>
     </div>
 
-    <div class="rounded-xl border border-line bg-surface p-5">
+    <div class="rounded-xl border border-line bg-surface p-5 xl:col-span-2">
       <div class="flex items-center justify-between gap-2">
         <div class="flex items-center gap-3">
           <UserAvatar :texture-id="user.avatarTextureId" :user-id="user.id" :name="user.nickname" class="h-9 w-9 rounded" />
@@ -508,11 +526,11 @@ async function deleteAccount() {
       <p v-if="avatarLoading" class="mt-3 text-sm text-muted" role="status">
         {{ i18n.t('common.loading') }}
       </p>
-      <div v-else class="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-6">
+      <div v-else class="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-12">
         <AppButton
-          class="rounded-lg border p-1"
+          class="aspect-square rounded-lg border p-1"
           :class="user.avatarTextureId === t.id ? 'border-brand-500 ring-2 ring-brand-400' : 'border-line'"
-          v-for="t in visibleAvatars"
+          v-for="t in filteredAvatars"
           :key="t.id"
           :disabled="profileBusy"
           @click="setAvatar(t.id)"
@@ -520,15 +538,14 @@ async function deleteAccount() {
           <AvatarPreview :hash="t.hash" :name="t.name" class="h-full w-full object-contain" />
         </AppButton>
         <p
-          v-if="visibleAvatars.length === 0 && !avatarErr"
+          v-if="filteredAvatars.length === 0 && !avatarErr"
           class="col-span-full py-4 text-center text-sm text-muted"
         >
           {{ i18n.t(avatarKeyword ? 'general.noResult' : 'user.no_textures_ext') }}
         </p>
       </div>
     </div>
-    <AppPagination v-model="avatarPage" :total-pages="avatarPages" />
-    <section v-if="!session.isAdmin.value" class="panel border-danger/40">
+    <section v-if="!session.isAdmin.value" class="panel border-danger/40 xl:col-span-2">
       <h2 class="font-semibold text-danger">{{ i18n.t('user.delete_account') }}</h2>
       <p class="mt-2 text-sm text-muted">{{ i18n.t('user.delete_warning') }}</p>
       <AppButton class="btn-danger mt-4" :loading="profileBusy" @click="deleteAccount">

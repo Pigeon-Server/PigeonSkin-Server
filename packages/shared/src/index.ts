@@ -42,6 +42,10 @@ export const ERROR_CODES = [
   'auth.already_initialized',
   'auth.initialization_expired',
   'auth.oauth_unavailable',
+  'auth.mojang_microsoft_unavailable',
+  'auth.mojang_xbox_unavailable',
+  'auth.mojang_xsts_denied',
+  'auth.mojang_profile_unavailable',
   'auth.cannot_unbind_last',
   'comment.not_found',
   'comment.too_long',
@@ -234,6 +238,8 @@ export const LIMITS = {
   sessionRememberSeconds: 90 * 24 * 60 * 60,
   /** 滑动续期的最小间隔（秒）—— 这是控制 D1 写量的关键 */
   sessionRenewIntervalSeconds: 15 * 60,
+  /** Web 前端 access token（JWT）有效期（秒）。撤销语义由 refresh 令牌 + 服务端缓存保证 */
+  webAccessTokenSeconds: 15 * 60,
 
   /** 邮箱验证令牌有效期（秒）。旧版是永久有效，这里是有意收紧。 */
   verificationTokenSeconds: 24 * 60 * 60,
