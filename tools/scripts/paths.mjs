@@ -25,5 +25,3 @@ const repoRoot = isWorkspaceRoot(process.cwd()) ? process.cwd() : rootFromHere;
 
 export { repoRoot };
 export const serverDir = resolve(repoRoot, 'apps/server');
-export const webDir = resolve(repoRoot, 'apps/web');
-export const wranglerConfig = resolve(repoRoot, 'wrangler.jsonc');

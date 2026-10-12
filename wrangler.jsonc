@@ -29,8 +29,8 @@
     }
   },
   "queues": {
-    "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-dev" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-dev" }],
-    "consumers": [{ "queue": "pigeon-search-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1, "dead_letter_queue": "pigeon-search-dlq-dev" }, { "queue": "pigeon-email-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-dev" }]
+    "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-prod" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-prod" }],
+    "consumers": [{ "queue": "pigeon-search-prod", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1, "dead_letter_queue": "pigeon-search-dlq-prod" }, { "queue": "pigeon-email-prod", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-prod" }]
   },
 
   // ── 静态资源（前端 SPA）──────────────────────────────────────────────────
@@ -95,13 +95,13 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "bs-dev",
-      "database_id": "local-dev-placeholder",
+      "database_name": "bs-prod",
+      // 省略 database_id：按名字自动连接账户里已有的库，不存在时自动创建
       "migrations_dir": "packages/db/migrations"
     }
   ],
   "r2_buckets": [
-    { "binding": "BUCKET", "bucket_name": "bs-dev-textures" }
+    { "binding": "BUCKET", "bucket_name": "bs-prod-textures" }
   ],
   // 原生 Rate Limiting binding：边缘限流，无存储、无成本。
   // RL_GLOBAL 防扫描（200 req/10s/IP），RL_AUTH 管认证端点（30 req/min/IP）；
@@ -115,13 +115,37 @@
     { "name": "RL_SKINLIB_USER", "namespace_id": "1004", "simple": { "limit": 300, "period": 60 } }
   ],
   "vars": {
-    "ENVIRONMENT": "development",
-    "DERIVATIVES_ENABLED": "true"
+    "ENVIRONMENT": "production",
+    "DERIVATIVES_ENABLED": "true",
+    "APP_URL": "https://skin.pigeon-server.cn"
   },
 
   // ── 预览环境 ────────────────────────────────────────────────────────────────
   // 硬规则：预览环境绝不绑定生产的 D1 或 R2（见 docs/rewrite/02-architecture.md §7）。
   "env": {
+    // ── 本地开发 ──────────────────────────────────────────────────────────────
+    // 本地 D1 与本地 R2 都是文件型的，不需要网络。npm run dev --env dev。
+    "dev": {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "bs-dev",
+          "database_id": "local-dev-placeholder",
+          "migrations_dir": "packages/db/migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "BUCKET", "bucket_name": "bs-dev-textures" }
+      ],
+      "queues": {
+        "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-dev" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-dev" }],
+        "consumers": [{ "queue": "pigeon-search-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1, "dead_letter_queue": "pigeon-search-dlq-dev" }, { "queue": "pigeon-email-dev", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-dev" }]
+      },
+      "vars": {
+        "ENVIRONMENT": "development",
+        "DERIVATIVES_ENABLED": "true"
+      }
+    },
     "preview": {
       "name": "pigeon-skin-preview",
       "queues": {
@@ -132,7 +156,7 @@
         {
           "binding": "DB",
           "database_name": "bs-preview",
-          "database_id": "REPLACE_WITH_PREVIEW_D1_ID",
+          // 同 production：按名字自动连接/创建，首次部署时 provisioning
           "migrations_dir": "packages/db/migrations"
         }
       ],
@@ -156,49 +180,9 @@
       "vars": {
         "ENVIRONMENT": "preview",
         "DERIVATIVES_ENABLED": "true"
+        // APP_URL 待预览环境有确定域名后在此填写
       }
     },
 
-    // ── 生产环境 ──────────────────────────────────────────────────────────────
-    "production": {
-      "name": "pigeon-skin",
-      "queues": {
-        "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-prod" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-prod" }],
-        "consumers": [{ "queue": "pigeon-search-prod", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 1, "dead_letter_queue": "pigeon-search-dlq-prod" }, { "queue": "pigeon-email-prod", "max_batch_size": 1, "max_batch_timeout": 5, "max_retries": 5, "max_concurrency": 1, "dead_letter_queue": "pigeon-email-dlq-prod" }]
-      },
-      "d1_databases": [
-        {
-          "binding": "DB",
-          "database_name": "bs-prod",
-          "database_id": "REPLACE_WITH_PRODUCTION_D1_ID",
-          "migrations_dir": "packages/db/migrations"
-        }
-      ],
-      "r2_buckets": [
-        { "binding": "BUCKET", "bucket_name": "bs-prod-textures" }
-      ],
-      "ai": { "binding": "AI" },
-      // durable_objects binding 不被 wrangler 环境继承，必须每个 env 显式声明
-      "durable_objects": {
-        "bindings": [
-          { "name": "DERIVATIVES", "class_name": "DerivativeGenerator" },
-          { "name": "OFFICIAL_RESOURCES", "class_name": "OfficialResourceUpdater" }
-        ]
-      },
-      "ratelimits": [
-        { "name": "RL_GLOBAL", "namespace_id": "1001", "simple": { "limit": 200, "period": 10 } },
-        { "name": "RL_AUTH", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
-        { "name": "RL_SKINLIB", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } },
-        { "name": "RL_SKINLIB_USER", "namespace_id": "1004", "simple": { "limit": 300, "period": 60 } }
-      ],
-      "vars": {
-        "ENVIRONMENT": "production",
-        "DERIVATIVES_ENABLED": "true"
-      },
-      // 小时级清理（0 * * * *）+ 分钟级 AI 任务派发（* * * * *，
-      // processDueJobs 认领到期任务，含指数退避重试）。免费额度下每次
-      // 触发就是一小批 D1 读写，分钟级对 AI 队列的时效足够。
-      "triggers": { "crons": ["0 * * * *", "* * * * *"] }
-    }
   }
 }

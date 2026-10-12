@@ -67,8 +67,10 @@ git submodule update --init --recursive
 # 安装项目依赖
 npm ci
 
-# 初始化本地环境配置与数据库
-npm run setup:local
+# 生成本地环境配置（.dev.vars，含 SESSION_SECRET 等本地密钥）
+cp .dev.vars.example .dev.vars
+
+# 初始化本地数据库
 npm run db:migrate:local
 
 # 预构建前端产物
@@ -81,8 +83,7 @@ npm run dev
 启动完成后：
 - 前端页面：`http://localhost:5173`
 - Worker API：`http://localhost:8787`（前端开发服务器会自动将 API 和游戏接口代理至 Worker）
-- 初次初始化：访问 `http://localhost:5173/setup`，输入 `apps/server/.dev.vars` 中生成的 `SETUP_TOKEN` 即可创建首个管理员。
-- 演示数据：如需快速预览界面效果，可运行 `npm run db:seed:local` 创建演示账号与角色（仅供本地测试，切勿导入生产数据库）。
+- 初次初始化：访问 `http://localhost:5173/setup`，输入 `.dev.vars` 中生成的 `SETUP_TOKEN` 即可创建首个管理员。
 
 本地环境下的 D1、R2、队列与 Durable Objects 均由 Wrangler 本地模拟，无需 Cloudflare 账号即可直接调试。
 
@@ -90,7 +91,7 @@ npm run dev
 
 ## 配置说明
 
-本地 Worker 配置可参考 `apps/server/.dev.vars.example`。生产环境建议通过 `wrangler secret put <KEY>` 写入敏感凭据，请勿将真实机密写入公开配置文件。
+本地 Worker 配置可参考仓库根的 `.dev.vars.example`（wrangler 从配置文件所在目录读取 `.dev.vars`）。生产环境建议通过 `wrangler secret put <KEY>` 写入敏感凭据，请勿将真实机密写入公开配置文件。
 
 | 环境变量 | 必选 | 说明与建议 |
 |---|:---:|---|
@@ -105,19 +106,21 @@ npm run dev
 
 除基础环境变量外，站点名称、备案号、注册策略、默认角色等业务设置均可在搭建完成后直接在**管理后台**进行可视化配置。
 
-如需使用自动化发布脚本，可参考 `.env.example` 配置部署参数，并通过 `node --env-file=.env tools/scripts/cloudflare.mjs <preview|production> configure` 绑定资源。
 
 ## 部署上线
 
 Pigeon Skin Server 原生适配 Cloudflare 基础设施。如果想跳过手动配置，可直接使用顶部的[一键部署](#一键部署)按钮。常见部署流程如下：
 
-1. **创建 Cloudflare 资源**  
-   在 Cloudflare 控制台创建对应的 D1 数据库、R2 存储桶（存放玩家上传的皮肤与材质）以及异步处理队列。
+1. **登录 Cloudflare**
 
-2. **准备部署参数**  
-   参考 `.env.example` 设定目标环境的环境变量，包括 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN` 以及 D1/R2 的资源配置。
+   ```sh
+   npx wrangler login
+   ```
 
-3. **执行迁移与发布**  
+2. **执行迁移与发布**
+
+   `wrangler.jsonc` 已包含生产环境的完整配置（D1 数据库按名字自动连接，不存在时自动创建）：
+
    ```sh
    # 运行发布前合规检查
    npm run check:public
@@ -132,7 +135,9 @@ Pigeon Skin Server 原生适配 Cloudflare 基础设施。如果想跳过手动�
    npm run deploy:prod
    ```
 
-4. 部署完成后，访问站点的 `/setup` 路径，输入先前配置的 `SETUP_TOKEN`，即可完成站点的首次初始化。
+   连接 GitHub 仓库后（Workers & Pages → 连接 Git），push 到 main 会自动构建并执行部署，无需手动操作。
+
+3. 部署完成后，访问站点的 `/setup` 路径，输入先前配置的 `SETUP_TOKEN`，即可完成站点的首次初始化。
 
 ## 管理 CLI
 

@@ -6,9 +6,9 @@
   "description": "Cloudflare Worker：REST API + Minecraft 协议 + 纹理下发",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "wrangler dev --config ../../wrangler.jsonc",
+    "dev": "wrangler dev --env dev --config ../../wrangler.jsonc",
     "deploy": "wrangler deploy --config ../../wrangler.jsonc",
-    "types": "wrangler types --config ../../wrangler.jsonc",
+    "types": "wrangler types --env dev --config ../../wrangler.jsonc",
     "tail": "wrangler tail --format json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

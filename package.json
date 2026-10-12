@@ -13,21 +13,19 @@
     "npm": ">=10"
   },
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail \"npm run dev --workspace @pigeon-skin/server\" \"npm run dev --workspace @pigeon-skin/web\"",
-    "setup:local": "node tools/scripts/setup-local.mjs",
+    "dev": "concurrently --kill-others-on-fail \"npm run dev --env dev --workspace @pigeon-skin/server\" \"npm run dev --workspace @pigeon-skin/web\"",
     "build": "npm run build --workspace @pigeon-skin/web",
     "test": "npm run test --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "lint": "eslint .",
     "db:check": "npm run test --workspace @pigeon-skin/db",
-    "db:migrate:local": "npm exec --offline --workspace @pigeon-skin/server -- wrangler d1 migrations apply bs-dev --local --config ../../wrangler.jsonc",
-    "db:migrate:preview": "node tools/scripts/cloudflare.mjs preview migrate",
-    "db:migrate:prod": "node tools/scripts/cloudflare.mjs production migrate",
-    "deploy:preview": "node tools/scripts/cloudflare.mjs preview deploy",
-    "deploy:prod": "node tools/scripts/cloudflare.mjs production deploy",
+    "db:migrate:local": "npm exec --offline --workspace @pigeon-skin/server -- wrangler d1 migrations apply bs-dev --local --env dev --config ../../wrangler.jsonc",
+    "db:migrate:preview": "npm exec --offline --workspace @pigeon-skin/server -- wrangler d1 migrations apply bs-preview --remote --env preview --config ../../wrangler.jsonc",
+    "db:migrate:prod": "npm exec --offline --workspace @pigeon-skin/server -- wrangler d1 migrations apply bs-prod --remote --env production --config ../../wrangler.jsonc",
+    "deploy:preview": "npm exec --offline --workspace @pigeon-skin/server -- wrangler deploy --env preview --config ../../wrangler.jsonc",
+    "deploy:prod": "npm exec --offline --workspace @pigeon-skin/server -- wrangler deploy --config ../../wrangler.jsonc",
     "migrate:legacy": "npm run migrate --workspace @pigeon-skin/migrate --",
     "cli": "npm run cli --workspace @pigeon-skin/cli --",
-    "db:seed:local": "node tools/scripts/seed-local.mjs",
     "check:public": "node tools/scripts/check-public.mjs"
   },
   "devDependencies": {
