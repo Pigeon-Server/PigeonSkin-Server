@@ -1,6 +1,6 @@
 // 后台仓储 —— 只负责查询。
-import { and, eq, sql } from 'drizzle-orm';
-import { scalarMax, players, reports, textures, users, closet, noCaseEq } from '@pigeon-skin/db';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
+import { scalarMax, aiJobs, chunkBind, players, reports, textures, users, closet, noCaseEq } from '@pigeon-skin/db';
 import type { Db } from './textures.ts';
 import type { SQL } from 'drizzle-orm';
 import { fragmentToSql, type SqlFragment } from '../search/compile.ts';
@@ -193,12 +193,26 @@ export async function deleteUser(db: Db, id: number) {
 
 // ── 纹理 ─────────────────────────────────────────────────────────────────────
 
+export interface AdminTextureFilter {
+  search?: SqlFragment | null | undefined;
+  kind?: string | undefined;
+  visibility?: string | undefined;
+  official?: boolean | undefined;
+}
+
 export async function listAdminTextures(
   db: Db,
-  filter: { search?: SqlFragment | null | undefined },
+  filter: AdminTextureFilter,
   page: { perPage: number; offset: number },
 ) {
-  const where = searchFilter(filter.search);
+  const where = and(
+    searchFilter(filter.search),
+    filter.kind ? eq(textures.kind, filter.kind) : sql`1=1`,
+    filter.visibility ? eq(textures.visibility, filter.visibility) : sql`1=1`,
+    filter.official === undefined
+      ? sql`1=1`
+      : filter.official ? sql`${textures.officialKey} IS NOT NULL` : sql`${textures.officialKey} IS NULL`,
+  );
 
   // 计数与实际查询共用同一套 join：表达式可能引用 users.nickname
   const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(textures)
@@ -227,6 +241,103 @@ export async function listAdminTextures(
 
   return { items, total: countRow?.n ?? 0 };
 }
+
+// ── 纹理：批量治理 ───────────────────────────────────────────────────────────
+//
+// 批量动作要求"取一次、改一次、清一次"，逐条调用单条版本会把每条的子请求
+// （计数、R2、衍生图、sitemap）乘上批量条数，很快就会撞 Workers 的子请求上限。
+
+export interface AdminTextureRef {
+  id: number;
+  hash: string;
+  visibility: string;
+  uploaderId: number | null;
+}
+
+export async function findAdminTexturesByIds(db: Db, ids: readonly number[]): Promise<AdminTextureRef[]> {
+  const rows: AdminTextureRef[] = [];
+  for (const part of chunkBind(ids)) {
+    rows.push(...await db.select({
+      id: textures.id,
+      hash: textures.hash,
+      visibility: textures.visibility,
+      uploaderId: textures.uploaderId,
+    }).from(textures).where(inArray(textures.id, part)));
+  }
+  return rows;
+}
+
+export async function findUserRolesByIds(db: Db, ids: readonly number[]): Promise<Array<{ id: number; role: string }>> {
+  const rows: Array<{ id: number; role: string }> = [];
+  for (const part of chunkBind(ids)) {
+    rows.push(...await db.select({ id: users.id, role: users.role }).from(users).where(inArray(users.id, part)));
+  }
+  return rows;
+}
+
+export async function deleteAdminTextures(db: Db, ids: readonly number[]): Promise<void> {
+  for (const part of chunkBind(ids)) await db.delete(textures).where(inArray(textures.id, part));
+}
+
+export async function setAdminTexturesVisibility(
+  db: Db, ids: readonly number[], visibility: string, updatedAt: number,
+): Promise<void> {
+  for (const part of chunkBind(ids)) {
+    await db.update(textures).set({ visibility, updatedAt }).where(inArray(textures.id, part));
+  }
+}
+
+/** 删除残留的 AI 任务行（ai_jobs 无外键，不随材质级联） */
+export async function deleteAiJobsForTextures(db: Db, ids: readonly number[]): Promise<void> {
+  for (const part of chunkBind(ids)) await db.delete(aiJobs).where(inArray(aiJobs.tid, part));
+}
+
+/**
+ * 穿戴者查询的分片容量。
+ *
+ * `skin_texture_id = ? OR cape_texture_id = ?` 一条语句要绑 2×N 个参数，
+ * 所以只能用通用上限（100）的一半：45×2 + 1（updated_at）= 91 ≤ 100。
+ * 用默认的 90 分片在批量删除 50 条以上时会直接撞上限报错。
+ */
+const WEARING_CHUNK = 45;
+
+/** 谁穿戴着这批纹理 → 角色名（按纹理 id 归组） */
+export async function listPlayersWearingTextures(
+  db: Db, ids: readonly number[],
+): Promise<Map<number, string[]>> {
+  const wearing = new Map<number, string[]>();
+  for (const part of chunkBind(ids, WEARING_CHUNK)) {
+    const rows = await db
+      .select({ name: players.name, skinTextureId: players.skinTextureId, capeTextureId: players.capeTextureId })
+      .from(players)
+      .where(or(inArray(players.skinTextureId, part), inArray(players.capeTextureId, part)));
+    for (const row of rows) {
+      for (const id of new Set([row.skinTextureId, row.capeTextureId])) {
+        if (id === null || !part.includes(id)) continue;
+        const names = wearing.get(id) ?? [];
+        names.push(row.name);
+        wearing.set(id, names);
+      }
+    }
+  }
+  return wearing;
+}
+
+/**
+ * 推进穿戴这批纹理的角色行 `updated_at`。
+ *
+ * 必须在删除/改写**之前**调用：外键的 ON DELETE SET NULL 会把指针置空，
+ * 之后就再也查不到这些角色了，而它们的协议出口内容已经变了。
+ */
+export async function touchPlayersWearingTextures(
+  db: Db, ids: readonly number[], updatedAt: number,
+): Promise<void> {
+  for (const part of chunkBind(ids, WEARING_CHUNK)) {
+    await db.update(players).set({ updatedAt })
+      .where(or(inArray(players.skinTextureId, part), inArray(players.capeTextureId, part)));
+  }
+}
+
 
 // ── 玩家 ─────────────────────────────────────────────────────────────────────
 

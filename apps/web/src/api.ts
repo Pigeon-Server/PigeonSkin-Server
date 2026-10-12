@@ -854,6 +854,8 @@ export interface AdminTextureRow {
   hash: string;
   name: string;
   kind: 'skin' | 'cape';
+  /** 披风为 null */
+  model: 'default' | 'slim' | null;
   visibility: 'public' | 'private';
   sizeBytes: number;
   likes: number;
@@ -1073,12 +1075,25 @@ export const adminApi = {
   deletePlayer: (id: number) =>
     request<void>(`/api/v1/admin/players/${id}`, { method: 'DELETE' }),
 
-  textures: (q: { keyword?: string | undefined; page?: number | undefined } = {}) => {
+  textures: (q: {
+    keyword?: string | undefined;
+    kind?: 'skin' | 'cape' | undefined;
+    visibility?: 'public' | 'private' | undefined;
+    official?: boolean | undefined;
+    page?: number | undefined;
+  } = {}) => {
     const p = new URLSearchParams();
     if (q.keyword) p.set('q', q.keyword);
+    if (q.kind) p.set('kind', q.kind);
+    if (q.visibility) p.set('visibility', q.visibility);
+    if (q.official !== undefined) p.set('official', String(q.official));
     if (q.page) p.set('page', String(q.page));
     return request<Paged<AdminTextureRow>>(`/api/v1/admin/textures?${p}`);
   },
+
+  /** 批量治理：一次删除或改可见性，返回实际影响条数 */
+  batchTextures: (input: { action: 'delete' | 'visibility'; ids: number[]; visibility?: 'public' | 'private' }) =>
+    request<{ affected: number }>('/api/v1/admin/textures/batch', { method: 'POST', json: input }),
 
   /** 某用户的收藏（排查/清理用） */
   addUserClosetEntry: (id: number, textureId: number) => request<{ ok: boolean }>(`/api/v1/admin/users/${id}/closet`, { method: 'POST', json: { textureId } }),

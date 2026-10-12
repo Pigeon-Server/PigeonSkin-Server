@@ -13,7 +13,9 @@ import {
   adminPatchPlayerInputSchema,
   adminPatchUserInputSchema,
   adminSettingsInputSchema,
+  adminTextureListQuerySchema,
   emailSchema,
+  textureBatchInputSchema,
   texturePatchInputSchema,
 } from './../../core/schemas.ts';
 
@@ -172,9 +174,14 @@ adminRoutes.delete('/users/:id/sessions', async (c) => {
 // ── 纹理 ─────────────────────────────────────────────────────────────────────
 
 adminRoutes.get('/textures', async (c) => {
-  const query = readQuery(c, adminListQuerySchema);
+  const query = readQuery(c, adminTextureListQuerySchema);
   const page = readPagination(c, { defaultPerPage: 20 });
-  const { items, total } = await admin.listTextures(c.env, { search: compileSearchInput(query.q, 'adminTextures') }, page);
+  const { items, total } = await admin.listTextures(c.env, {
+    search: compileSearchInput(query.q, 'adminTextures'),
+    kind: query.kind,
+    visibility: query.visibility,
+    official: query.official === undefined ? undefined : query.official === 'true',
+  }, page);
   return c.json(paginate(items, total, page));
 });
 
@@ -183,6 +190,14 @@ adminRoutes.delete('/textures/:id', async (c) => {
   const actor = currentAdmin(c);
   await admin.deleteAnyTexture(c.env, actor, Number(c.req.param('id')));
   return c.body(null, 204);
+});
+
+/** 批量治理：一次删除或改可见性，语义与逐条接口一致 */
+adminRoutes.post('/textures/batch', async (c) => {
+  const actor = currentAdmin(c);
+  const body = await readJson(c, textureBatchInputSchema);
+  const result = await admin.batchTextures(c.env, actor, body.action, body.ids, body.visibility);
+  return c.json(result);
 });
 
 adminRoutes.patch('/textures/:id', async (c) => {

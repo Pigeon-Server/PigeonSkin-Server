@@ -1181,6 +1181,134 @@ describe('管理员新动作', () => {
     });
     expect(del.status).toBe(204);
   });
+
+  it('纹理治理：批量改可见性与批量删除', async () => {
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+
+    const u = await registerUser();
+    const cookie = await login(u.email);
+    // makePng 是确定性的：同样尺寸产出同样字节，会被重复检测挡下。
+    // 用 (kind, model) 区分（重复检测按 kind+model 分域），外加一种披风尺寸。
+    const ids: number[] = [];
+    const uploads = [
+      { kind: 'skin', model: 'default', width: 64, height: 64 },
+      { kind: 'skin', model: 'slim', width: 64, height: 64 },
+      { kind: 'cape', width: 128, height: 64 },
+    ] as const;
+    for (const spec of uploads) {
+      const up = await uploadTexture(cookie, makePng({ width: spec.width, height: spec.height }), {
+        kind: spec.kind,
+        ...(spec.kind === 'skin' ? { model: spec.model } : {}),
+      });
+      ids.push((await up.json<{ id: number }>()).id);
+    }
+
+    // 前两条转私密，第三条保持公开 —— 批量只动选中的
+    const privatize = await authedFetch(adminCookie, 'https://x/api/v1/admin/textures/batch', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'visibility', ids: ids.slice(0, 2), visibility: 'private' }),
+    });
+    expect(privatize.status).toBe(200);
+    expect(await privatize.json<{ affected: number }>()).toEqual({ affected: 2 });
+
+    const privateList = await authedFetch(adminCookie, 'https://x/api/v1/admin/textures?visibility=private&per_page=100');
+    const privateIds = (await privateList.json<{ items: Array<{ id: number }> }>()).items.map(row => row.id);
+    expect(privateIds).toEqual(expect.arrayContaining(ids.slice(0, 2)));
+    expect(privateIds).not.toContain(ids[2]);
+
+    // 胶囊筛选：按类型收窄
+    const capes = await authedFetch(adminCookie, 'https://x/api/v1/admin/textures?kind=cape&per_page=100');
+    const capeIds = (await capes.json<{ items: Array<{ id: number; official: boolean }> }>()).items;
+    expect(capeIds.some(row => row.id === ids[2])).toBe(true);
+    expect(capeIds.every(row => row.id !== ids[0])).toBe(true);
+
+    // 官方资源筛选与表达式筛选可以叠加
+    const official = await authedFetch(adminCookie, 'https://x/api/v1/admin/textures?official=false&q=id%3A' + ids[2]);
+    expect((await official.json<{ items: Array<{ id: number }> }>()).items.map(row => row.id)).toEqual([ids[2]]);
+
+    const audit = await readAudit();
+    expect(audit.filter(row => row.action === 'admin.texture.update').length).toBeGreaterThanOrEqual(2);
+
+    const remove = await authedFetch(adminCookie, 'https://x/api/v1/admin/textures/batch', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'delete', ids: [ids[0], ids[2]] }),
+    });
+    expect(remove.status).toBe(200);
+    expect(await remove.json<{ affected: number }>()).toEqual({ affected: 2 });
+
+    const remaining = await authedFetch(adminCookie, `https://x/api/v1/admin/textures?q=id%3A${ids[0]}`);
+    expect((await remaining.json<{ items: unknown[] }>()).items).toHaveLength(0);
+    const kept = await authedFetch(adminCookie, `https://x/api/v1/admin/textures?q=id%3A${ids[1]}`);
+    expect((await kept.json<{ items: Array<{ visibility: string }> }>()).items[0]?.visibility).toBe('private');
+  });
+
+  it('纹理治理：批量超过单个语句的绑定参数上限时仍整批完成', async () => {
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+    const u = await registerUser();
+    const now = Date.now();
+    // 直接落库 60 条：超过穿戴者查询的 45 分片，覆盖 or(inArray, inArray)
+    // 这种"一条语句绑 2N 个参数"的切分路径（D1 单语句上限 100）
+    const ids: number[] = [];
+    const hash = 'f'.repeat(64);
+    for (let i = 0; i < 60; i++) {
+      const row = await env.DB.prepare(
+        "INSERT INTO textures (hash, kind, model, name, uploader_id, size_bytes, visibility, width, height, created_at, updated_at) VALUES (?, 'skin', 'default', ?, ?, 128, 'public', 64, 64, ?, ?) RETURNING id",
+      ).bind(hash, `Batch ${i}`, u.id, now, now).first<{ id: number }>();
+      ids.push(row!.id);
+    }
+
+    const deleted = await authedFetch(adminCookie, 'https://x/api/v1/admin/textures/batch', {
+      method: 'POST', body: JSON.stringify({ action: 'delete', ids }),
+    });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json<{ affected: number }>()).toEqual({ affected: 60 });
+
+    const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM textures WHERE uploader_id = ?')
+      .bind(u.id).first<{ n: number }>();
+    expect(left?.n).toBe(0);
+  });
+
+  it('纹理治理：批量参数的校验与越权', async () => {
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+
+    const u = await registerUser();
+    const cookie = await login(u.email);
+    const up = await uploadTexture(cookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'default' });
+    const { id: tid } = await up.json<{ id: number }>();
+
+    // 可见性动作缺目标可见性 → 422，而不是静默成功
+    expect((await authedFetch(adminCookie, 'https://x/api/v1/admin/textures/batch', {
+      method: 'POST', body: JSON.stringify({ action: 'visibility', ids: [tid] }),
+    })).status).toBe(422);
+    // 空列表 / 超过上限 → 422
+    expect((await authedFetch(adminCookie, 'https://x/api/v1/admin/textures/batch', {
+      method: 'POST', body: JSON.stringify({ action: 'delete', ids: [] }),
+    })).status).toBe(422);
+    // 目标不存在 → 404
+    expect((await authedFetch(adminCookie, 'https://x/api/v1/admin/textures/batch', {
+      method: 'POST', body: JSON.stringify({ action: 'delete', ids: [tid + 999_999] }),
+    })).status).toBe(404);
+
+    // 同级管理员之间不能互相治理：整批拒绝，且一条也不能动
+    const peer = await registerUser();
+    const peerCookie = await login(peer.email);
+    await makeAdmin(peer.id);
+    const peerUp = await uploadTexture(peerCookie, makePng({ width: 128, height: 64 }), { kind: 'cape' });
+    const peerTid = (await peerUp.json<{ id: number }>()).id;
+
+    const mixed = await authedFetch(adminCookie, 'https://x/api/v1/admin/textures/batch', {
+      method: 'POST', body: JSON.stringify({ action: 'delete', ids: [tid, peerTid] }),
+    });
+    expect(mixed.status).toBe(403);
+    const stillThere = await authedFetch(adminCookie, `https://x/api/v1/admin/textures?q=id%3A${tid}`);
+    expect((await stillThere.json<{ items: unknown[] }>()).items).toHaveLength(1);
+  });
 });
 
 // ── yggdrasil 协议 ───────────────────────────────────────────────────────────

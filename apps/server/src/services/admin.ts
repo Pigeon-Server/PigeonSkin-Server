@@ -13,9 +13,9 @@ import { hashPassword } from '@pigeon-skin/auth';
 import { ASSIGNABLE_ROLES, canModifyUser, isSuperAdmin, type Role } from '@pigeon-skin/shared';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 
-import { audit } from './audit.ts';
+import { audit, auditBatch } from './audit.ts';
 import { bumpSitemap } from './sitemap-cache.ts';
-import { queueTextureSubmission } from './search-submissions.ts';
+import { queueTextureSubmission, queueTextureSubmissions } from './search-submissions.ts';
 import { renderNotificationTemplate } from './notification-template.ts';
 import { contentHash } from './notifications.ts';
 import { enqueueAiJob } from './ai-jobs.ts';
@@ -169,10 +169,103 @@ export async function deleteUser(
 
 export async function listTextures(
   env: AdminEnv,
-  filter: { search?: SqlFragment | null | undefined },
+  filter: { search?: SqlFragment | null | undefined; kind?: string | undefined; visibility?: string | undefined; official?: boolean | undefined },
   page: Pagination,
 ) {
   return repo.listAdminTextures(db(env), filter, page);
+}
+
+export type TextureBatchAction = 'delete' | 'visibility';
+
+/**
+ * 批量治理材质：删除，或批量改可见性。
+ *
+ * 业务语义与逐条 deleteAnyTexture / patchAnyTexture 完全对齐（越权拒绝、
+ * 穿戴者指纹前进、R2 按引用计数删对象、衍生图清理、sitemap 与搜索队列），
+ * 区别只在清理动作按批各做一次。逐条调用在批量下会把子请求数乘上选中条数，
+ * 一个整页删除就能撞上 Workers 的子请求上限。
+ *
+ * 任一目标越权则整批拒绝：部分成功会让管理员以为整批都生效了。
+ */
+export async function batchTextures(
+  env: AdminEnv,
+  actor: AdminActor,
+  action: TextureBatchAction,
+  ids: readonly number[],
+  visibility?: 'public' | 'private',
+): Promise<{ affected: number }> {
+  const unique = [...new Set(ids)];
+  if (!unique.length) throw fail.invalid('common.invalid_request');
+  if (action === 'visibility' && visibility === undefined) throw fail.invalid('common.invalid_request');
+
+  const database = db(env);
+  const targets = await repo.findAdminTexturesByIds(database, unique);
+  if (!targets.length) throw fail.notFound('texture.not_found');
+
+  // 上传者已注销（uploader_id 为空）的材质视为无主，管理员可直接治理
+  const ownerIds = [...new Set(targets.map(t => t.uploaderId).filter((id): id is number => id !== null))];
+  if (ownerIds.length) {
+    const roles = new Map((await repo.findUserRolesByIds(database, ownerIds)).map(row => [row.id, row.role as Role]));
+    for (const role of roles.values()) {
+      if (!canModifyUser(actor.role, role)) throw fail.forbidden('admin.cannot_modify_peer');
+    }
+  }
+
+  const targetIds = targets.map(t => t.id);
+  const hashes = [...new Set(targets.map(t => t.hash))];
+  const now = Date.now();
+  const access = await import('./texture-access.ts');
+
+  // 删除会让外键把角色行的指针置空 —— 资料内容变了而角色行指纹不会自己变，
+  // 必须在这之前把穿戴者的 updated_at 推走，否则客户端带旧 ETag 重验证会
+  // 拿到 304、继续用已删除的哈希。改可见性不动角色资料，无需推进（与逐条
+  // patchAnyTexture 一致：私密材质被角色穿着时仍对游戏可达）。
+  const wearing = action === 'delete'
+    ? await repo.listPlayersWearingTextures(database, targetIds)
+    : new Map<number, string[]>();
+  if (action === 'delete') await repo.touchPlayersWearingTextures(database, targetIds, now);
+
+  if (action === 'delete') {
+    await repo.deleteAiJobsForTextures(database, targetIds);
+    await repo.deleteAdminTextures(database, targetIds);
+  } else {
+    await repo.setAdminTexturesVisibility(database, targetIds, visibility!, now);
+  }
+
+  for (const names of wearing.values()) {
+    for (const name of names) await access.purgePlayerProfiles(env, name);
+  }
+
+  const textureRepo = await import('../repositories/textures.ts');
+  if (action === 'delete' && env.BUCKET) {
+    // 同一对象可能被多行共享，引用计数必须在删除**之后**、且对本批哈希一次性算出
+    const remaining = await textureRepo.countReferencesToHashes(database, hashes);
+    const orphaned = hashes.filter(hash => (remaining.get(hash) ?? 0) === 0);
+    if (orphaned.length) {
+      const { textureObjectKey } = await import('@pigeon-skin/minecraft');
+      await env.BUCKET.delete(orphaned.map(hash => textureObjectKey(hash)));
+    }
+  }
+  if (env.BUCKET) {
+    // 还有别处公开引用同一哈希时不能清衍生图：那张预览图是它们共用的
+    const stillPublic = await textureRepo.countPublicReferencesToHashes(database, hashes);
+    for (const hash of hashes.filter(h => (stillPublic.get(h) ?? 0) === 0)) {
+      await access.purgeTextureDerivatives({ ...env, BUCKET: env.BUCKET }, hash);
+    }
+  }
+
+  const actionName = action === 'delete' ? 'admin.texture.delete' as const : 'admin.texture.update' as const;
+  await auditBatch(env, targets.map(target => ({
+    actorId: actor.id,
+    action: actionName,
+    targetType: 'texture',
+    targetId: target.id,
+    detail: action === 'delete' ? `hash:${target.hash}` : `visibility:${visibility}`,
+  })));
+
+  await bumpSitemap();
+  await queueTextureSubmissions(env, targetIds);
+  return { affected: targets.length };
 }
 
 // ── 收藏（后台视角）────────────────────────────────────────────────────────
@@ -458,6 +551,8 @@ export async function deleteAnyTexture(env: AdminEnv, actor: { id: number; role:
   // 推进穿戴者的 updated_at，否则客户端带旧 ETag 重验证会 304 继续用已删除的哈希。
   const access = await import('./texture-access.ts');
   const wearingPlayers = await access.playersWearingTexture(env, textureId, Date.now());
+  // ai_jobs 没有外键，不随材质级联：留着会变成永远失败的僵尸任务（用户侧删除也清）
+  await repo.deleteAiJobsForTextures(database, [textureId]);
   await (await import('../repositories/textures.ts')).deleteTexture(database, textureId);
   for (const name of wearingPlayers) await access.purgePlayerProfiles(env, name);
   const remaining = await (await import('../repositories/textures.ts')).countReferencesToHash(database, texture.hash);

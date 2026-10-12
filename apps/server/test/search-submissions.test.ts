@@ -5,7 +5,7 @@ import { beforeAll, beforeEach, afterEach, describe, it, expect, vi } from 'vite
 import { generateKeyPair, exportPKCS8 } from 'jose';
 import { runMigrations, makeAdmin } from './setup.ts';
 
-import { queueTextureSubmission, queuePublicSubmissions, processSearchSubmissions, dispatchSearchSubmissions, searchSubmissionStatus, type SearchQueueMessage } from '../src/services/search-submissions.ts';
+import { queueTextureSubmission, queueTextureSubmissions, queuePublicSubmissions, processSearchSubmissions, dispatchSearchSubmissions, searchSubmissionStatus, type SearchQueueMessage } from '../src/services/search-submissions.ts';
 import { writeMany } from '../src/services/settings.ts';
 import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
 import { createApp } from '../src/app.ts';
@@ -58,6 +58,39 @@ describe('search submissions', () => {
     expect((await searchSubmissionStatus(searchEnv)).recent).toHaveLength(1);
     await env.DB.prepare("UPDATE textures SET visibility = 'private' WHERE id = ?").bind(id).run();
     await processSearchSubmissions(searchEnv);
+    expect((await searchSubmissionStatus(searchEnv)).recent).toHaveLength(0);
+  });
+
+  it('queues a batch larger than the upsert chunk in one pass', async () => {
+    await configure({ search_bing_enabled: 'true', search_bing_key: indexKey });
+    // 17 条公开 id：跨过 chunkBind(publicIds, 16) 的边界，同时覆盖
+    // 多行 upsert 的占位符/binds 拼接（16 + 1 两片）
+    const ids: number[] = [];
+    for (let i = 0; i < 17; i++) ids.push(await texture());
+    await queueTextureSubmissions(searchEnv, ids);
+
+    const recent = (await searchSubmissionStatus(searchEnv)).recent;
+    expect(recent).toHaveLength(17);
+    expect(new Set(recent.map(row => row.textureId))).toEqual(new Set(ids));
+    expect(recent.every(row => row.status === 'pending' && row.attempts === 0)).toBe(true);
+  });
+
+  it('reconciles the queue for a batch of ids that are public, private or gone', async () => {
+    await configure({ search_bing_enabled: 'true', search_bing_key: indexKey });
+    const id = await texture();
+    await queueTextureSubmissions(searchEnv, [id]);
+    expect((await searchSubmissionStatus(searchEnv)).recent.map(row => row.textureId)).toEqual([id]);
+
+    // 一批里混有"不再公开"与"已删除"的 id：它们的待提交行要被清掉，
+    // 仍公开的那些重新入队
+    const gone = await texture();
+    const stillPrivate = await texture('private');
+    await env.DB.prepare('DELETE FROM textures WHERE id = ?').bind(gone).run();
+    await queueTextureSubmissions(searchEnv, [id, gone, stillPrivate]);
+    expect((await searchSubmissionStatus(searchEnv)).recent.map(row => row.textureId)).toEqual([id]);
+
+    await env.DB.prepare('DELETE FROM textures WHERE id = ?').bind(id).run();
+    await queueTextureSubmissions(searchEnv, [id]);
     expect((await searchSubmissionStatus(searchEnv)).recent).toHaveLength(0);
   });
 

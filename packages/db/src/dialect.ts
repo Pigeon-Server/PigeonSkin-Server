@@ -188,6 +188,16 @@ function likePredicate(column: string): string {
   return `${column} LIKE ? ESCAPE '\\'`;
 }
 
+/**
+ * 单条语句的绑定参数上限（D1 与自托管 PG/MySQL 都按 100 设计），批量语句统一
+ * 按这个粒度切分后再拼 IN (...) 占位符。
+ */
+export function chunkBind<T>(items: readonly T[], size = 90): T[][] {
+  const parts: T[][] = [];
+  for (let i = 0; i < items.length; i += size) parts.push(items.slice(i, i + size));
+  return parts;
+}
+
 /** 32 位十六进制随机 id（等价 sqlite 的 lower(hex(randomblob(16)))） */
 export function randomId32(): string {
   if (current === 'postgres') return `replace(gen_random_uuid()::text, '-', '')`;

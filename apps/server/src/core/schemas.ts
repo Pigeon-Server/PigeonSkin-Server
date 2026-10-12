@@ -75,6 +75,13 @@ export const adminListQuerySchema = paginationQuerySchema.extend({
   q: z.string().trim().max(500).optional(),
 });
 
+/** 后台材质列表：在搜索表达式之外另给胶囊筛选，管理员用起来比写表达式直接 */
+export const adminTextureListQuerySchema = adminListQuerySchema.extend({
+  kind: textureKindSchema.optional(),
+  visibility: textureVisibilitySchema.optional(),
+  official: z.enum(['true', 'false']).optional(),
+});
+
 export const reportListQuerySchema = z.object({
   status: z.enum(['pending', 'resolved', 'rejected']).optional(),
 });
@@ -164,6 +171,21 @@ export const texturePatchInputSchema = z.object({
   kind: textureKindSchema.optional(),
   model: z.enum(['default', 'slim']).optional(),
 });
+
+/**
+ * 后台批量治理。可见性动作必须带 visibility —— 缺了它整批请求会变成空操作，
+ * 静默"成功"比报错更难排查。
+ */
+export const textureBatchInputSchema = z
+  .object({
+    action: z.enum(['delete', 'visibility']),
+    ids: z.array(idSchema).min(1).max(LIMITS.textureBatchMax),
+    visibility: textureVisibilitySchema.optional(),
+  })
+  .refine(value => value.action !== 'visibility' || value.visibility !== undefined, {
+    path: ['visibility'],
+    message: 'required',
+  });
 
 // ── 收藏与举报 ───────────────────────────────────────────────────────────────
 

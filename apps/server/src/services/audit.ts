@@ -8,7 +8,7 @@
 
 import { type Bindings } from './../core/env.ts';
 import { auditLog } from '@pigeon-skin/db';
-import { createDb } from '@pigeon-skin/db';
+import { chunkBind, createDb } from '@pigeon-skin/db';
 
 export type AuditAction =
   | 'admin.search.submit'
@@ -73,6 +73,40 @@ export async function audit(
       detail: entry.detail ?? null,
       createdAt: Date.now(),
     });
+  } catch (e) {
+    console.error('audit_log 写入失败', e);
+  }
+}
+
+/**
+ * 批量审计：每条目标各留一行记录（与逐条操作的可追溯性一致），但按多行
+ * INSERT 分片写入 —— 批量治理一次点掉几十条时，逐条调用会把子请求乘上条数。
+ * 每片 10 行：6 个绑定列 × 10 行 = 60，留在单查询 100 个绑定参数以内。
+ */
+export async function auditBatch(
+  env: { DB: Bindings['DB'] },
+  entries: ReadonlyArray<{
+    actorId: number | null;
+    action: AuditAction;
+    targetType?: string | null | undefined;
+    targetId?: number | null | undefined;
+    detail?: string | null | undefined;
+  }>,
+): Promise<void> {
+  if (!entries.length) return;
+  try {
+    const database = createDb(env.DB);
+    const now = Date.now();
+    for (const part of chunkBind(entries, 10)) {
+      await database.insert(auditLog).values(part.map(entry => ({
+        actorId: entry.actorId,
+        action: entry.action,
+        targetType: entry.targetType ?? null,
+        targetId: entry.targetId ?? null,
+        detail: entry.detail ?? null,
+        createdAt: now,
+      })));
+    }
   } catch (e) {
     console.error('audit_log 写入失败', e);
   }

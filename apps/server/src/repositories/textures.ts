@@ -3,10 +3,10 @@
 // 这一层的存在意义：把 SQL 收在一处，service 里就不必出现 Drizzle 的写法细节；
 // 想换查询实现（加缓存、换索引）时只需改这里。
 import { type Pagination } from './../core/framework.ts';
-import { and, desc, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
-import { closet, textures, textureTranslations, texturesDescription, users } from '@pigeon-skin/db';
+import { closet, textures, textureTranslations, texturesDescription, users, chunkBind } from '@pigeon-skin/db';
 import type { TextureKind, TextureVisibility } from '@pigeon-skin/shared';
 
 import { fragmentToSql, type SqlFragment } from '../search/compile.ts';
@@ -234,6 +234,42 @@ export async function countPublicReferencesToHash(db: Db, hash: string): Promise
     sql`${textures.visibility} = 'public' OR EXISTS (SELECT 1 FROM players p JOIN users u ON u.id = p.user_id WHERE u.role != 'banned' AND (p.skin_texture_id = ${textures.id} OR p.cape_texture_id = ${textures.id}))`,
   ));
   return row?.n ?? 0;
+}
+
+/**
+ * 批量引用计数。
+ *
+ * 与单条版的差别不只是省查询：批量删除时必须用同一时刻的计数结果，逐条
+ * `countReferencesToHash` 会在删掉本批其他行之前就得出结论，把互相共享同一
+ * R2 对象的行判成"无引用"而误删对象。返回的 Map 覆盖传入的全部哈希，未命中的记为 0。
+ */
+export async function countReferencesToHashes(db: Db, hashes: readonly string[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>(hashes.map(hash => [hash, 0]));
+  for (const part of chunkBind(hashes)) {
+    const rows = await db
+      .select({ hash: textures.hash, n: sql<number>`count(*)` })
+      .from(textures)
+      .where(inArray(textures.hash, part))
+      .groupBy(textures.hash);
+    for (const row of rows) counts.set(row.hash, row.n);
+  }
+  return counts;
+}
+
+export async function countPublicReferencesToHashes(db: Db, hashes: readonly string[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>(hashes.map(hash => [hash, 0]));
+  for (const part of chunkBind(hashes)) {
+    const rows = await db
+      .select({ hash: textures.hash, n: sql<number>`count(*)` })
+      .from(textures)
+      .where(and(
+        inArray(textures.hash, part),
+        sql`${textures.visibility} = 'public' OR EXISTS (SELECT 1 FROM players p JOIN users u ON u.id = p.user_id WHERE u.role != 'banned' AND (p.skin_texture_id = ${textures.id} OR p.cape_texture_id = ${textures.id}))`,
+      ))
+      .groupBy(textures.hash);
+    for (const row of rows) counts.set(row.hash, row.n);
+  }
+  return counts;
 }
 
 export async function findPlayerEquippedTextures(db: Db, textureId: number) {

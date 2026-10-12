@@ -1,6 +1,6 @@
 import { type Bindings } from './../core/env.ts';
 import { importPKCS8, SignJWT } from 'jose';
-import { jsonArrayPairRows, leastOf, randomId32, supportsReturning } from '@pigeon-skin/db';
+import { chunkBind, jsonArrayPairRows, leastOf, randomId32, supportsReturning } from '@pigeon-skin/db';
 
 type Env = { DB: Bindings['DB']; APP_URL?: string; SEARCH_SUBMISSIONS?: Pick<NonNullable<Bindings['SEARCH_SUBMISSIONS']>, 'sendBatch'> };
 export const searchEngines = ['google', 'bing', 'baidu'] as const;
@@ -41,6 +41,51 @@ export async function queueTextureSubmission(env: Env, id: number): Promise<void
       if (!enabled(values, engine)) continue;
       if (engine === 'google') await upsert(env, engine, 0);
       else if (texture) await upsert(env, engine, id);
+    }
+  } catch {
+    console.error('search submission queue failed');
+  }
+}
+
+/**
+ * 批量版的搜索引擎队列维护，语义与逐条 queueTextureSubmission 等价：
+ * 仍公开的 id 重新入队，"不再公开或已消失"的 id 清掉待提交行。
+ *
+ * 入队也按多行 upsert 合并：逐条 upsert 会按「条数 × 启用引擎数」乘出子请求，
+ * 批量治理（一次整页）正好卡在这个乘数上。每行 5 个绑定参数，一片 16 行 = 80。
+ */
+export async function queueTextureSubmissions(env: Env, ids: readonly number[]): Promise<void> {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return;
+  try {
+    const { values } = await searchConfiguration(env);
+    const publicIds: number[] = [];
+    const staleIds: number[] = [];
+    for (const part of chunkBind(unique)) {
+      const placeholders = part.map(() => '?').join(',');
+      const { results } = await env.DB.prepare(
+        `SELECT id FROM textures WHERE visibility = 'public' AND id IN (${placeholders})`,
+      ).bind(...part).all<{ id: number }>();
+      const found = new Set((results ?? []).map(row => row.id));
+      for (const id of part) (found.has(id) ? publicIds : staleIds).push(id);
+    }
+    for (const part of chunkBind(staleIds)) {
+      const placeholders = part.map(() => '?').join(',');
+      await env.DB.prepare(`DELETE FROM search_submissions WHERE texture_id IN (${placeholders})`)
+        .bind(...part).run();
+    }
+    for (const engine of searchEngines) {
+      if (!enabled(values, engine)) continue;
+      if (engine === 'google') { await upsert(env, engine, 0); continue; }
+      const now = Date.now();
+      for (const part of chunkBind(publicIds, 16)) {
+        const placeholders = part.map(() => '(?, ?, ?, ?, ?)').join(',');
+        const binds = part.flatMap(id => [engine, id, crypto.randomUUID(), now, now]);
+        await env.DB.prepare(`INSERT INTO search_submissions (engine, texture_id, revision, next_at, updated_at)
+          VALUES ${placeholders} ON CONFLICT(engine, texture_id) DO UPDATE SET
+          revision = excluded.revision, status = 'pending', attempts = 0, next_at = excluded.next_at,
+          http_status = NULL, error = NULL, updated_at = excluded.updated_at`).bind(...binds).run();
+      }
     }
   } catch {
     console.error('search submission queue failed');

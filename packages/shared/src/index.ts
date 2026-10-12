@@ -225,6 +225,9 @@ export const LIMITS = {
   maxPageSize: 100,
   defaultPageSize: 24,
 
+  /** 后台批量治理单次可提交的材质条数上限：一次请求要跑完整套清理（R2、衍生图、索引） */
+  textureBatchMax: 100,
+
   /** 头像/预览衍生图的白名单尺寸。旧版接受任意整数，会被用来撑爆存储。 */
   derivativeSizes: [36, 45, 64, 100, 200] as const,
   /** 服务端生成衍生图时允许解码的源图面积上限（DO 内存约束；皮肤实际 ≤ 128²） */
