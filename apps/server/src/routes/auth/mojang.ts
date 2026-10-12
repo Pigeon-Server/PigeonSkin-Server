@@ -176,6 +176,10 @@ export function registerMojangRoutes(app: Hono<AppEnv>): void {
     const record = stateRow.session_id ? await loadAuthedUser(c.env, stateRow.session_id) : null;
     if (!record) throw new AppError('common.unauthorized', 401);
     const user = record.user;
+    // 挂回 context：回调内后续失败走 onError，须按已登录身份弹回 /profile
+    //（不设的话 onError 判 c.get('user') 为 null，会把已登录用户弹到 /login）
+    c.set('user', user);
+    c.set('sessionId', record.sessionId);
 
     const profile = await minecraftProfileFromCode(c, code);
     const db = createDb(c.env.DB);
