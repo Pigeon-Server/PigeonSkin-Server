@@ -480,8 +480,8 @@ onMounted(() => {
   <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
   <p v-if="actionError" class="alert alert-danger" role="alert">{{ actionError }}</p>
 
-  <!-- 加载状态 -->
-  <AppSkeleton v-if="loading" variant="list" :count="3" />
+  <!-- 加载状态：仅在还没有角色数据时用骨架屏占位；保存/改名等操作后的刷新保留原界面 -->
+  <AppSkeleton v-if="loading && !players.length" variant="list" :count="3" />
 
   <!-- 空角色状态 -->
   <EmptyState
@@ -495,7 +495,7 @@ onMounted(() => {
   </EmptyState>
 
   <!-- 主体工作区 -->
-  <div v-else-if="current" class="grid gap-5 lg:grid-cols-12">
+  <div v-else-if="current" class="grid gap-5 lg:grid-cols-12 aria-busy:opacity-60 aria-busy:cursor-progress" :aria-busy="loading">
     <!-- 左侧：角色切换、当前角色概览与实时 3D 预览 -->
     <div class="space-y-4 lg:col-span-5">
       <!-- 角色选择卡片 -->

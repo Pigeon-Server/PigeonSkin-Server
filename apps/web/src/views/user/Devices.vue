@@ -93,11 +93,12 @@ onMounted(load);
     <p class="text-sm text-muted">{{ i18n.t('devices.intro') }}</p>
     <p v-if="error" class="text-sm text-red-600" role="alert">{{ error }}</p>
 
-    <AppSkeleton v-if="loading" variant="list" :count="4" />
+    <!-- 首次加载占位；踢除设备后的刷新保留原有列表 -->
+    <AppSkeleton v-if="loading && !browserDevices.length && !launcherDevices.length" variant="list" :count="4" />
 
     <template v-else>
       <!-- 浏览器会话 -->
-      <section class="space-y-2">
+      <section class="space-y-2 aria-busy:opacity-60" :aria-busy="loading">
         <h2 class="text-sm font-semibold text-muted">{{ i18n.t('devices.browser_section') }}</h2>
         <AppCard v-for="device in browserDevices" :key="device.id" class="flex flex-wrap items-center gap-3 p-4">
           <AppIcon name="devices" class="text-brand-600 !text-2xl" />
@@ -124,7 +125,7 @@ onMounted(load);
       </section>
 
       <!-- 游戏启动器 -->
-      <section class="space-y-2">
+      <section class="space-y-2 aria-busy:opacity-60" :aria-busy="loading">
         <h2 class="text-sm font-semibold text-muted">{{ i18n.t('devices.launcher_section') }}</h2>
         <AppCard v-for="device in launcherDevices" :key="device.id" class="flex flex-wrap items-center gap-3 p-4">
           <AppIcon name="sports_esports" class="text-brand-600 !text-2xl" />

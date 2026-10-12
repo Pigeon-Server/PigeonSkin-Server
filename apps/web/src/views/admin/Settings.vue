@@ -317,8 +317,11 @@ const changed = computed(() => {
       }),
   );
 });
-async function load() {
+// switchContext=true 用于切换语言这类「换一份内容」的加载：清空旧数据交给骨架屏占位。
+// 保存设置后的刷新走默认分支——保留当前表单，避免整页闪骨架屏。
+async function load(switchContext = false) {
   loading.value = true;
+  if (switchContext) data.value = null;
   error.value = '';
   try {
     data.value = await adminApi.getSettings(locale.value);
@@ -402,7 +405,7 @@ async function changeLocale(next: string) {
   if (changed.value.length && !await confirmAction(i18n.t('integration.unsaved'))) return;
   locale.value = next;
   notice.value = '';
-  await load();
+  await load(true);
 }
 async function selectLocale(value: string | number | null) {
   const next = String(value ?? '');
@@ -442,10 +445,10 @@ onMounted(load);
       <div :key="tab" class="settings-panel">
         <p v-if="error" class="alert alert-danger" role="alert">
           {{ error }}
-          <AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton>
+          <AppButton class="btn-sm ml-2" :loading="loading" @click="load()">{{ i18n.t('common.retry') }}</AppButton>
         </p>
         <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-        <AppSkeleton v-if="loading" variant="form" :count="4" />
+        <AppSkeleton v-if="loading && !data" variant="form" :count="4" />
         <section
           v-else-if="data && tab === 'integrations'"
           class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"

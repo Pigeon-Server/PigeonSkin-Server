@@ -153,8 +153,8 @@ onBeforeUnmount(() => { requestId++; clearTimeout(pendingTimer); });
       {{ listError }}
       <AppButton class="btn-sm ml-2" @click="load()">{{ i18n.t('common.retry') }}</AppButton>
     </p>
-    <AppSkeleton v-if="loading" variant="list" :count="3" />
-    <div v-else-if="items.length" class="divide-y divide-line">
+    <AppSkeleton v-if="loading && !items.length" variant="list" :count="3" />
+    <div v-else-if="items.length" class="divide-y divide-line aria-busy:opacity-60 aria-busy:cursor-progress" :aria-busy="loading">
       <article v-for="comment in items" :key="comment.id" class="flex gap-3 py-4">
         <UserAvatar
           :texture-id="comment.avatarTextureId || null"

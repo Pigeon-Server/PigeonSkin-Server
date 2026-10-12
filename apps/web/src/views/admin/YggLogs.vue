@@ -54,8 +54,8 @@ onMounted(load);
     {{ error }}
     <AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton>
   </p>
-  <AppSkeleton v-if="loading" variant="table" :count="6" />
-  <div v-else class="overflow-x-auto rounded-xl border border-line bg-surface">
+  <AppSkeleton v-if="loading && !items.length" variant="table" :count="6" />
+  <div v-else class="overflow-x-auto rounded-xl border border-line bg-surface aria-busy:opacity-60 aria-busy:cursor-progress" :aria-busy="loading">
     <table class="table">
       <thead>
         <tr>

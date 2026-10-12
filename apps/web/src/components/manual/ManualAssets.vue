@@ -15,16 +15,28 @@ const dialog = ref<HTMLDialogElement>();
 const picker = ref<HTMLInputElement>();
 const assets = ref<ManualAsset[]>([]);
 const page = ref(1), total = ref(0);
-const loading = ref(false), uploading = ref(false);
+const loading = ref(false), refreshing = ref(false), uploading = ref(false);
 const error = ref('');
 const kind = ref('');
 const items = computed(() => [...(page.value === 1 ? manualBuiltinAssets : []), ...assets.value].filter(asset => !kind.value || asset.kind === kind.value));
 function message(e: unknown) { return apiErrorMessage(e); }
-async function fetchAssets() {
-  loading.value = true; error.value = '';
-  try { const result = await manualApi.assets(page.value); assets.value = result.items; total.value = result.total; }
-  catch (e) { error.value = message(e); }
-  finally { loading.value = false; }
+// silent：上传/删除/翻页后的刷新保留已渲染的网格，只在原内容上叠加刷新态
+let generation = 0;
+
+async function fetchAssets(silent = false) {
+  const id = ++generation;
+  if (silent) refreshing.value = true; else loading.value = true;
+  error.value = '';
+  try {
+    const result = await manualApi.assets(page.value);
+    if (id !== generation) return;
+    assets.value = result.items; total.value = result.total;
+  }
+  catch (e) { if (id === generation) error.value = message(e); }
+  finally {
+    // 只有最新一次请求负责收尾：翻页连点后旧请求若清标志会提前撤掉刷新态
+    if (id === generation) { loading.value = false; refreshing.value = false; }
+  }
 }
 function usedBy(asset: ManualAsset) {
   return [...new Set([...(asset.usedBy || []), ...manual.pages.value.filter(page => manual.rawContent(page.slug).includes(asset.url)).map(page => page.title)])];
@@ -39,7 +51,7 @@ async function upload(files: File[]) {
       emit('insert', asset);
     }
     page.value = 1; open.value = false; await nextTick();
-    await fetchAssets();
+    await fetchAssets(true);
   } catch (e) { error.value = message(e); emit('error', error.value); }
   finally { uploading.value = false; emit('busy', false); if (picker.value) picker.value.value = ''; }
 }
@@ -50,15 +62,15 @@ async function remove(asset: ManualAsset) {
   if (asset.builtin || usedBy(asset).length || props.draft.includes(asset.url)) return;
   open.value = false; await nextTick();
   if (await confirmAction(i18n.t('manual.asset_delete_confirm'))) {
-    try { await manualApi.deleteAsset(asset.id); await fetchAssets(); }
+    try { await manualApi.deleteAsset(asset.id); await fetchAssets(true); }
     catch (e) { error.value = message(e); }
   }
   open.value = true;
 }
-async function changePage(value: number) { page.value = value; await fetchAssets(); }
+async function changePage(value: number) { page.value = value; await fetchAssets(true); }
 watch(open, async value => {
   await nextTick();
-  if (value) { dialog.value?.showModal(); await fetchAssets(); }
+  if (value) { dialog.value?.showModal(); await fetchAssets(items.value.length > 0); }
   else dialog.value?.close();
 });
 defineExpose({ upload, pick });
@@ -71,16 +83,16 @@ defineExpose({ upload, pick });
       <div class="flex flex-wrap justify-between gap-3 mb-3"><AppSelect v-model="kind" class="!w-auto" :options="[{ value: '', label: i18n.t('manual.all_assets') }, ...(['image', 'audio', 'video'] as const).map(value => ({ value, label: i18n.t('manual.' + value) }))]" :aria-label="i18n.t('manual.asset_type')" /><AppButton class="btn-primary" :loading="uploading" @click="pick"><AppIcon name="upload" />{{ i18n.t('manual.upload_insert') }}</AppButton></div>
       <p class="text-xs text-muted mb-4">{{ i18n.t('manual.asset_hint') }}</p>
       <p v-if="error" role="alert" class="alert alert-danger">{{ error }}</p>
-      <AppSkeleton v-if="loading" variant="grid" :count="3" />
-      <div v-else class="manual-assets-grid"><article v-for="asset in items" :key="asset.id" class="manual-asset">
+      <AppSkeleton v-if="(loading || refreshing) && !items.length" variant="grid" :count="3" />
+      <div v-else class="manual-assets-grid aria-busy:opacity-60" :aria-busy="refreshing"><article v-for="asset in items" :key="asset.id" class="manual-asset">
         <div class="manual-asset-preview"><img v-if="asset.kind === 'image'" :src="asset.url" :alt="asset.name" loading="lazy" /><AppIcon v-else :name="asset.kind === 'audio' ? 'audiotrack' : 'movie'" /></div>
         <h3 :title="asset.name">{{ asset.name }}</h3><p class="text-xs text-muted">{{ asset.builtin ? i18n.t('manual.builtin') : `${(asset.size / 1024 / 1024).toFixed(2)} MB` }} · {{ i18n.t(`manual.${asset.kind}`) }}</p>
         <p class="manual-asset-usage">{{ usedBy(asset).length ? i18n.t('manual.asset_used', { pages: usedBy(asset).join('、') }) : draft.includes(asset.url) ? i18n.t('manual.asset_draft') : i18n.t('manual.asset_unused') }}</p>
         <div class="flex justify-between gap-2 mt-3"><AppButton class="btn-sm btn-primary" :disabled="uploading" @click="insert(asset)">{{ i18n.t('manual.insert') }}</AppButton><AppButton v-if="!asset.builtin" class="btn-sm" :disabled="uploading || !!usedBy(asset).length || draft.includes(asset.url)" @click="remove(asset)">{{ i18n.t('common.delete') }}</AppButton></div>
       </article></div>
-      <p v-if="!loading && !items.length" class="text-muted text-sm py-6">{{ i18n.t('manual.asset_empty') }}</p>
+      <p v-if="!loading && !refreshing && !items.length" class="text-muted text-sm py-6">{{ i18n.t('manual.asset_empty') }}</p>
     </div>
-    <footer v-if="total > 50"><AppButton class="btn-sm" :disabled="page <= 1 || uploading" @click="changePage(page - 1)">{{ i18n.t('common.prev') }}</AppButton><span>{{ page }} / {{ Math.ceil(total / 50) }}</span><AppButton class="btn-sm" :disabled="page * 50 >= total || uploading" @click="changePage(page + 1)">{{ i18n.t('common.next') }}</AppButton></footer>
+    <footer v-if="total > 50"><AppButton class="btn-sm" :disabled="page <= 1 || uploading || loading || refreshing" @click="changePage(page - 1)">{{ i18n.t('common.prev') }}</AppButton><span>{{ page }} / {{ Math.ceil(total / 50) }}</span><AppButton class="btn-sm" :disabled="page * 50 >= total || uploading || loading || refreshing" @click="changePage(page + 1)">{{ i18n.t('common.next') }}</AppButton></footer>
   </dialog>
 </template>
 <style scoped>

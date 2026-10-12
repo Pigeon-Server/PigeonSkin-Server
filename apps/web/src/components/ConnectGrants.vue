@@ -27,9 +27,9 @@ onMounted(load);
 <template>
   <section class="space-y-4">
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }} <AppButton class="btn-sm" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
-    <AppSkeleton v-if="loading" variant="list" :count="3" />
+    <AppSkeleton v-if="loading && !items.length" variant="list" :count="3" />
     <p v-else-if="!items.length && !error" class="panel text-muted">{{ i18n.t('connect.no_apps') }}</p>
-    <div v-else class="panel divide-y divide-line !py-0">
+    <div v-else class="panel divide-y divide-line !py-0 aria-busy:opacity-60 aria-busy:cursor-progress" :aria-busy="loading">
       <article v-for="item in items" :key="item.id" class="py-4 flex justify-between gap-4">
         <div class="min-w-0 space-y-2">
           <p class="font-semibold">{{ item.clientName }}<span v-if="item.playerName" class="text-sm text-muted ml-2">{{ item.playerName }}</span></p>

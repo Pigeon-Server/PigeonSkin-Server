@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { adminApi, type AiJobItem, type SearchSubmissionRecord, type TaskRunItem, type TextureFlagItem } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import { confirmAction } from '@/stores/dialog';
@@ -33,6 +33,17 @@ const subTotalPages = ref(1);
 
 // 定时任务
 const runs = ref<TaskRunItem[]>([]);
+
+// 当前页签是否已有数据：切回加载过的页签时保留原表格，只有首次进入该页签才用骨架屏占位
+const tabHasData = computed(() =>
+  tab.value === 'ai'
+    ? jobs.value.length > 0
+    : tab.value === 'flags'
+      ? flags.value.length > 0
+      : tab.value === 'search'
+        ? submissions.value.length > 0
+        : runs.value.length > 0,
+);
 
 const JOB_KINDS = ['translate_texture', 'moderate_texture_name', 'moderate_texture_description', 'translate_notification'] as const;
 const JOB_STATUSES = ['pending', 'processing', 'done', 'failed', 'cancelled'] as const;
@@ -168,7 +179,7 @@ onMounted(load);
     <p v-if="errMsg" class="alert alert-danger" role="alert">{{ errMsg }}<AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
 
-    <AppSkeleton v-if="loading" variant="table" :columns="7" :count="8" />
+    <AppSkeleton v-if="loading && !tabHasData" variant="table" :columns="7" :count="8" />
 
     <template v-else>
       <!-- AI 任务队列 -->

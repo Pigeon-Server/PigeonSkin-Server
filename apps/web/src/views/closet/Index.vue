@@ -15,6 +15,7 @@ const kind = ref<'' | 'skin' | 'cape'>('');
 const error = ref('');
 const notice = ref('');
 const loading = ref(true);
+const refreshing = ref(false);
 const busy = ref<number | null>(null);
 const page = ref(1);
 const hasMore = ref(false);
@@ -26,6 +27,7 @@ const applyTextures = ref<{ skin?: number; cape?: number } | null>(null);
 const selectedSkin = ref<ClosetEntry | null>(null);
 const selectedCape = ref<ClosetEntry | null>(null);
 const hasSelection = computed(() => !!selectedSkin.value || !!selectedCape.value);
+const hasFilter = computed(() => keyword.value.trim() !== '' || kind.value !== '');
 const applyOpen = ref(false);
 const visible = computed(() => items.value);
 function select(entry: ClosetEntry) {
@@ -44,10 +46,19 @@ function applySelection(entry?: ClosetEntry) {
   applyTextures.value = assignment;
   applyOpen.value = true;
 }
-async function load(reset = true) {
-  if (loadingMore.value) return;
-  if (reset) { loading.value = true; page.value = 1; items.value = []; }
-  else loadingMore.value = true;
+// reset=true 重新拉第一页；silent=true 用于搜索/筛选/操作后的刷新——
+// 保留已渲染的网格，只在原内容上叠加刷新态，避免整页闪骨架屏
+let generation = 0;
+
+async function load(reset = true, silent = false) {
+  // 追加分页不做并发：已有刷新在跑时跳过，避免旧页结果被追加到新结果之后
+  if (!reset && (loading.value || refreshing.value || loadingMore.value)) return;
+  const id = ++generation;
+  if (reset) {
+    page.value = 1;
+    if (silent) refreshing.value = true;
+    else loading.value = true;
+  } else loadingMore.value = true;
   error.value = '';
   try {
     const result = await closetApi.list({
@@ -56,14 +67,18 @@ async function load(reset = true) {
         page: page.value,
         perPage: 24,
       });
+    if (id !== generation) return;
     items.value = reset ? result.items : [...items.value, ...result.items];
     hasMore.value = result.hasMore;
     await nextTick();
     if (sentinel.value) observer?.observe(sentinel.value);
   } catch (e) {
-    error.value = apiErrorMessage(e);
+    if (id === generation) error.value = apiErrorMessage(e);
   } finally {
-    loading.value = false; loadingMore.value = false;
+    // 只有最新一次请求负责收尾：被取代的旧请求若清标志会误伤正在跑的新请求
+    if (id === generation) {
+      loading.value = false; loadingMore.value = false; refreshing.value = false;
+    }
   }
 }
 async function act(e: ClosetEntry, action: 'remove' | 'avatar') {
@@ -79,16 +94,16 @@ async function act(e: ClosetEntry, action: 'remove' | 'avatar') {
       if (selectedCape.value?.textureId === e.textureId) selectedCape.value = null;
     }
     notice.value = i18n.t('general.op-success');
-    await load();
+    await load(true, true);
   } catch (err) {
     error.value = apiErrorMessage(err);
   } finally {
     busy.value = null;
   }
 }
-watch([keyword, kind], () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => void load(), 280); });
+watch([keyword, kind], () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => void load(true, true), 280); });
 onMounted(() => {
-  observer = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting) && hasMore.value && !loading.value && !loadingMore.value) { page.value++; void load(false); } }, { rootMargin: '400px' });
+  observer = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting) && hasMore.value && !loading.value && !loadingMore.value && !refreshing.value) { page.value++; void load(false); } }, { rootMargin: '400px' });
   void load();
 });
 onBeforeUnmount(() => { observer?.disconnect(); window.clearTimeout(searchTimer); });
@@ -112,17 +127,31 @@ onBeforeUnmount(() => { observer?.disconnect(); window.clearTimeout(searchTimer)
         schema-key="closet"
         :aria-label="i18n.t('general.search')"
         :placeholder="i18n.t('user.typeToSearch')"
-        @submit="load()"
+        @submit="load(true, true)"
       />
-      <AppSelect v-model="kind" class="!w-auto" :options="[{ value: '', label: i18n.t('common.all') }, { value: 'skin', label: i18n.t('general.skin') }, { value: 'cape', label: i18n.t('general.cape') }]" :aria-label="i18n.t('skinlib.texture_type')" @change="load" />
+      <AppSelect v-model="kind" class="!w-auto" :options="[{ value: '', label: i18n.t('common.all') }, { value: 'skin', label: i18n.t('general.skin') }, { value: 'cape', label: i18n.t('general.cape') }]" :aria-label="i18n.t('skinlib.texture_type')" @change="load(true, true)" />
     </div>
     <p v-if="error" class="alert alert-danger" role="alert">
       {{ error }}
-      <AppButton class="ml-2 btn-sm" @click="load">{{ i18n.t('common.retry') }}</AppButton>
+      <AppButton class="ml-2 btn-sm" @click="load()">{{ i18n.t('common.retry') }}</AppButton>
     </p>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-    <AppSkeleton v-if="loading" variant="grid" />
-    <div v-else-if="items.length || hasSelection" class="grid items-start gap-4" :class="hasSelection ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : ''">
+    <!-- 没有内容可保留时（首次加载、空结果刷新）用骨架屏；有内容则保留网格只叠加刷新态 -->
+    <AppSkeleton v-if="(loading || refreshing) && !items.length && !hasSelection" variant="grid" />
+    <div
+      v-else-if="items.length || hasSelection"
+      class="relative grid items-start gap-4"
+      :class="[
+        hasSelection ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : '',
+        refreshing ? 'resource-gallery-refreshing' : '',
+      ]"
+      :aria-busy="refreshing"
+    >
+      <!-- 搜索/筛选/操作后的轻量刷新提示：覆盖在原有结果上，不打断网格 -->
+      <div v-if="refreshing" class="resource-refresh-status" role="status">
+        <AppIcon name="sync" class="animate-spin !text-sm" />
+        <span>{{ i18n.t('common.loading') }}</span>
+      </div>
       <div v-if="items.length" class="texture-grid">
         <article v-for="e in visible" :key="e.textureId" class="texture-card" :class="isSelected(e) ? '!border-brand-500 ring-1 ring-brand-500' : ''">
           <AppButton class="preview !w-full !rounded-none !border-0 !p-0" :aria-pressed="isSelected(e)" :aria-label="i18n.t('skinlib.preview_named', { name: e.itemName || e.textureName })" @click="select(e)">
@@ -178,8 +207,9 @@ onBeforeUnmount(() => { observer?.disconnect(); window.clearTimeout(searchTimer)
         </div>
       </section>
     </div>
-    <EmptyState v-else-if="!error" :title="i18n.t('user.emptyClosetMsg')" icon="checkroom">
-      <router-link to="/skinlib" class="btn btn-primary">{{ i18n.t('home.cta_browse') }}</router-link>
+    <!-- 区分「筛选后无结果」与「衣柜本来为空」，后者才引导去皮肤库 -->
+    <EmptyState v-else-if="!error" :title="i18n.t(hasFilter ? 'general.noResult' : 'user.emptyClosetMsg')" icon="checkroom">
+      <router-link v-if="!hasFilter" to="/skinlib" class="btn btn-primary">{{ i18n.t('home.cta_browse') }}</router-link>
     </EmptyState>
     <div ref="sentinel" class="h-8" aria-hidden="true" />
     <ApplyTextureDialog

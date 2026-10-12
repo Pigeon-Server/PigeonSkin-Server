@@ -20,9 +20,9 @@ onMounted(load);
   <PageHeader :title="i18n.t('votes.title')"><AppButton @click="load">{{ i18n.t('common.refresh') }}</AppButton></PageHeader>
   <div><AppSelect id="vote-filter" v-model="status" class="!w-auto" :aria-label="i18n.t('votes.status_filter')" :options="[{ value: '', label: i18n.t('votes.all') }, ...['active', 'scheduled', 'ended', 'closed', 'cancelled'].map(state => ({ value: state, label: i18n.t(`votes.states.${state}`) }))]" @change="filter" /></div>
   <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
-  <AppSkeleton v-if="loading" variant="stats" :count="3" :columns="3" />
+  <AppSkeleton v-if="loading && !items.length" variant="stats" :count="3" :columns="3" />
   <p v-else-if="!items.length" class="panel text-muted">{{ i18n.t('votes.empty') }}</p>
-  <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+  <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3 aria-busy:opacity-60 aria-busy:cursor-progress" :aria-busy="loading">
     <article v-for="vote in items" :key="vote.id" class="panel flex flex-col gap-4">
       <div class="flex items-center justify-between gap-2"><span class="badge">{{ i18n.t(`votes.states.${vote.status}`) }}</span><span v-if="vote.voted" class="text-sm text-success">{{ i18n.t('votes.voted') }}</span></div>
       <h2 class="text-xl font-semibold"><router-link :to="`/votes/${vote.id}`">{{ vote.title }}</router-link></h2>

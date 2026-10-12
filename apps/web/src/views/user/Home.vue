@@ -143,7 +143,8 @@ onMounted(load);
       </div>
     </div>
 
-    <div v-if="loading" class="texture-grid" aria-hidden="true">
+    <!-- 首次加载占位；翻页等刷新保留已渲染的网格 -->
+    <div v-if="loading && !items.length" class="texture-grid" aria-hidden="true">
       <div v-for="n in 8" :key="n" class="texture-card animate-pulse">
         <div class="h-[210px] w-full bg-surface-2" />
         <div class="meta space-y-2 !p-3">
@@ -156,7 +157,7 @@ onMounted(load);
     <div v-else-if="profileError" class="py-12 text-center text-sm text-red-600" role="alert">{{ profileError }}</div>
 
     <template v-else-if="profile">
-      <div v-if="items.length > 0" class="texture-grid">
+      <div v-if="items.length > 0" class="texture-grid aria-busy:opacity-60 aria-busy:cursor-progress" :aria-busy="loading">
         <TextureCard
           v-for="item in items"
           :key="item.id"

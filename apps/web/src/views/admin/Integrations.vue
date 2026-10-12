@@ -63,15 +63,18 @@ async function changeGeneratorLocale(next: Locale) {
   if (busyAll.value || loading.value) { pendingLocale = next; return; }
   if (changed.value.length && !await confirmAction(i18n.t('integration.unsaved'))) return;
   generatorLocale.value = next;
-  await load();
+  await load(true);
 }
 async function selectGeneratorLocale(value: string | number | null) {
   const next = normalizeLocale(String(value ?? ''));
   await changeGeneratorLocale(next);
 }
 watch(i18n.locale, value => { void changeGeneratorLocale(normalizeLocale(value)); });
-async function load() {
+// switchContext=true 用于切换模块/生成器语言这类「换一份内容」的加载：清空旧数据交给骨架屏占位。
+// 保存后的刷新走默认分支——保留当前表单，避免整页闪骨架屏。
+async function load(switchContext = false) {
   loading.value = true;
+  if (switchContext) { data.value = null; status.value = null; }
   error.value = '';
   try {
     const [settings, state] = await Promise.all([adminApi.getSettings(active.value.id === 'generator' ? generatorLocale.value : undefined), adminApi.integrations()]);
@@ -85,11 +88,12 @@ async function load() {
   }
 }
 async function select(module: string) {
-  if (busyAll.value) return;
+  // 加载中 data/edits 处于过渡状态，此时 changed 会误判出「未保存修改」
+  if (busyAll.value || loading.value) return;
   if (changed.value.length && !(await confirmAction(i18n.t('integration.unsaved')))) return;
   if (data.value) edits.value = { ...data.value.values };
   await router.replace({ query: { module } });
-  await load();
+  await load(true);
 }
 async function save() {
   if (busyAll.value || !changed.value.length) return;
@@ -142,7 +146,7 @@ onMounted(load);
 <template>
   <PageHeader :title="i18n.t('integration.title')">
     <AppSelect v-if="active.id === 'generator'" :model-value="generatorLocale" :options="LOCALE_OPTIONS.map(option => ({ value: option.value, label: option.name }))" :disabled="busyAll || loading" class="!w-auto" :aria-label="i18n.t('admin.localized')" @change="selectGeneratorLocale" />
-    <AppButton :loading="loading" :disabled="busyAll" @click="load">
+    <AppButton :loading="loading" :disabled="busyAll" @click="load()">
       <AppIcon name="refresh" />
       {{ i18n.t('common.refresh') }}
     </AppButton>
@@ -153,7 +157,7 @@ onMounted(load);
         v-for="module in integrationModules"
         :key="module.id"
         :class="{ selected: active.id === module.id }"
-        :disabled="busyAll"
+        :disabled="busyAll || loading"
         @click="select(module.id)"
       >
         <AppIcon :name="module.icon" />
@@ -163,12 +167,12 @@ onMounted(load);
     <div class="min-w-0 space-y-4">
       <p v-if="error" class="alert alert-danger" role="alert">
         {{ error }}
-        <AppButton v-if="!data" class="btn-sm ml-2" @click="load">
+        <AppButton v-if="!data" class="btn-sm ml-2" :loading="loading" @click="load()">
           {{ i18n.t('common.retry') }}
         </AppButton>
       </p>
       <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-      <AppSkeleton v-if="loading" variant="form" :count="4" />
+      <AppSkeleton v-if="loading && !data" variant="form" :count="4" />
       <template v-else-if="data && status">
         <header class="flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-lg font-semibold">{{ i18n.t(`integration.modules.${active.id}`) }}</h2>

@@ -107,8 +107,8 @@ onMounted(load);
     <AppButton class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton>
   </p>
   <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-  <AppSkeleton v-if="loading" variant="table" :count="8" />
-  <div v-else class="panel !p-0 overflow-x-auto max-h-[70vh]">
+  <AppSkeleton v-if="loading && !items.length" variant="table" :count="8" />
+  <div v-else class="panel !p-0 overflow-x-auto max-h-[70vh] aria-busy:opacity-60 aria-busy:cursor-progress" :aria-busy="loading">
     <table class="table">
       <thead class="sticky top-0">
         <tr>

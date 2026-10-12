@@ -255,6 +255,10 @@ describe('PlayerIndex (views/player/Index.vue)', () => {
             props: ['to'],
             template: '<a :href="to"><slot /></a>',
           },
+          AppSkeleton: {
+            props: ['variant', 'count', 'columns'],
+            template: '<div class="app-skeleton" />',
+          },
         },
       },
     });
@@ -303,6 +307,37 @@ describe('PlayerIndex (views/player/Index.vue)', () => {
     await flushPromises();
 
     expect(setTexturesMock).toHaveBeenCalledWith(1, { skin: 102 });
+  });
+
+  it('keeps the workspace mounted while reloading after save', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const slimSkinBtn = wrapper.findAll('button.group').find((btn) => btn.text().includes('Slim Alex Skin'));
+    await slimSkinBtn!.trigger('click');
+    await flushPromises();
+
+    setTexturesMock.mockResolvedValue({ ok: true });
+    // 挂起保存后的重新加载，观察刷新过程中的界面
+    const pending: Array<(value: unknown) => void> = [];
+    listPlayersMock.mockImplementation(
+      () => new Promise((resolve) => { pending.push(resolve); }),
+    );
+
+    const saveBtn = wrapper.findAll('button').find((b) => b.text().includes('保存装扮'));
+    await saveBtn!.trigger('click');
+    await flushPromises();
+
+    // 刷新期间不能回退到整页骨架屏，工作区与 3D 预览都要保持挂载
+    expect(wrapper.find('.app-skeleton').exists()).toBe(false);
+    expect(wrapper.find('.stub-texture-previewer').exists()).toBe(true);
+    expect(wrapper.text()).toContain('操作成功');
+
+    pending.forEach((resolve) => resolve({ items: [...mockPlayers] }));
+    await flushPromises();
+
+    expect(wrapper.find('.app-skeleton').exists()).toBe(false);
+    expect(wrapper.find('.stub-texture-previewer').exists()).toBe(true);
   });
 
   it('resets preview changes when clicking reset preview button', async () => {

@@ -199,8 +199,8 @@ onMounted(load);
     {{ error }}
   </p>
   <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
-  <AppSkeleton v-if="loading" variant="table" :count="6" />
-  <div v-else class="panel !p-0 overflow-x-auto">
+  <AppSkeleton v-if="loading && !items.length" variant="table" :count="6" />
+  <div v-else class="panel !p-0 overflow-x-auto aria-busy:opacity-60 aria-busy:cursor-progress" :aria-busy="loading">
     <table class="table">
       <thead>
         <tr>
