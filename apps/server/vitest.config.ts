@@ -53,7 +53,11 @@ export default defineWorkersConfig({
         // 默认行为会为它启动 remote proxy session（要求 wrangler 登录），
         // CI 无凭据直接失败。
         remoteBindings: false,
-        miniflare: { bindings: { APP_URL: 'http://localhost:8787', SESSION_SECRET: 'test-session-secret', OFFICIAL_CATALOG_ENABLED: 'false', RATE_LIMIT_ENABLED: 'false' } },
+        // ENVIRONMENT 必须显式给 development：wrangler 配置顶层 vars 是生产部署
+        // 用的（ENVIRONMENT=production + https 的 APP_URL），测试池按顶层读，
+        // 而这里把 APP_URL 覆盖成本地 http —— 两者不一致时 resolveConfiguration
+        // 会判定为非本地开发并要求 https，所有走配置解析的请求直接 503。
+        miniflare: { bindings: { ENVIRONMENT: 'development', APP_URL: 'http://localhost:8787', SESSION_SECRET: 'test-session-secret', OFFICIAL_CATALOG_ENABLED: 'false', RATE_LIMIT_ENABLED: 'false' } },
         // 配置源已迁到仓库根目录（目录结构重组）
         wrangler: { configPath: path.resolve(__dirname, '../../wrangler.jsonc') },
       },
