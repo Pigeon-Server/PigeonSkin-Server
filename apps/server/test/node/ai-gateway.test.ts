@@ -2,7 +2,7 @@
 
 import { type Bindings } from './../../src/core/env.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { parseVerdict, moderateComment, isModerationConfigured } from '../../src/services/ai-gateway.ts';
+import { parseVerdict, moderateComment, isModerationConfigured, classifyAiFailure } from '../../src/services/ai-gateway.ts';
 
 const AI = { run: async () => ({ response: 'safe' }) };
 
@@ -579,5 +579,61 @@ describe('判别模型后台辅助', () => {
     expect(text).toBeNull(); // 判别模型不能翻译 → 无模型 → fail-open
     expect(fetchMock).not.toHaveBeenCalled(); // 不白耗判别 API 配额
     expect(aiMock.run).not.toHaveBeenCalled();
+  });
+});
+
+// ── 渠道级故障识别（执行器据此暂停队列而不是记任务失败）────────────────────
+
+describe('classifyAiFailure', () => {
+  it('配额耗尽：Workers AI 4006 与 neuron 配额文案都识别为 quota', () => {
+    const byCode = Object.assign(new Error("4006: you have used up your daily free allocation of 10,000 neurons, please upgrade to Cloudflare's Workers Paid plan if you would like to continue usage."), { code: 4006 });
+    expect(classifyAiFailure(byCode)).toMatchObject({ kind: 'quota', retryAfterMs: 30 * 60_000 });
+    expect(classifyAiFailure(new Error('you have used up your daily free allocation of neurons'))).toMatchObject({ kind: 'quota' });
+  });
+
+  it('限流 / 鉴权 / 超时 / 网络错误各自归类', () => {
+    expect(classifyAiFailure(new Error('openai 429'))?.kind).toBe('rate_limit');
+    expect(classifyAiFailure(new Error('rate limit exceeded'))?.kind).toBe('rate_limit');
+    expect(classifyAiFailure(new Error('anthropic 401'))?.kind).toBe('auth');
+    expect(classifyAiFailure(new Error('invalid api key'))?.kind).toBe('auth');
+    expect(classifyAiFailure(new Error('AI call timed out'))?.kind).toBe('timeout');
+    expect(classifyAiFailure(new Error('fetch failed'))?.kind).toBe('unavailable');
+    expect(classifyAiFailure(new Error('cloudflare 503'))?.kind).toBe('unavailable');
+  });
+
+  it('认不出的失败返回 null：按任务自身失败处理，不误判成渠道故障', () => {
+    expect(classifyAiFailure(new Error('no usable translations in output'))).toBeNull();
+    expect(classifyAiFailure(new Error('unparseable translation output'))).toBeNull();
+    expect(classifyAiFailure('texture deleted')).toBeNull();
+  });
+
+  it('特征收窄后不误伤：裸 neuron / 普通 network 文案不算渠道故障', () => {
+    expect(classifyAiFailure(new Error('model emitted 3 neurons of output'))).toBeNull();
+    expect(classifyAiFailure(new Error('network of friends'))).toBeNull();
+  });
+
+  it('渠道级故障才暂停队列，超时只推后该任务', () => {
+    const quota = Object.assign(new Error('4006: you have used up your daily free allocation of 10,000 neurons'), { code: 4006 });
+    expect(classifyAiFailure(quota)?.pauseQueue).toBe(true);
+    expect(classifyAiFailure(new Error('openai 429'))?.pauseQueue).toBe(true);
+    expect(classifyAiFailure(new Error('AI call timed out'))?.pauseQueue).toBe(false);
+  });
+
+  it('序列号标记：快照之后发生的渠道故障可见，之前发生的不可见', async () => {
+    const { aiProviderFailureSeq, aiProviderFailureAfter, runAiJob, AI_JOB_DEFINITIONS } = await import('../../src/services/ai-gateway.ts');
+    const seq = aiProviderFailureSeq();
+    expect(aiProviderFailureAfter(seq)).toBeNull();
+    // 触发一次真实的渠道故障路径：AI 绑定抛出配额错误
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const aiMock = { run: async () => { throw Object.assign(new Error('4006: you have used up your daily free allocation of 10,000 neurons'), { code: 4006 }); } };
+    expect(await runAiJob(env({ AI: aiMock }), AI_JOB_DEFINITIONS.texture_translate, 'translate me')).toBeNull();
+    expect(aiProviderFailureAfter(seq)).toMatchObject({ kind: 'quota' });
+    expect(aiProviderFailureAfter(aiProviderFailureSeq())).toBeNull();
+    // 渠道故障按 warning 输出（不是 error）：连续命中每个任务时不该刷满错误上报
+    expect(error).not.toHaveBeenCalled();
+    expect(warn.mock.calls.some((call) => String(call[0]).includes('AI 渠道不可用'))).toBe(true);
+    warn.mockRestore();
+    error.mockRestore();
   });
 });

@@ -15,8 +15,23 @@ const AI = {
   },
 };
 
-function bindings(d1: SqliteD1): Bindings {
-  return { AI, DB: d1 } as unknown as Bindings;
+/** 可用的翻译输出：渠道正常时的返回值，用来验证渠道恢复后任务能继续跑完 */
+const TRANSLATING_AI = {
+  run: async () => {
+    return { response: '{"translations": {"en": {"name": "Name", "description": "Desc"}}}' };
+  },
+};
+
+/** Workers AI 免费额度耗尽的原始错误形态（AiError: 4006） */
+function quotaError(): Error {
+  return Object.assign(
+    new Error("4006: you have used up your daily free allocation of 10,000 neurons, please upgrade to Cloudflare's Workers Paid plan if you would like to continue usage."),
+    { code: 4006 },
+  );
+}
+
+function bindings(d1: SqliteD1, ai: unknown = AI): Bindings {
+  return { AI: ai, DB: d1 } as unknown as Bindings;
 }
 
 afterAll(() => d1.close());
@@ -87,6 +102,163 @@ describe('ai jobs queue', () => {
     const status = await d1.prepare('SELECT status FROM ai_jobs').first<{ status: string }>();
     expect(status!.status).toBe('cancelled');
     expect(await cancelAiJob(bindings(d1), row!.id)).toBe(false);
+  });
+});
+
+describe('ai jobs provider outage', () => {
+  beforeEach(async () => {
+    await d1.prepare("INSERT INTO settings (key, locale, value, updated_at) VALUES ('texture_ai_translation', '', 'true', 0)").run();
+    invalidateSettingsCache();
+  });
+
+  async function seedTextures(count: number): Promise<number[]> {
+    const db = createDb(d1 as never);
+    const { textures } = await import('@pigeon-skin/db');
+    const rows = await db.insert(textures).values(Array.from({ length: count }, (_, index) => ({
+      hash: `quota-${index}-${Date.now()}`, kind: 'skin', name: `T${index}`, uploaderId: null, sizeBytes: 1,
+      visibility: 'public', width: 64, height: 64, createdAt: index + 1, updatedAt: index + 1,
+    }))).returning({ id: textures.id });
+    return rows.map((row) => row.id);
+  }
+
+  function downWith(error: () => Error) {
+    return { run: async () => { throw error(); } };
+  }
+
+  async function jobRows(tid: number) {
+    return await d1.prepare('SELECT status, attempts, next_run_at, last_error FROM ai_jobs WHERE tid = ?')
+      .bind(tid).first<{ status: string; attempts: number; next_run_at: number; last_error: string }>();
+  }
+
+  async function aiJobRunRecord() {
+    return await d1.prepare("SELECT ok, detail FROM task_runs WHERE name = 'ai_jobs' ORDER BY id DESC")
+      .first<{ ok: number; detail: string }>();
+  }
+
+  it('渠道配额耗尽：不计失败次数、整队推后，渠道恢复后自动跑完', async () => {
+    const [a, b] = await seedTextures(2);
+    await enqueueAiJob(bindings(d1), 'translate_texture', a!);
+    await enqueueAiJob(bindings(d1), 'translate_texture', b!);
+
+    let calls = 0;
+    const down = { run: async () => { calls += 1; throw quotaError(); } };
+    const before = Date.now();
+    await processDueJobs(bindings(d1, down));
+
+    expect(calls).toBe(2);
+    const rows = await d1.prepare('SELECT status, attempts, next_run_at, last_error FROM ai_jobs').all<{ status: string; attempts: number; next_run_at: number; last_error: string }>();
+    expect(rows.results!.every((r) => r.status === 'pending')).toBe(true);
+    expect(rows.results!.every((r) => r.attempts === 0)).toBe(true);
+    expect(rows.results!.every((r) => r.next_run_at >= before + 30 * 60_000)).toBe(true);
+    expect(rows.results![0]!.last_error).toContain('AI 渠道不可用（quota）');
+    // 渠道停摆在后台「定时任务」页可见，而不是只写日志
+    expect(await aiJobRunRecord()).toMatchObject({ ok: 0 });
+    expect((await aiJobRunRecord())!.detail).toContain('quota');
+
+    // 队列已整体推后：再触发一次不会继续撞同一个坏渠道
+    await processDueJobs(bindings(d1, down));
+    expect(calls).toBe(2);
+
+    // 渠道恢复（配额重置 / 换驱动 / 补凭据）：到期后自动跑完，不需要管理员重跑
+    await d1.prepare('UPDATE ai_jobs SET next_run_at = 0').run();
+    await processDueJobs(bindings(d1, TRANSLATING_AI));
+    const done = await d1.prepare('SELECT status FROM ai_jobs').all<{ status: string }>();
+    expect(done.results!.every((r) => r.status === 'done')).toBe(true);
+  });
+
+  it('任务自身的失败（输出不可用）仍计次数并按退避重排', async () => {
+    const [a] = await seedTextures(1);
+    await enqueueAiJob(bindings(d1), 'translate_texture', a!);
+    await processDueJobs(bindings(d1));
+    const row = await jobRows(a!);
+    expect(row!.status).toBe('pending');
+    expect(row!.attempts).toBe(1);
+    expect(row!.last_error).toContain('no usable translations');
+    // 任务级失败不暂停队列，也不写渠道记录
+    expect(await aiJobRunRecord()).toBeNull();
+  });
+
+  it('鉴权失败同样是渠道级：按 60 分钟推后并留可见记录', async () => {
+    const [a] = await seedTextures(1);
+    await enqueueAiJob(bindings(d1), 'translate_texture', a!);
+    const before = Date.now();
+    await processDueJobs(bindings(d1, downWith(() => new Error('anthropic 401 unauthorized'))));
+    const row = await jobRows(a!);
+    expect(row!.status).toBe('pending');
+    expect(row!.attempts).toBe(0);
+    expect(row!.next_run_at).toBeGreaterThanOrEqual(before + 60 * 60_000);
+    expect(row!.last_error).toContain('AI 渠道不可用（auth）');
+    expect((await aiJobRunRecord())!.detail).toContain('auth');
+  });
+
+  it('暂停只推后到期任务：未来排期与已结束的任务不动', async () => {
+    const [due, future, done] = await seedTextures(3);
+    await enqueueAiJob(bindings(d1), 'translate_texture', due!);
+    await enqueueAiJob(bindings(d1), 'translate_texture', future!);
+    await enqueueAiJob(bindings(d1), 'translate_texture', done!);
+    const scheduledAt = Date.now() + 7 * 24 * 3600_000;
+    await d1.prepare('UPDATE ai_jobs SET next_run_at = ? WHERE tid = ?').bind(scheduledAt, future!).run();
+    await d1.prepare("UPDATE ai_jobs SET status = 'done', next_run_at = 0 WHERE tid = ?").bind(done!).run();
+
+    await processDueJobs(bindings(d1, downWith(quotaError)));
+
+    expect((await jobRows(due!))!.next_run_at).toBeGreaterThan(Date.now());
+    expect(await jobRows(future!)).toMatchObject({ status: 'pending', next_run_at: scheduledAt });
+    expect(await jobRows(done!)).toMatchObject({ status: 'done', next_run_at: 0 });
+  });
+
+  it('单个任务超时只推后它自己，不暂停队列', async () => {
+    const [a] = await seedTextures(1);
+    await enqueueAiJob(bindings(d1), 'translate_texture', a!);
+    const timedOut = downWith(() => new Error('AI call timed out'));
+
+    await processDueJobs(bindings(d1, timedOut));
+    const first = await jobRows(a!);
+    expect(first).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(first!.last_error).toContain('AI 渠道不可用（timeout）');
+    expect(await aiJobRunRecord()).toBeNull();
+  });
+
+  it('同批 ≥2 个任务超时按渠道整体变慢处理：暂停队列并留记录', async () => {
+    const [a, b] = await seedTextures(2);
+    await enqueueAiJob(bindings(d1), 'translate_texture', a!);
+    await enqueueAiJob(bindings(d1), 'translate_texture', b!);
+    const timedOut = downWith(() => new Error('AI call timed out'));
+
+    await processDueJobs(bindings(d1, timedOut));
+    expect(await jobRows(a!)).toMatchObject({ status: 'pending', attempts: 0 });
+    expect((await aiJobRunRecord())!.detail).toContain('timeout');
+  });
+
+  it('连续超时按任务失败计次，最终落 failed（不会无限挂起）', async () => {
+    const [a] = await seedTextures(1);
+    await enqueueAiJob(bindings(d1), 'translate_texture', a!);
+    const timedOut = downWith(() => new Error('AI call timed out'));
+
+    await processDueJobs(bindings(d1, timedOut));           // 第一次超时：渠道级，不计次
+    expect(await jobRows(a!)).toMatchObject({ status: 'pending', attempts: 0 });
+    for (let round = 1; round <= 5; round += 1) {
+      await d1.prepare('UPDATE ai_jobs SET next_run_at = 0').run();
+      await processDueJobs(bindings(d1, timedOut));
+    }
+    const settled = await jobRows(a!);
+    expect(settled!.status).toBe('failed');
+    expect(settled!.attempts).toBe(5);
+  });
+
+  it('渠道停摆期间的重复暂停只写一条记录（不刷满后台任务页）', async () => {
+    const [a] = await seedTextures(1);
+    await enqueueAiJob(bindings(d1), 'translate_texture', a!);
+    const down = downWith(quotaError);
+
+    await processDueJobs(bindings(d1, down));
+    // 停摆期间每次上传都会触发一次派发：同 kind 在窗口内不重复写记录
+    for (let round = 0; round < 3; round += 1) {
+      await d1.prepare('UPDATE ai_jobs SET next_run_at = 0').run();
+      await processDueJobs(bindings(d1, down));
+    }
+    const rows = await d1.prepare("SELECT count(*) AS n FROM task_runs WHERE name = 'ai_jobs'").first<{ n: number }>();
+    expect(rows!.n).toBe(1);
   });
 });
 

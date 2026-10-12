@@ -21,7 +21,9 @@ export default {
    */
   async scheduled(event: ScheduledEvent, env: Bindings, ctx: ExecutionContext): Promise<void> {
     if (event.cron === '* * * * *') {
-      ctx.waitUntil(processDueJobs(env));
+      // 派发失败（认领/推后的 D1 写入出错）下一分钟会重来，记一条即可，不让它
+      // 变成 scheduled 调用的未捕获异常
+      ctx.waitUntil(processDueJobs(env).catch((error) => console.warn('AI 任务派发失败', String(error))));
       return;
     }
     await runScheduledTasks(event, env, ctx);

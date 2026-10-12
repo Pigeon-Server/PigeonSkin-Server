@@ -120,14 +120,48 @@ function finalizeConfiguration(env: ConfigurationSourceEnv, stored: Record<strin
   if (!values.site_url) values.site_url = env.APP_URL || 'http://localhost:8787';
   return values;
 }
+/**
+ * 站点地址校验：返回不合法原因（'' = 通过）。原因只写日志与后台任务记录 ——
+ * 客户端响应只能拿到 common.internal_error，不暴露部署细节（见 toErrorResponse）。
+ */
+export function appUrlProblem(appUrl: string, environment: string | undefined): string {
+  let canonical: URL;
+  try { canonical = new URL(appUrl); } catch { return `APP_URL 不是合法 URL：${JSON.stringify(appUrl)}`; }
+  const localDevelopment = environment === 'development' && canonical.protocol === 'http:';
+  if (!localDevelopment && canonical.protocol !== 'https:') return `APP_URL 必须是 https 地址（当前 ${JSON.stringify(appUrl)}）`;
+  if (canonical.username || canonical.password) return `APP_URL 不得包含用户名或密码：${JSON.stringify(appUrl)}`;
+  if (canonical.hash || canonical.search) return `APP_URL 不得包含查询串或片段：${JSON.stringify(appUrl)}`;
+  if (canonical.pathname !== '/') return `APP_URL 必须指向站点根：${JSON.stringify(appUrl)}`;
+  return '';
+}
+
+/** 部署配置非法（站点地址等）。reason 供日志/后台定位，不进客户端响应。 */
+export class ConfigurationError extends AppError {
+  readonly reason: string;
+  constructor(reason: string) {
+    super('common.internal_error', 503);
+    this.name = 'ConfigurationError';
+    this.reason = reason;
+  }
+}
+
+// 配置坏了每个请求都会走到这里：同一个原因只输出一次，避免日志被刷满
+let loggedConfigurationProblem = '';
+function logConfigurationProblem(problem: string): void {
+  if (loggedConfigurationProblem === problem) return;
+  loggedConfigurationProblem = problem;
+  console.warn('部署配置非法，请求将以 503 失败：', problem);
+}
+
 export async function resolveConfiguration(env: Bindings): Promise<Bindings> {
   const values = await configurationValues(env);
   const resolved = { ...env };
   for (const [key, spec] of Object.entries(CONFIGURATION)) resolved[spec.binding] = values[key]!;
   resolved.APP_URL = resolved.APP_URL.replace(/\/$/, '');
-  let canonical: URL;
-  try { canonical = new URL(resolved.APP_URL); } catch { throw new AppError('common.internal_error', 503); }
-  const localDevelopment = resolved.ENVIRONMENT === 'development' && canonical.protocol === 'http:';
-  if ((!localDevelopment && canonical.protocol !== 'https:') || canonical.username || canonical.password || canonical.hash || canonical.pathname !== '/' || canonical.search) throw new AppError('common.internal_error', 503);
+  const problem = appUrlProblem(resolved.APP_URL, resolved.ENVIRONMENT);
+  if (problem) {
+    logConfigurationProblem(problem);
+    throw new ConfigurationError(problem);
+  }
   return resolved;
 }

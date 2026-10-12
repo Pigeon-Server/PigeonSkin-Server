@@ -195,6 +195,91 @@ function callTimeoutMs(env: Pick<Bindings, 'DB'>): Promise<number> {
 /** 调用结果：null = 无驱动配置/调用失败（fail-open 语义由调用方解释） */
 export type AiTextResult = string | null;
 
+// ── 渠道级故障识别 ──────────────────────────────────────────────────────────
+//
+// 「渠道坏了」与「这次输出不能用」是两回事：配额耗尽、限流、鉴权失败、超时、
+// 网络/服务端错误重试多少次都不会成功，而且一次配额耗尽会同时打掉整批任务。
+// 识别出来后记录故障序号，后台任务执行器据此不计失败次数、按渠道间隔重排
+// （渠道级的还会把整条队列一起推后，见 ai-jobs.ts），避免一批任务白烧重试
+// 次数被永久判失败。
+// 只认下面这些特征，认不出的仍按任务自身失败处理，行为与改造前一致。
+
+export type AiFailureKind = 'quota' | 'rate_limit' | 'auth' | 'timeout' | 'unavailable';
+
+export interface AiProviderFailure {
+  kind: AiFailureKind;
+  message: string;
+  /** 建议的下次探活间隔（毫秒）。 */
+  retryAfterMs: number;
+  /** 是否连整条队列一起推后。超时可能只是单个任务自己的问题（超大输入），只推它自己。 */
+  pauseQueue: boolean;
+}
+
+const PROVIDER_RETRY_MS: Record<AiFailureKind, number> = {
+  // Workers AI 免费额度按 UTC 自然日重置，探活太密没有意义；付费/换驱动后最迟半小时内恢复
+  quota: 30 * 60_000,
+  rate_limit: 5 * 60_000,
+  auth: 60 * 60_000,
+  timeout: 10 * 60_000,
+  unavailable: 10 * 60_000,
+};
+
+// 特征写窄一点：认错会把任务级失败当成渠道故障，让本来该计次失败的任务一直挂着。
+// 只留下足以指认渠道的标记，`503`/`429`/`401` 这类状态码都要求前后不是数字。
+const FAILURE_PATTERNS: ReadonlyArray<readonly [AiFailureKind, RegExp]> = [
+  ['quota', /used up your daily free allocation|\b4006\b/i],
+  ['rate_limit', /\b429\b|rate ?limit|too many requests/i],
+  ['auth', /\b401\b|\b403\b|unauthor|invalid api key|authentication|permission denied/i],
+  ['timeout', /timed out|timeout/i],
+  ['unavailable', /\b50[0234]\b|bad gateway|service unavailable|gateway timeout|fetch failed|econnreset|socket hang up|network connection lost/i],
+];
+
+/** 识别渠道级故障；认不出返回 null（按任务自身失败处理）。 */
+export function classifyAiFailure(error: unknown): AiProviderFailure | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: unknown } | null)?.code;
+  const text = code === undefined ? message : `${String(code)}: ${message}`;
+  for (const [kind, pattern] of FAILURE_PATTERNS) {
+    if (pattern.test(text)) return { kind, message: message.slice(0, 200), retryAfterMs: PROVIDER_RETRY_MS[kind], pauseQueue: kind !== 'timeout' };
+  }
+  return null;
+}
+
+// 最近一次渠道级故障。执行器在调用前取序号、失败后比对，把渠道故障与任务自身
+// 的失败区分开。序号单调递增：并发调用里后发生的故障也能被先取的快照看到
+// （少数情况下会把同伴的任务级失败一并算成渠道故障，代价只是这批晚些重试）。
+let providerFailureSeq = 0;
+let providerFailure: (AiProviderFailure & { seq: number }) | null = null;
+
+/** 调用前取一次序号，与 aiProviderFailureAfter 配对使用。 */
+export function aiProviderFailureSeq(): number {
+  return providerFailureSeq;
+}
+
+/** 快照之后是否发生渠道级故障。 */
+export function aiProviderFailureAfter(seq: number): AiProviderFailure | null {
+  return providerFailure && providerFailure.seq > seq ? providerFailure : null;
+}
+
+// 渠道故障会连续命中每个任务：逐条写 error 日志会淹掉真正的故障，也让错误上报
+// 失去信号。同一 isolate 内同 kind 五分钟只输出一次 warning。
+let loggedProviderFailure: { kind: AiFailureKind; at: number } | null = null;
+
+function recordProviderFailure(failure: AiProviderFailure): void {
+  providerFailureSeq += 1;
+  providerFailure = { ...failure, seq: providerFailureSeq };
+  const now = Date.now();
+  if (loggedProviderFailure && loggedProviderFailure.kind === failure.kind && now - loggedProviderFailure.at < 5 * 60_000) return;
+  loggedProviderFailure = { kind: failure.kind, at: now };
+  const minutes = Math.round(failure.retryAfterMs / 60_000);
+  console.warn(
+    failure.pauseQueue
+      ? `AI 渠道不可用（${failure.kind}），任务队列暂停 ${minutes} 分钟`
+      : `AI 调用失败（${failure.kind}），任务 ${minutes} 分钟后重试`,
+    failure.message,
+  );
+}
+
 /**
  * 执行一次 AI 任务调用。返回模型文本输出；
  * 无驱动配置或任何失败（超时/网络/HTTP 错误）返回 null，不抛出。
@@ -223,6 +308,11 @@ export async function runAiJob(
     const text = await (config.driver as AiDriver).call(env, def, model, prompt, content, await readSettings(env), options?.reasoningOverride);
     return text.length > 0 ? text : null;
   } catch (e) {
+    const failure = classifyAiFailure(e);
+    if (failure) {
+      recordProviderFailure(failure);
+      return null;
+    }
     console.error(`AI 任务 ${def.key} 失败（无结果）`, e);
     return null;
   }
