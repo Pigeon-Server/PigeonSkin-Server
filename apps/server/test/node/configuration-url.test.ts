@@ -21,7 +21,9 @@ describe('appUrlProblem', () => {
   it('非法 URL 与带凭据/路径/查询串的地址都给出具体原因', () => {
     expect(appUrlProblem('', 'production')).toContain('不是合法 URL');
     expect(appUrlProblem('skin.example.com', 'production')).toContain('不是合法 URL');
-    expect(appUrlProblem('https://user:pass@skin.example.com', 'production')).toContain('用户名或密码');
+    // 主机必须是占位词 example.com：公开发布检查只对「用户名/密码/主机都是占位词」的
+    // 凭据 URL 放行，换成真实域名形状的字面量会被判成凭据泄漏
+    expect(appUrlProblem('https://user:pass@example.com', 'production')).toContain('用户名或密码');
     expect(appUrlProblem('https://skin.example.com/wiki', 'production')).toContain('站点根');
     expect(appUrlProblem('https://skin.example.com/?lang=zh', 'production')).toContain('查询串');
   });
