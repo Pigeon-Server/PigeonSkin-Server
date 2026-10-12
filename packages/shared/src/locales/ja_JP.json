@@ -2114,6 +2114,9 @@
     "too_many_files": "添付は最大{n}個まで",
     "attach_files": "ファイルを添付",
     "attachments": "添付ファイル",
+    "image_preview": "画像のプレビュー",
+    "view_image": "画像を表示：{name}",
+    "download_original": "元の画像をダウンロード",
     "closed_notice": "このチケットはクローズされています",
     "close_ticket": "チケットをクローズ"
   },

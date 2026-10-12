@@ -102,7 +102,7 @@ export async function get(env: Pick<Bindings, 'DB'>, actor: AuthedUser, id: numb
   await env.DB.prepare(`UPDATE tickets SET ${asAdmin ? 'last_admin_read_at' : 'last_user_read_at'}=? WHERE id=?`).bind(Date.now(), id).run();
   const messages = await env.DB.prepare(`SELECT m.id,m.author_id as authorId,m.author_type as authorType,m.body,m.internal,m.created_at as createdAt,u.nickname as authorName FROM ticket_messages m LEFT JOIN users u ON u.id=m.author_id WHERE m.ticket_id=? ${isAdmin(actor) ? '' : 'AND m.internal=0'} ORDER BY m.created_at ASC,m.id ASC`).bind(id).all();
   const attachments = await env.DB.prepare(`SELECT a.id,a.message_id as messageId,a.file_name as fileName,a.mime_type as mimeType,a.size_bytes as sizeBytes FROM ticket_attachments a LEFT JOIN ticket_messages m ON m.id=a.message_id WHERE a.ticket_id=? ${isAdmin(actor) ? '' : 'AND COALESCE(m.internal,0)=0'} ORDER BY a.created_at,a.id`).bind(id).all();
-  const events = await env.DB.prepare('SELECT id,actor_id as actorId,type,from_status as fromStatus,to_status as toStatus,detail,created_at as createdAt FROM ticket_events WHERE ticket_id=? ORDER BY created_at ASC,id ASC').bind(id).all();
+  const events = await env.DB.prepare(`SELECT id,actor_id as actorId,type,from_status as fromStatus,to_status as toStatus,detail,created_at as createdAt FROM ticket_events WHERE ticket_id=? ${isAdmin(actor) ? '' : "AND type IN ('created','status_changed')"} ORDER BY created_at ASC,id ASC`).bind(id).all();
   return { ticket: { ...ticket, userUnread: false, adminUnread: false }, messages: messages.results, attachments: attachments.results, events: events.results };
 }
 
@@ -141,7 +141,6 @@ export async function addMessage(env: Pick<Bindings, 'DB' | 'BUCKET'>, actor: Au
   const now = Date.now();
   const message = await env.DB.prepare('INSERT INTO ticket_messages(ticket_id,author_id,author_type,body,internal,created_at) VALUES(?,?,?,?,?,?) RETURNING id').bind(id, actor.id, authorType, body.trim(), internal ? 1 : 0, now).first<{ id: number }>();
   await env.DB.prepare('UPDATE tickets SET updated_at=?,status=CASE WHEN ?=1 THEN status WHEN ?=\'user\' THEN \'pending\' ELSE \'in_progress\' END WHERE id=?').bind(now, internal ? 1 : 0, authorType, id).run();
-  await env.DB.prepare('INSERT INTO ticket_events(ticket_id,actor_id,type,detail,created_at) VALUES(?,?,?,?,?)').bind(id, actor.id, internal ? 'internal_note' : 'message', body.slice(0, 200), now).run();
   const nextStatus = internal ? ticket.status : (asAdmin ? 'in_progress' : 'pending');
   if (nextStatus !== ticket.status) await env.DB.prepare('INSERT INTO ticket_events(ticket_id,actor_id,type,from_status,to_status,created_at) VALUES(?,?,?,?,?,?)').bind(id, actor.id, 'status_changed', ticket.status, nextStatus, now).run();
   await saveFiles(env, id, message?.id ?? null, files);

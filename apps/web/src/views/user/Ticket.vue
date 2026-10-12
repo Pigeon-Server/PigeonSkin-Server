@@ -76,6 +76,9 @@ function isImage(mimeType: string) {
   return mimeType.startsWith('image/');
 }
 
+// 流转记录只展示工单状态流转（created / status_changed）；消息与内部备注由气泡承载
+const TIMELINE_EVENT_TYPES = new Set(['created', 'status_changed']);
+
 // 将消息和事件按时间统一排序展示
 const timelineItems = computed(() => {
   if (!data.value) return [];
@@ -85,7 +88,7 @@ const timelineItems = computed(() => {
     time: m.createdAt,
     data: m,
   }));
-  const evts = (data.value.events || []).map(e => ({
+  const evts = (data.value.events || []).filter(e => TIMELINE_EVENT_TYPES.has(e.type)).map(e => ({
     kind: 'event' as const,
     id: `evt-${e.id}`,
     time: e.createdAt,
@@ -95,6 +98,20 @@ const timelineItems = computed(() => {
 });
 
 const attachmentUrls = ref<Record<number, string>>({});
+// 区分「还在取」与「取不到」：前者是中性占位，只有后者才是加载失败
+const attachmentFailed = ref<Record<number, boolean>>({});
+
+// 图片缩略图只用于放大查看，下载入口在弹窗内
+const imagePreview = ref<{ url: string; name: string } | null>(null);
+const imagePreviewOpen = computed({
+  get: () => imagePreview.value !== null,
+  set: value => { if (!value) imagePreview.value = null; },
+});
+
+function openImage(file: TicketDetail['attachments'][number]) {
+  const url = attachmentUrls.value[file.id];
+  if (url) imagePreview.value = { url, name: file.fileName };
+}
 
 async function load() {
   loading.value = true;
@@ -117,7 +134,7 @@ async function loadAttachments() {
     try {
       const blob = await requestBlob(`/api/v1/tickets/${ticketId}/attachments/${file.id}`);
       attachmentUrls.value[file.id] = URL.createObjectURL(blob);
-    } catch { /* 单个附件失败不阻塞其余附件，位置上显示为加载失败占位 */ }
+    } catch { attachmentFailed.value[file.id] = true; }
   }
 }
 
@@ -249,9 +266,6 @@ onBeforeUnmount(() => {
             <span v-else-if="item.data.type === 'status_changed' && item.data.toStatus">
               {{ i18n.t('ticket.event_status_changed', { status: i18n.t(`ticket.status.${item.data.toStatus}`) }) }}
             </span>
-            <span v-else>
-              {{ item.data.detail || item.data.type }}
-            </span>
             <span class="font-mono text-[11px] opacity-70">
               ({{ i18n.d(item.time, 'short') }})
             </span>
@@ -318,14 +332,15 @@ onBeforeUnmount(() => {
                   v-if="data.attachments.filter(a => a.messageId === item.data.id && isImage(a.mimeType)).length"
                   class="flex flex-wrap gap-2"
                 >
-                  <a
+                  <button
                     v-for="file in data.attachments.filter(a => a.messageId === item.data.id && isImage(a.mimeType))"
                     :key="file.id"
-                    :href="attachmentUrls[file.id]"
-                    :download="file.fileName"
-                    target="_blank"
-                    class="block rounded-lg overflow-hidden border border-line bg-surface-2/60 hover:border-brand-400"
+                    type="button"
+                    class="block rounded-lg overflow-hidden border border-line bg-surface-2/60 hover:border-brand-400 cursor-zoom-in disabled:cursor-default disabled:opacity-70"
                     :title="file.fileName"
+                    :aria-label="i18n.t('ticket.view_image', { name: file.fileName })"
+                    :disabled="!attachmentUrls[file.id]"
+                    @click="openImage(file)"
                   >
                     <img
                       v-if="attachmentUrls[file.id]"
@@ -334,7 +349,10 @@ onBeforeUnmount(() => {
                       class="max-h-48 max-w-[240px] w-auto object-contain"
                       loading="lazy"
                     />
-                  </a>
+                    <span v-else class="flex h-24 w-24 items-center justify-center text-muted">
+                      <AppIcon :name="attachmentFailed[file.id] ? 'image_not_supported' : 'image'" class="!text-xl" />
+                    </span>
+                  </button>
                 </div>
                 <div
                   v-for="file in data.attachments.filter(a => a.messageId === item.data.id && !isImage(a.mimeType))"
@@ -452,4 +470,26 @@ onBeforeUnmount(() => {
       </div>
     </section>
   </div>
+
+  <AppDialog
+    v-model="imagePreviewOpen"
+    :title="i18n.t('ticket.image_preview')"
+    dialog-class="ticket-image-dialog"
+  >
+    <div v-if="imagePreview" class="flex flex-col items-center gap-4">
+      <img
+        :src="imagePreview.url"
+        :alt="imagePreview.name"
+        class="max-h-[70dvh] w-auto max-w-full object-contain"
+      />
+      <a
+        :href="imagePreview.url"
+        :download="imagePreview.name"
+        class="btn btn-primary"
+      >
+        <AppIcon name="download" />
+        <span>{{ i18n.t('ticket.download_original') }}</span>
+      </a>
+    </div>
+  </AppDialog>
 </template>

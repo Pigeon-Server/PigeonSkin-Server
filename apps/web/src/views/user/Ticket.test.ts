@@ -6,6 +6,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import AppAlert from '@/components/ui/AppAlert.vue';
 import AppInput from '@/components/ui/AppInput.vue';
+import AppDialog from '@/components/ui/AppDialog.vue';
 import AppSkeleton from '@/components/ui/AppSkeleton.vue';
 import PageHeader from '@/components/ui/PageHeader.vue';
 
@@ -41,8 +42,12 @@ vi.mock('@/stores/i18n', () => ({
         'ticket.admin': '管理员',
         'ticket.back_to_list': '返回工单列表',
         'ticket.event_created': '提交了工单',
+        'ticket.event_status_changed': '工单状态变更为 {status}',
         'ticket.attachments': '附件',
         'ticket.attach_files': '添加附件',
+        'ticket.image_preview': '图片预览',
+        'ticket.view_image': '查看图片：{name}',
+        'ticket.download_original': '下载原图',
         'ticket.file_limit_hint': '支持图片、PDF、文本及 ZIP，单个不超过 5MB',
         'ticket.status.pending': '待处理',
         'ticket.status.in_progress': '处理中',
@@ -50,10 +55,9 @@ vi.mock('@/stores/i18n', () => ({
         'ticket.status.closed': '已关闭',
         'common.retry': '重试',
       };
-      if (key === 'ticket.event_status_changed' && params) {
-        return `工单状态变更为 ${params.status}`;
-      }
-      return messages[key] || key;
+      const template = messages[key] ?? key;
+      if (!params) return template;
+      return Object.entries(params).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), template);
     },
     d: (d: number | string) => String(d),
   }),
@@ -124,11 +128,21 @@ const mockDetail = {
       detail: null,
       createdAt: 1710000500,
     },
+    {
+      id: 3,
+      actorId: 1,
+      type: 'message',
+      fromStatus: null,
+      toStatus: null,
+      detail: '这条正文不该被重复成流转记录',
+      createdAt: 1710000600,
+    },
   ],
 };
 
 const getMock = vi.fn().mockResolvedValue(mockDetail);
 const replyMock = vi.fn().mockResolvedValue({ ok: true, messageId: 103 });
+const { requestBlobMock } = vi.hoisted(() => ({ requestBlobMock: vi.fn() }));
 
 vi.mock('@/api', () => ({
   ticketApi: {
@@ -137,7 +151,7 @@ vi.mock('@/api', () => ({
     attachmentUrl: (ticketId: number, attachmentId: number) => `/api/v1/tickets/${ticketId}/attachments/${attachmentId}`,
   },
   // 附件需要 Bearer 认证：组件经 requestBlob 取 blob 再渲染 object URL
-  requestBlob: () => Promise.resolve(new Blob(['attachment-bytes'])),
+  requestBlob: (path: string) => requestBlobMock(path),
 }));
 
 vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:mock-attachment', revokeObjectURL: () => {} }));
@@ -158,6 +172,7 @@ function mountComponent() {
         AppIcon,
         AppAlert,
         AppInput,
+        AppDialog,
         AppSkeleton,
         PageHeader,
         RouterLink: {
@@ -172,6 +187,7 @@ function mountComponent() {
 describe('User Ticket Detail View (Ticket.vue)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    requestBlobMock.mockImplementation(() => Promise.resolve(new Blob(['attachment-bytes'])));
   });
 
   it('renders ticket header, messages, timeline events and attachments', async () => {
@@ -189,6 +205,58 @@ describe('User Ticket Detail View (Ticket.vue)', () => {
     expect(thumbnail.attributes('src')).toBe('blob:mock-attachment');
     expect(wrapper.text()).toContain('提交了工单');
     expect(wrapper.text()).toContain('工单状态变更为 处理中');
+    // 消息本身已有气泡，事件流不再把正文重复成一条流转记录
+    expect(wrapper.text()).not.toContain('这条正文不该被重复成流转记录');
+  });
+
+  it('opens the image attachment in a viewer instead of downloading it', async () => {
+    const wrapper = mountComponent();
+    await flushPromises();
+
+    const thumbnail = wrapper.find('button[aria-label="查看图片：screenshot.png"]');
+    expect(thumbnail.exists()).toBe(true);
+    expect(thumbnail.attributes('download')).toBeUndefined();
+    expect(thumbnail.attributes('disabled')).toBeUndefined();
+    // 预览弹窗默认关闭，点击缩略图才打开；下载入口在弹窗内
+    expect(wrapper.findComponent(AppDialog).props('modelValue')).toBe(false);
+    expect(wrapper.find('a[download="screenshot.png"]').exists()).toBe(false);
+
+    await thumbnail.trigger('click');
+    await flushPromises();
+
+    const dialog = wrapper.findComponent(AppDialog);
+    expect(dialog.props('modelValue')).toBe(true);
+    expect(dialog.props('title')).toBe('图片预览');
+    const download = dialog.find('a[download="screenshot.png"]');
+    expect(download.exists()).toBe(true);
+    expect(download.attributes('href')).toBe('blob:mock-attachment');
+  });
+
+  it('leaves the viewer closed when the attachment cannot be loaded', async () => {
+    requestBlobMock.mockImplementation(() => Promise.reject(new Error('attachment unavailable')));
+    const wrapper = mountComponent();
+    await flushPromises();
+
+    const thumbnail = wrapper.find('button[aria-label="查看图片：screenshot.png"]');
+    expect(thumbnail.attributes('disabled')).toBeDefined();
+    expect(thumbnail.text()).toContain('image_not_supported');
+
+    await thumbnail.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.findComponent(AppDialog).props('modelValue')).toBe(false);
+  });
+
+  it('shows a neutral placeholder while the attachment is still loading', async () => {
+    // 永不落地的 promise：模拟慢网下附件仍在读取的窗口
+    requestBlobMock.mockImplementation(() => new Promise(() => {}));
+    const wrapper = mountComponent();
+    await flushPromises();
+
+    const thumbnail = wrapper.find('button[aria-label="查看图片：screenshot.png"]');
+    expect(thumbnail.attributes('disabled')).toBeDefined();
+    expect(thumbnail.text()).toContain('image');
+    expect(thumbnail.text()).not.toContain('image_not_supported');
   });
 
   it('keeps the return link inside the page header as the breadcrumb row', async () => {

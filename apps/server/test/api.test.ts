@@ -1910,6 +1910,43 @@ describe('工单回复身份', () => {
     expect(ticket.status).toBe('in_progress');
   });
 
+  it('回复不再写入重复的流转事件，事件流只保留创建与状态流转', async () => {
+    const owner = await registerUser();
+    const ownerCookie = await login(owner.email);
+    const ticketId = await createTicket(ownerCookie);
+
+    const form = new FormData();
+    form.set('body', '补充说明');
+    expect((await authedFetch(ownerCookie, `https://x/api/v1/tickets/${ticketId}/messages`, { method: 'POST', body: form })).status).toBe(200);
+
+    const detail = await authedFetch(ownerCookie, `https://x/api/v1/tickets/${ticketId}`);
+    const { events } = await detail.json<{ events: Array<{ type: string; detail: string | null }> }>();
+    expect(events.map(e => e.type)).toEqual(['created']);
+    expect(events.some(e => e.detail === '补充说明')).toBe(false);
+  });
+
+  it('历史的内部备注流转事件不下发给工单所有者', async () => {
+    const owner = await registerUser();
+    const ownerCookie = await login(owner.email);
+    const ticketId = await createTicket(ownerCookie);
+
+    // 本次改动前 addMessage 会给内部备注写一条 type='internal_note' 事件，备注正文进 detail
+    await env.DB.prepare('INSERT INTO ticket_events(ticket_id,actor_id,type,detail,created_at) VALUES(?,?,?,?,?)')
+      .bind(ticketId, owner.id, 'internal_note', '仅管理员可见的内部判断', Date.now()).run();
+
+    const ownerDetail = await authedFetch(ownerCookie, `https://x/api/v1/tickets/${ticketId}`);
+    const ownerView = await ownerDetail.json<{ events: Array<{ type: string; detail: string | null }> }>();
+    expect(ownerView.events.some(e => e.type === 'internal_note')).toBe(false);
+    expect(ownerView.events.some(e => e.detail === '仅管理员可见的内部判断')).toBe(false);
+
+    const admin = await registerUser();
+    const adminCookie = await login(admin.email);
+    await makeAdmin(admin.id);
+    const adminDetail = await authedFetch(adminCookie, `https://x/api/v1/admin/tickets/${ticketId}`);
+    const adminView = await adminDetail.json<{ events: Array<{ type: string }> }>();
+    expect(adminView.events.some(e => e.type === 'internal_note')).toBe(true);
+  });
+
   it('内部备注对普通用户不可见；用户端点传 internal=true 被忽略', async () => {
     const owner = await registerUser();
     const ownerCookie = await login(owner.email);

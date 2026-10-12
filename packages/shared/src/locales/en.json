@@ -2114,6 +2114,9 @@
     "too_many_files": "Up to {n} attachments",
     "attach_files": "Attach files",
     "attachments": "Attachments",
+    "image_preview": "Image preview",
+    "view_image": "View image: {name}",
+    "download_original": "Download original",
     "closed_notice": "This ticket is closed",
     "close_ticket": "Close Ticket"
   },

@@ -2114,6 +2114,9 @@
     "too_many_files": "附件最多 {n} 个",
     "attach_files": "添加附件",
     "attachments": "附件",
+    "image_preview": "图片预览",
+    "view_image": "查看图片：{name}",
+    "download_original": "下载原图",
     "closed_notice": "此工单已关闭",
     "close_ticket": "关闭工单"
   },

@@ -2114,6 +2114,9 @@
     "too_many_files": "Не более {n} вложений",
     "attach_files": "Прикрепить файлы",
     "attachments": "Вложения",
+    "image_preview": "Просмотр изображения",
+    "view_image": "Открыть изображение: {name}",
+    "download_original": "Скачать оригинал",
     "closed_notice": "Этот тикет закрыт",
     "close_ticket": "Закрыть тикет"
   },
