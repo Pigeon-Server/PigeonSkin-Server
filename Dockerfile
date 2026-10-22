@@ -9,7 +9,9 @@
 # 缺少 vendor/blockbench 时 docker build 会在 build 阶段报错并给出提示。
 
 # ── 构建阶段 ─────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS build
+# 固定补丁版本而不是浮动 22：CVE-2026-111497（Brotli 解码器越界写入 → RCE）
+# 修复于 22.23.4 / 24.22.1 / 26.12.1，浮动标签回退会重新引入。
+FROM node:22.23.4-bookworm-slim AS build
 
 # build-blockbench.mjs 依赖 git（子模块版本校验与源码归档）
 RUN apt-get update \
@@ -52,7 +54,7 @@ COPY .git/ .git/
 RUN npm run build && npm run build:node --workspace @pigeon-skin/server
 
 # ── 运行阶段 ─────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim
+FROM node:22.23.4-bookworm-slim
 
 WORKDIR /app
 
@@ -70,8 +72,10 @@ COPY --from=build /src/packages/db/migrations/ packages/db/migrations/
 COPY --from=build /src/packages/db/migrations-pg/ packages/db/migrations-pg/
 COPY --from=build /src/packages/db/migrations-mysql/ packages/db/migrations-mysql/
 
-# 非 root 运行；数据目录挂载点归 node(uid/gid 1000)
-RUN chown -R node:node /app
+# 非 root 运行；数据目录挂载点归 node(uid/gid 1000)。目录先建出来再 chown：
+# 镜像内不存在该路径时，VOLUME 生成的匿名卷由 root 拥有，sqlite 会打不开库文件。
+RUN mkdir -p /app/data \
+ && chown -R node:node /app
 USER node
 
 # 默认值：sqlite 零依赖即可运行；生产部署务必显式设置 SESSION_SECRET 与
@@ -91,7 +95,7 @@ ENV NODE_ENV=production \
 VOLUME /app/data
 EXPOSE 8787
 
-# node:22-slim 无 curl：用内置 fetch 探活（health 端点会真实执行 SELECT 1）
+# 运行镜像无 curl：用内置 fetch 探活（health 端点会真实执行 SELECT 1）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:8787/api/v1/health').then(r => r.json()).then(j => process.exit(j.ok ? 0 : 1)).catch(() => process.exit(1))"]
 

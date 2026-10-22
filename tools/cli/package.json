@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Pigeon Skin Server 管理 CLI —— 用户管理 / 材质导入导出 / 数据备份 / 设置项",
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1"
   },
   "scripts": {
     "cli": "node src/index.ts",

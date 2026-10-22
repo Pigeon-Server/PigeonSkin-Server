@@ -2,7 +2,7 @@
 
 欢迎通过 [Issue 和 Pull Request](https://github.com/Pigeon-Server/PigeonSkin-Server) 贡献修复、翻译和功能。安全问题请遵循 [SECURITY.md](SECURITY.md)。
 
-使用 Node.js 22.18 或更新的受支持版本，以及 npm 10+。安装和本地启动见 [README.md](README.md)。提交前运行：
+使用 Node.js 22.23.4 / 24.22.1 / 26.12.1 或各自更新的补丁版本（更低版本受 CVE-2026-111497 等运行库漏洞影响），以及 npm 10+。安装和本地启动见 [README.md](README.md)。提交前运行：
 
 ```sh
 npm run typecheck

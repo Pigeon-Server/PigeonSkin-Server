@@ -98,7 +98,7 @@ Redis 只在显式配置 `REDIS_URL` 后启用，见下文「Redis 可选层」�
 
 ## 裸机部署
 
-要求 Node.js ≥ 22.18（使用了内置的 `node:sqlite` 模块，无需原生编译）。
+要求 Node.js ≥ 22.23.4（或 ≥ 24.22.1 / ≥ 26.12.1；使用了内置的 `node:sqlite` 模块，无需原生编译）。这些补丁版本修复了包括 CVE-2026-111497（Brotli 解码器越界写入，可导致远程代码执行）在内的运行库漏洞，更低版本不要用于对外服务。Docker 镜像已固定到 `node:22.23.4-bookworm-slim`。
 
 ```bash
 git clone --recurse-submodules https://github.com/Pigeon-Server/PigeonSkin-Server.git
