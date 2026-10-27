@@ -11,11 +11,13 @@ import { createDb, scalarMax } from '@pigeon-skin/db';
 import { canModifyUser, type Role, type TextureKind, type TextureModel, type TextureVisibility } from '@pigeon-skin/shared';
 
 import {
-  validateTexture, textureObjectKey, DEFAULT_TEXTURE_LIMITS, type TextureLimits,
+  textureObjectKey, DEFAULT_TEXTURE_LIMITS, sha256Hex,
+  type TextureLimits,
 } from '@pigeon-skin/minecraft';
 import { bumpSitemap } from './sitemap-cache.ts';
 
 import { audit } from './audit.ts';
+import { computeSanitize, computeValidateTexture } from './compute.ts';
 import { queueTextureSubmission } from './search-submissions.ts';
 import * as repo from '../repositories/textures.ts';
 import type { SqlFragment } from '../search/compile.ts';
@@ -103,7 +105,6 @@ export interface UploadTextureInput {
   name: string;
   description?: string | undefined;
   kind: TextureKind;
-  model: TextureModel | null;
   visibility: TextureVisibility;
   limits: TextureLimits;
   /** 纹理名正则；留空表示不限制 */
@@ -128,13 +129,14 @@ export interface UploadCostRates {
  * 上传纹理。
  *
  * 顺序刻意如此，每一步的失败后果都是可诊断的：
- *   1. 校验（不解码像素）→ 失败无副作用
- *   2. 重复检测 → 失败无副作用
- *   3. 算费用
- *   4. 一个批处理里：原子扣分 + 建行（余额条件在 UPDATE 的 WHERE 里）
- *   5. 写 R2 对象
+ *   1. 结构/尺寸校验（不解码像素）→ 失败无副作用
+ *   2. 净化（解码 → 重编码，顺带判定皮肤模型）→ 失败无副作用
+ *   3. 重复检测 → 失败无副作用
+ *   4. 算费用
+ *   5. 一个批处理里：原子扣分 + 建行（余额条件在 UPDATE 的 WHERE 里）
+ *   6. 写 R2 对象
  *
- * 第 4 步先于第 5 步：若 R2 写入失败，结果是"行存在但对象缺失" ——
+ * 第 5 步先于第 6 步：若 R2 写入失败，结果是"行存在但对象缺失" ——
  * verify 与每日定时任务会检测这种状态，服务端对它返回 503。
  * 反过来会留下无人引用、难以归因的孤儿对象。
  */
@@ -146,25 +148,38 @@ export async function uploadTexture(
 ): Promise<{ id: number; hash: string; width: number; height: number; sizeBytes: number; scoreSpent: number; reused: boolean }> {
   assertNameMatches(input.name, input.nameRegexp);
 
-  const validated = await validateTexture(
+  const validated = await computeValidateTexture(
+    env,
     input.bytes,
-    { kind: input.kind, model: input.model },
+    // 模型是像素的函数,校验阶段尚不可知;model null 对皮肤放行 1:1 与 1:2
+    { kind: input.kind, model: null },
     input.limits,
   );
   if (!validated.ok) {
     // 校验器的错误码本身就是 API 错误码，直接透传，不重新映射
     throw new AppError(validated.code, 422, validated.message);
   }
-  const { hash, info, byteLength } = validated.value;
+  // 规范 §2.7：服务端必须去除材质里任何与位图无关的数据。解码 → 重编码
+  // 之后才哈希入库，保证分发出去的字节只有像素本身（原始 tEXt/iCCP/eXIf
+  // 等元数据不会随物料外泄）。旧版 22×17 披风在这一步补透明边到 64×32。
+  const sanitized = await computeSanitize(env, input.bytes, input.kind, input.limits.maxArea);
+  if (!sanitized.ok) throw new AppError('texture.malformed', 422, sanitized.reason);
+  const pixels = sanitized.bytes;
+  // 重编码后尺寸可能变大（补边），需要重新量一遍
+  const hash = await sha256Hex(pixels);
+  const info = { width: sanitized.width, height: sanitized.height };
+  const byteLength = pixels.length;
+  // 模型只由像素决定,调用方(表单/启动器)传的 model 一律忽略
+  const model: TextureModel | null = sanitized.skinModel ?? null;
 
   const database = db(env);
   if (input.sourceResourceId != null) {
     const source = await repo.findTextureById(database, input.sourceResourceId);
-    if (!source || (source.visibility !== 'public' && source.uploaderId !== uploader.id) || source.kind !== input.kind || (input.kind === 'skin' && (source.model ?? 'default') !== (input.model ?? 'default'))) {
+    if (!source || (source.visibility !== 'public' && source.uploaderId !== uploader.id) || source.kind !== input.kind) {
       throw fail.invalid('common.invalid_request', { sourceResourceId: 'invalid' });
     }
   }
-  const existing = await repo.findVisibleDuplicate(database, hash, uploader.id, input.visibility, input.kind, input.model);
+  const existing = await repo.findVisibleDuplicate(database, hash, uploader.id, input.visibility, input.kind, model);
   if (existing) {
     if (input.allowDuplicateReuse) {
       return { id: existing.id, hash, width: info.width, height: info.height, sizeBytes: byteLength, scoreSpent: 0, reused: true };
@@ -184,8 +199,8 @@ export async function uploadTexture(
   const now = Date.now();
   const statements = [
     env.DB.prepare('UPDATE users SET score=score-?,updated_at=? WHERE id=? AND score>=?').bind(cost, now, uploader.id, cost),
-    env.DB.prepare(`INSERT INTO textures(hash,kind,model,name,uploader_id,source_resource_id,origin,size_bytes,visibility,width,height,likes,created_at,updated_at,score_refund_basis,score_award)
-      SELECT ?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,? WHERE changes()>0 RETURNING id`).bind(hash, input.kind, input.model, input.name, uploader.id, input.sourceResourceId ?? null, input.origin ?? 'original', byteLength, input.visibility, info.width, info.height, now, now, cost, award),
+    env.DB.prepare(`INSERT INTO textures(hash,kind,model,name,uploader_id,source_resource_id,origin,size_bytes,visibility,width,height,likes,created_at,updated_at,score_refund_basis,score_award,sanitized)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,1 WHERE changes()>0 RETURNING id`).bind(hash, input.kind, model, input.name, uploader.id, input.sourceResourceId ?? null, input.origin ?? 'original', byteLength, input.visibility, info.width, info.height, now, now, cost, award),
   ];
   if (input.description) statements.push(env.DB.prepare('INSERT INTO textures_description(tid,description,updated_at) SELECT last_insert_rowid(),?,? WHERE changes()>0').bind(input.description, now));
   if (input.addToCloset !== false) statements.push(env.DB.prepare('INSERT INTO closet(user_id,texture_id,item_name,created_at,is_default) SELECT ?,last_insert_rowid(),?,?,0 WHERE changes()>0 ON CONFLICT(user_id,texture_id) DO NOTHING').bind(uploader.id, input.name, now));
@@ -195,7 +210,8 @@ export async function uploadTexture(
   if (!id) throw fail.conflict('texture.duplicate');
 
   // 元数据已提交，现在写字节。对象键由哈希直接推导，无需查表。
-  await env.BUCKET.put(textureObjectKey(hash), input.bytes, {
+  // 写入的是净化后的字节（与哈希一致），不是上传的原始文件。
+  await env.BUCKET.put(textureObjectKey(hash), pixels, {
     httpMetadata: {
       contentType: 'image/png',
       cacheControl: 'public, max-age=31536000, immutable',
@@ -203,7 +219,7 @@ export async function uploadTexture(
   });
 
   // 站点地图失效（公开纹理 URL 集变化）。失败不阻塞上传。
-  await bumpSitemap();
+  await bumpSitemap(env);
 
   await queueTextureSubmission(env, id);
   return { id, hash, width: info.width, height: info.height, sizeBytes: byteLength, scoreSpent: cost, reused: false };
@@ -222,7 +238,7 @@ export async function renameTexture(
   if (!texture) throw fail.notFound('texture.not_found');
   await assertCanEdit(env, texture.uploaderId, actor);
   await repo.updateTexture(database, id, { name, updatedAt: Date.now() });
-  await bumpSitemap();
+  await bumpSitemap(env);
   await queueTextureSubmission(env, id);
 }
 
@@ -247,7 +263,7 @@ export async function patchTexture(
   env: TextureEnv,
   actor: AuthedUser,
   id: number,
-  input: { name?: string | undefined; visibility?: TextureVisibility | undefined; kind?: TextureKind | undefined; model?: TextureModel | undefined },
+  input: { name?: string | undefined; visibility?: TextureVisibility | undefined; kind?: TextureKind | undefined },
   rates: UploadCostRates,
   nameRegexp: string,
 ): Promise<{ scoreDelta: number }> {
@@ -257,14 +273,23 @@ export async function patchTexture(
   const name = typeof input.name === 'string' ? input.name : texture.name;
   const visibility = input.visibility ?? texture.visibility;
   const kind = input.kind ?? texture.kind as TextureKind;
-  const model = kind === 'cape' ? null : input.model ?? (texture.model as TextureModel | null) ?? 'default';
+  // 模型只由像素决定,不接受补丁指定:内容不变就保持现值;类型切换在下方
+  // typeChanged 分支里重新判定(→skin)或归空(→cape)
+  let model: TextureModel | null = kind === 'cape' ? null : ((texture.model as TextureModel | null) ?? 'default');
   assertNameMatches(name, nameRegexp);
   const typeChanged = kind !== texture.kind || model !== texture.model;
   const wasPubliclyReachable = texture.visibility === 'public' || await repo.countPublicReferencesToHash(db(env), texture.hash) > 0;
   if (typeChanged) {
     const object = await env.BUCKET.get(textureObjectKey(texture.hash));
     if (!object) throw fail.notFound('texture.not_found');
-    const validation = await validateTexture(new Uint8Array(await object.arrayBuffer()), { kind, model }, {
+    const objectBytes = new Uint8Array(await object.arrayBuffer());
+    if (kind === 'skin') {
+      // 切到皮肤(或存量 NULL 行归一):模型按存储像素重新判定
+      const sanitized = await computeSanitize(env, objectBytes, 'skin', DEFAULT_TEXTURE_LIMITS.maxArea);
+      if (!sanitized.ok) throw fail.invalid('texture.malformed');
+      model = sanitized.skinModel ?? 'default';
+    }
+    const validation = await computeValidateTexture(env, objectBytes, { kind, model }, {
       ...DEFAULT_TEXTURE_LIMITS,
       maxSizeBytes: Math.max(DEFAULT_TEXTURE_LIMITS.maxSizeBytes, texture.sizeBytes),
       maxWidth: Math.max(DEFAULT_TEXTURE_LIMITS.maxWidth, texture.width),
@@ -308,7 +333,7 @@ export async function patchTexture(
     throw fail.conflict('texture.changed');
   }
   for (const name of wearingPlayers) await purgePlayerProfiles(env, name);
-  await bumpSitemap();
+  await bumpSitemap(env);
   await queueTextureSubmission(env, id);
   // 类型与模型参与衍生图的渲染（预览区分披风/皮肤与经典/纤细模型），
   // 而产物按哈希寻址、以 immutable 下发 —— 不改这一处就等于让新模型永远
@@ -334,13 +359,33 @@ export async function replaceTextureContent(
   await assertCanEdit(env, texture.uploaderId, actor);
   if (texture.official) throw fail.forbidden('common.forbidden');
 
-  const validation = await validateTexture(bytes, {
+  const validation = await computeValidateTexture(env, bytes, {
     kind: texture.kind as TextureKind,
-    model: texture.kind === 'cape' ? null : texture.model as TextureModel,
+    model: null,
   }, limits);
   if (!validation.ok) throw new AppError(validation.code, 422, validation.message);
-  const { hash, info, byteLength } = validation.value;
-  if (hash === texture.hash) return { hash, width: info.width, height: info.height, sizeBytes: byteLength };
+  // 与上传同一规则：剥离元数据后重编码，哈希以净化后的字节为准；
+  // 模型借这一次解码按像素重新判定（哈希不变时内容不变，模型也不会变）
+  const sanitized = await computeSanitize(env, bytes, texture.kind as TextureKind, limits.maxArea);
+  if (!sanitized.ok) throw new AppError('texture.malformed', 422, sanitized.reason);
+  const sanitizedBytes = sanitized.bytes;
+  const model: TextureModel | null = sanitized.skinModel ?? null;
+  const hash = await sha256Hex(sanitizedBytes);
+  const info = { width: sanitized.width, height: sanitized.height };
+  const byteLength = sanitizedBytes.length;
+  if (hash === texture.hash) {
+    // 内容没变 → 模型理论上也不会变;但存量行的 model 可能仍是用户当年手选
+    // 的错值(或 NULL),覆盖保存同一张图是用户能自愈的机会,顺手纠正。
+    if (model !== null && model !== texture.model) {
+      const { playersWearingTexture, purgePlayerProfiles, purgeTextureDerivatives } = await import('./texture-access.ts');
+      const wearing = await playersWearingTexture(env, id, Date.now());
+      await env.DB.prepare('UPDATE textures SET model=?, updated_at=? WHERE id=? AND hash=?').bind(model, Date.now(), id, texture.hash).run();
+      for (const name of wearing) await purgePlayerProfiles(env, name);
+      await purgeTextureDerivatives(env, texture.hash);
+      await queueTextureSubmission(env, id);
+    }
+    return { hash, width: info.width, height: info.height, sizeBytes: byteLength };
+  }
 
   const governance = texture.uploaderId !== actor.id && isAdmin(actor);
   const perKb = texture.visibility === 'public' ? rates.perKbPublic : rates.perKbPrivate;
@@ -353,18 +398,18 @@ export async function replaceTextureContent(
   const { playersWearingTexture, purgePlayerProfiles } = await import('./texture-access.ts');
   const wearingPlayers = await playersWearingTexture(env, id, Date.now());
 
-  await env.BUCKET.put(textureObjectKey(hash), bytes, {
+  await env.BUCKET.put(textureObjectKey(hash), sanitizedBytes, {
     httpMetadata: { contentType: 'image/png', cacheControl: 'public, max-age=31536000, immutable' },
   });
   const now = Date.now();
   const statements = governance ? [
-    env.DB.prepare('UPDATE textures SET hash=?,width=?,height=?,size_bytes=?,updated_at=? WHERE id=? AND hash=? AND updated_at=?')
-      .bind(hash, info.width, info.height, byteLength, now, id, texture.hash, texture.updatedAt),
+    env.DB.prepare('UPDATE textures SET hash=?,width=?,height=?,size_bytes=?,model=?,sanitized=1,updated_at=? WHERE id=? AND hash=? AND updated_at=?')
+      .bind(hash, info.width, info.height, byteLength, model, now, id, texture.hash, texture.updatedAt),
   ] : [
     env.DB.prepare('UPDATE users SET score=score-?,updated_at=? WHERE id=? AND (?<=0 OR score>=?) AND EXISTS(SELECT 1 FROM textures WHERE id=? AND hash=? AND updated_at=?)')
       .bind(scoreDelta, now, texture.uploaderId, scoreDelta, scoreDelta, id, texture.hash, texture.updatedAt),
-    env.DB.prepare(`UPDATE textures SET hash=?,width=?,height=?,size_bytes=?,score_refund_basis=${scalarMax('0', 'score_refund_basis+?')},updated_at=? WHERE id=? AND changes()>0`)
-      .bind(hash, info.width, info.height, byteLength, scoreDelta, now, id),
+    env.DB.prepare(`UPDATE textures SET hash=?,width=?,height=?,size_bytes=?,model=?,sanitized=1,score_refund_basis=${scalarMax('0', 'score_refund_basis+?')},updated_at=? WHERE id=? AND changes()>0`)
+      .bind(hash, info.width, info.height, byteLength, model, scoreDelta, now, id),
   ];
   const changed = await env.DB.batch(statements);
   const textureChanged = governance ? !!changed[0]?.meta.changes : !!changed[1]?.meta.changes;
@@ -379,7 +424,7 @@ export async function replaceTextureContent(
   }
   if (!await repo.countPublicReferencesToHash(database, texture.hash)) await (await import('./texture-access.ts')).purgeTextureDerivatives(env, texture.hash);
   for (const name of wearingPlayers) await purgePlayerProfiles(env, name);
-  await bumpSitemap();
+  await bumpSitemap(env);
   await queueTextureSubmission(env, id);
   return { hash, width: info.width, height: info.height, sizeBytes: byteLength };
 }
@@ -410,7 +455,7 @@ export async function deleteTexture(
   const deleted = await env.DB.batch(statements);
   if (!deleted[0]?.meta.changes) throw fail.conflict('texture.changed');
   for (const name of wearingPlayers) await purgePlayerProfiles(env, name);
-  await bumpSitemap();
+  await bumpSitemap(env);
   await queueTextureSubmission(env, id);
 
   // 管理员删除他人纹理是治理动作，留审计痕迹；用户删自己的不用记

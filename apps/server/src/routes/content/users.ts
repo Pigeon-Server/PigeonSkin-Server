@@ -7,8 +7,8 @@
 import { fail } from '../../core/framework.ts';
 import { type AppEnv } from '../../core/user.ts';
 import { Hono } from 'hono';
-import { and, eq, sql } from 'drizzle-orm';
-import { createDb, textures, users } from '@pigeon-skin/db';
+import { eq, sql } from 'drizzle-orm';
+import { createDb, textureCounts, users } from '@pigeon-skin/db';
 
 export const usersRoutes = new Hono<AppEnv>();
 
@@ -33,12 +33,12 @@ usersRoutes.get('/users/:id/profile', async (c) => {
 
   const counts = await db
     .select({
-      kind: textures.kind,
-      n: sql<number>`count(*)`,
+      kind: textureCounts.kind,
+      n: sql<number>`SUM(${textureCounts.value})`.mapWith(Number),
     })
-    .from(textures)
-    .where(and(eq(textures.uploaderId, id), eq(textures.visibility, 'public')))
-    .groupBy(textures.kind);
+    .from(textureCounts)
+    .where(eq(textureCounts.scope, `u:${id}:public`))
+    .groupBy(textureCounts.kind);
 
   const skins = counts.find((r) => r.kind === 'skin')?.n ?? 0;
   const capes = counts.find((r) => r.kind === 'cape')?.n ?? 0;

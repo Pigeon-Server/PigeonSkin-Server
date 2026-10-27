@@ -7,7 +7,8 @@ import { needsAccountInitialization, toPublicUser, type AppEnv } from './../core
 import type { Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { base64url } from 'jose';
-import { hashToken, mintTokenWithHash, verifyStoredPassword } from '@pigeon-skin/auth';
+import { hashToken, mintTokenWithHash } from '@pigeon-skin/auth';
+import { computePasswordVerify } from './compute.ts';
 import { LIMITS } from '@pigeon-skin/shared';
 import { isUniqueViolation, noCaseEq } from '@pigeon-skin/db';
 import type { SecondFactor, SecurityChallenge, SecurityStatus } from '@pigeon-skin/shared/security';
@@ -126,7 +127,7 @@ export async function passwordReauth(c: Ctx, password: string) {
   const config = await repo.state(c.env, user.id);
   if ((await repo.methods(c.env, user.id)).length) return newChallenge(c, user.id, 'reauth');
   const credentials = (await repo.user(c.env, user.id))!;
-  if (!credentials.password_hash || !await verifyStoredPassword(password, credentials.password_hash, { legacySalt: c.env.LEGACY_SALT ?? '' })) throw new AppError('auth.invalid_credentials', 401);
+  if (!credentials.password_hash || !await computePasswordVerify(c.env, password, credentials.password_hash, { legacySalt: c.env.LEGACY_SALT ?? '' })) throw new AppError('auth.invalid_credentials', 401);
   await grantReauth(c, user.id, { version: config.version, credentialsHash: await hashToken(`${credentials.password_hash}\n${credentials.email}\n${credentials.role}`) });
   return null;
 }

@@ -19,6 +19,7 @@
 import { flag, type Bindings } from './../core/env.ts';
 import { getSetting, readSettings } from './../core/settings-reader.ts';
 import { SECRET_PLACEHOLDER } from './configuration.ts';
+import { pauseWorkersAiToday, readWorkersAiQuota, type WorkersAiQuota } from './ai-quota.ts';
 
 // ── 任务定义注册表 ──────────────────────────────────────────────────────────
 
@@ -213,6 +214,7 @@ export interface AiProviderFailure {
   retryAfterMs: number;
   /** 是否连整条队列一起推后。超时可能只是单个任务自己的问题（超大输入），只推它自己。 */
   pauseQueue: boolean;
+  dailyQuota?: boolean;
 }
 
 const PROVIDER_RETRY_MS: Record<AiFailureKind, number> = {
@@ -291,11 +293,19 @@ export async function runAiJob(
   options?: { maxChars?: number; reasoningOverride?: ReasoningMode },
 ): Promise<AiTextResult> {
   const maxChars = options?.maxChars ?? 4000;
+  let quota: WorkersAiQuota | undefined;
   try {
     const config = await resolveDriverConfig(env, undefined, def);
     if (!config.driver || !config.kind) return null;
     const model = await jobModel(env, def, config);
     if (!model) return null;
+    if (config.kind === 'workers' || (config.kind === 'systemone' && model.startsWith(CLEF_MODEL_PREFIX))) {
+      quota = await readWorkersAiQuota(env);
+      if (quota.paused) {
+        recordProviderFailure({ kind: 'quota', message: 'Workers AI daily allocation exhausted', retryAfterMs: quota.pausedUntil - Date.now(), pauseQueue: true, dailyQuota: true });
+        return null;
+      }
+    }
     // 判别模型（System One/Clef）输入即数据、不做生成：走 state+questions 结构化
     // 调用，不走 system 提示词与界定符。Clef 模型本身防注入，Jev 同理。
     if (config.kind === 'systemone') {
@@ -310,6 +320,11 @@ export async function runAiJob(
   } catch (e) {
     const failure = classifyAiFailure(e);
     if (failure) {
+      if (failure.kind === 'quota' && quota) {
+        await pauseWorkersAiToday(env, quota);
+        failure.dailyQuota = true;
+        failure.retryAfterMs = (Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000 - Date.now();
+      }
       recordProviderFailure(failure);
       return null;
     }
@@ -426,6 +441,12 @@ async function discriminativeThreshold(env: Pick<Bindings, 'DB'>): Promise<numbe
  * 返回经阈值判定的 verdict JSON 文本（与生成式 parseVerdict 同形状）。
  * 判别模型不做生成，管理员 prompt 覆盖改作 unsafe 问题 instructions。
  */
+async function cloudflareAiError(response: Response): Promise<Error> {
+  const body = await response.json<{ errors?: Array<{ code?: number; message?: string }> }>().catch(() => null);
+  const error = body?.errors?.[0];
+  return Object.assign(new Error(`cloudflare ${response.status}: ${error?.message ?? ''}`), error?.code === undefined ? {} : { code: error.code });
+}
+
 async function systemoneModerate(
   env: Bindings,
   def: AiJobDefinition,
@@ -455,7 +476,7 @@ async function systemoneModerate(
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ model: model.slice(CLEF_MODEL_PREFIX.length), state, questions }),
     }), callTimeoutMs(env));
-    if (!response.ok) throw new Error(`cloudflare ${response.status}`);
+    if (!response.ok) throw await cloudflareAiError(response);
     result = await response.json<SystemOneAnswers>();
   } else {
     // TypeSafe System One（Jev）；base URL 可自定义（自托管/代理网关），空 = 官方端点
@@ -610,6 +631,14 @@ async function jobModel(env: Bindings, def: AiJobDefinition, config?: { kind: Dr
   if (kind === 'systemone') return def.discriminative ? await systemoneDefaultModel(env, values) : null;
   if (kind === 'workers') return def.defaultModel.workers;
   return null;
+}
+
+export async function aiJobProvider(env: Bindings, def: AiJobDefinition): Promise<'workers' | 'other' | null> {
+  const config = await resolveDriverConfig(env, undefined, def);
+  if (!config.driver) return null;
+  const model = await jobModel(env, def, config);
+  if (!model) return null;
+  return config.kind === 'workers' || (config.kind === 'systemone' && model.startsWith(CLEF_MODEL_PREFIX)) ? 'workers' : 'other';
 }
 
 /**
@@ -934,7 +963,7 @@ async function systemonePing(
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ model: model.slice(CLEF_MODEL_PREFIX.length), state: 'ping', questions }),
     }), timeoutMs);
-    if (!response.ok) throw new Error(`cloudflare ${response.status}`);
+    if (!response.ok) throw await cloudflareAiError(response);
     answers = (await response.json<SystemOneAnswers>()).answers ?? null;
   } else {
     const apiKey = (values.ai_systemone_api_key ?? '').trim() || env.TYPESAFE_API_KEY || '';

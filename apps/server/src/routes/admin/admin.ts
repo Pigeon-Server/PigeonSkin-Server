@@ -4,6 +4,7 @@
 import { AppError, currentAdmin, currentUser, fail, paginate, readJson, readJsonOptional, readPagination, readQuery } from '../../core/framework.ts';
 import { getSetting, getSettingBool, getSettingInt } from '../../core/settings-reader.ts';
 import { type AppEnv } from '../../core/user.ts';
+import { readD1Budget } from '../../core/usage-budget.ts';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -34,10 +35,12 @@ import * as tickets from '../../services/tickets.ts';
 import { enqueueBroadcastEmail, isEmailConfigured, renderEmail, sendEmail } from '../../services/email.ts';
 import { multipartLimit } from '../content/tickets.ts';
 import * as aiJobsSvc from '../../services/ai-jobs.ts';
+import { listTaskRuns } from '../../services/task-runs.ts';
+import { readWorkersAiQuota, resetWorkersAiQuota } from '../../services/ai-quota.ts';
 import { AI_JOB_DEFINITIONS, defaultModelFor, effectiveDriverKind, fetchAvailableModels, testAiConnection } from '../../services/ai-gateway.ts';
 import { resetSearchSubmissions, searchEngines } from '../../services/search-submissions.ts';
 import {
-  createDb, searchSubmissions, taskRuns as taskRunsTable, textures as texturesTable,
+  createDb, searchSubmissions, textures as texturesTable,
 } from '@pigeon-skin/db';
 import { desc, eq, inArray, or, sql } from 'drizzle-orm';
 
@@ -53,6 +56,7 @@ adminRoutes.use('*', async (c, next) => {
 // ── 总览 ─────────────────────────────────────────────────────────────────────
 
 adminRoutes.get('/stats', async (c) => c.json(await admin.stats(c.env)));
+adminRoutes.get('/usage', async c => c.json({ ...await readD1Budget(c.env), configured: !!c.env.CLOUDFLARE_ANALYTICS_TOKEN }));
 
 // ── 工单 ─────────────────────────────────────────────────────────────────────
 adminRoutes.get('/ticket-categories', async c => c.json(await tickets.listCategories(c.env, true)));
@@ -317,6 +321,12 @@ adminRoutes.post('/notifications/email-preview', async c => {
 
 // ── 通知（用户自己的）────────────────────────────────────────────────────────
 
+notificationRoutes.get('/summary', async c => {
+  const user = currentUser(c);
+  c.header('Cache-Control', 'private, no-store');
+  return c.json({ unread: await notifications.unreadCount(c.env, user.id) });
+});
+
 notificationRoutes.get('/', async (c) => {
   const user = currentUser(c);
   return c.json(await notifications.list(c.env, user.id, {
@@ -422,6 +432,20 @@ adminRoutes.delete('/settings/:key', async (c) => {
 
 const AI_JOB_KINDS = ['translate_texture', 'moderate_texture_name', 'moderate_texture_description', 'translate_notification'] as const;
 const AI_JOB_STATUSES = ['pending', 'processing', 'done', 'failed', 'cancelled'] as const;
+
+adminRoutes.get('/ai-jobs/quota', async (c) => {
+  currentAdmin(c);
+  const state = await readWorkersAiQuota(c.env);
+  return c.json({ paused: state.paused, pausedUntil: state.pausedUntil });
+});
+
+adminRoutes.post('/ai-jobs/quota/reset', async (c) => {
+  const actor = currentAdmin(c);
+  await resetWorkersAiQuota(c.env);
+  await audit(c.env, { actorId: actor.id, action: 'admin.ai_jobs.quota_reset' });
+  c.executionCtx.waitUntil(aiJobsSvc.processDueJobs(c.env).catch(() => {}));
+  return c.json({ ok: true });
+});
 
 adminRoutes.get('/ai-jobs', async (c) => {
   currentAdmin(c);
@@ -544,8 +568,7 @@ adminRoutes.post('/search-submissions/:engine/retry', async (c) => {
 
 adminRoutes.get('/task-runs', async (c) => {
   currentAdmin(c);
-  const db = createDb(c.env.DB);
-  const rows = await db.select().from(taskRunsTable).orderBy(desc(taskRunsTable.ranAt)).limit(100);
+  const rows = await listTaskRuns(c.env);
   return c.json({ items: rows });
 });
 

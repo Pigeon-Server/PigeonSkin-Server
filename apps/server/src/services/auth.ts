@@ -10,7 +10,8 @@
 import { type Bindings } from './../core/env.ts';
 import { AppError, fail } from './../core/framework.ts';
 import { createDb, isUniqueViolation } from '@pigeon-skin/db';
-import { hashPassword, needsRehash, verifyStoredPassword } from '@pigeon-skin/auth';
+import { needsRehash } from '@pigeon-skin/auth';
+import { computePasswordHash, computePasswordVerify } from './compute.ts';
 import { isValidPlayerName, type PlayerNameRule } from '@pigeon-skin/shared';
 
 import { checkEmailDomain } from './email-policy.ts';
@@ -110,7 +111,7 @@ export async function register(
   }
 
   const now = Date.now();
-  const passwordHash = await hashPassword(input.password);
+  const passwordHash = await computePasswordHash(env, input.password);
 
   let results: D1Result<unknown>[];
   try {
@@ -137,10 +138,10 @@ export async function register(
  * 用户不存在时用它做一次等价成本的哈希运算，让失败响应耗时与真实校验相当。
  * 否则响应时间就成了"这个账号是否存在"的探针。
  */
-let dummyHashPromise: Promise<string> | null = null;
-async function dummyHash(): Promise<string> {
-  dummyHashPromise ??= hashPassword('timing-equalizer-not-a-real-password');
-  return dummyHashPromise;
+let dummyHashValue: string | null = null;
+async function dummyHash(env: AuthEnv): Promise<string> {
+  dummyHashValue ??= await computePasswordHash(env, 'timing-equalizer-not-a-real-password');
+  return dummyHashValue;
 }
 
 export async function login(
@@ -164,7 +165,7 @@ export async function login(
   };
 
   if (!user || user.mergedIntoUserId !== null) {
-    await verifyStoredPassword(input.password, await dummyHash());
+    await computePasswordVerify(env, input.password, await dummyHash(env));
     return failLogin();
   }
 
@@ -185,7 +186,7 @@ export async function login(
     const verified: number[] = [];
     for (const account of conflicts) {
       const candidatePassword = input.conflictPasswords?.find(value => value.userId === account.id)?.password ?? input.password;
-      if (await verifyStoredPassword(candidatePassword, account.passwordHash, { legacySalt: env.LEGACY_SALT ?? '' })) verified.push(account.id);
+      if (await computePasswordVerify(env, candidatePassword, account.passwordHash, { legacySalt: env.LEGACY_SALT ?? '' })) verified.push(account.id);
     }
     if (!verified.length) return failLogin();
     const accounts = conflicts.map(account => ({ id: account.id, nickname: account.nickname }));
@@ -202,7 +203,7 @@ export async function login(
     passwordVerified = true;
   }
 
-  const ok = passwordVerified || await verifyStoredPassword(input.conflictPasswords?.find(value => value.userId === user.id)?.password ?? input.password, user.passwordHash, {
+  const ok = passwordVerified || await computePasswordVerify(env, input.conflictPasswords?.find(value => value.userId === user.id)?.password ?? input.password, user.passwordHash, {
     legacySalt: env.LEGACY_SALT ?? '',
   });
   if (!ok) return failLogin();
@@ -217,7 +218,7 @@ export async function login(
 
   // 旧格式（或参数偏低）的哈希在首次成功登录时立即升级
   if (needsRehash(user.passwordHash)) {
-    await repo.updatePasswordHash(database, user.id, await hashPassword(input.conflictPasswords?.find(value => value.userId === user.id)?.password ?? input.password));
+    await repo.updatePasswordHash(database, user.id, await computePasswordHash(env, input.conflictPasswords?.find(value => value.userId === user.id)?.password ?? input.password));
   }
 
   return {

@@ -100,6 +100,29 @@ function concat(parts: Uint8Array[]): Uint8Array {
 }
 
 describe('decodePng', () => {
+  it('跨多个 IDAT 和 64 KiB 输入边界解码，像素保持一致', async () => {
+    const width = 256, height = 256;
+    const rgba = new Uint8Array(width * height * 4);
+    let noise = 1;
+    for (let i = 0; i < rgba.length; i++) { noise ^= noise << 13; noise ^= noise >>> 17; noise ^= noise << 5; rgba[i] = noise & 255; }
+    const raw = new Uint8Array(height * (width * 4 + 1));
+    for (let y = 0; y < height; y++) raw.set(rgba.subarray(y * width * 4, (y + 1) * width * 4), y * (width * 4 + 1) + 1);
+    const compressed = deflateSync(raw);
+    expect(compressed.length).toBeGreaterThan(131_072);
+    const png = concat([Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr(width, height, 6)), chunk('IDAT', compressed.subarray(0, 3)), chunk('IDAT', new Uint8Array()), chunk('IDAT', compressed.subarray(3, 100_000)), chunk('IDAT', compressed.subarray(100_000)), chunk('IEND', new Uint8Array())]);
+    const result = await decodePng(png);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.image.rgba).toEqual(rgba);
+  });
+
+  it.each(['truncated', 'checksum'])('拒绝分块 zlib 流损坏：%s', async kind => {
+    const compressed = deflateSync(Uint8Array.from([0, 10, 20, 30, 255]));
+    const damaged = kind === 'truncated' ? compressed.subarray(0, compressed.length - 3) : Uint8Array.from(compressed);
+    if (kind === 'checksum') damaged[damaged.length - 1] = damaged[damaged.length - 1]! ^ 1;
+    const png = concat([Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr(1, 1, 6)), chunk('IDAT', damaged.subarray(0, 2)), chunk('IDAT', damaged.subarray(2)), chunk('IEND', new Uint8Array())]);
+    expect((await decodePng(png)).ok).toBe(false);
+  });
+
   it('保留 RGB 图的透明色键', async () => {
     const png=concat([Uint8Array.from([137,80,78,71,13,10,26,10]),chunk('IHDR',ihdr(2,1,2)),chunk('tRNS',Uint8Array.from([0,10,0,20,0,30])),chunk('IDAT',deflateSync(Uint8Array.from([0,10,20,30,10,20,31]))),chunk('IEND',new Uint8Array())]);
     const result=await decodePng(png);

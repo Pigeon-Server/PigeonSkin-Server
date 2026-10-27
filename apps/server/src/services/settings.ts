@@ -8,8 +8,8 @@
 import { type Bindings, type SettingKey } from './../core/env.ts';
 import { fail } from './../core/framework.ts';
 import { invalidateSettingsCache, readSettings } from './../core/settings-reader.ts';
-import { createDb, settings } from '@pigeon-skin/db';
-import { and, eq } from 'drizzle-orm';
+import { createDb, settings, settingsWriteLocks } from '@pigeon-skin/db';
+import { and, eq, sql } from 'drizzle-orm';
 
 import { restrictedEmailListSchema } from './../core/schemas.ts';
 
@@ -17,6 +17,9 @@ import { isLocale, normalizeLocale } from './../core/i18n.ts';
 import { inspectSigningKey } from './ygg-key.ts';
 import { configurationValues, SECRET_PLACEHOLDER } from './configuration.ts';
 import { importPKCS8 } from 'jose';
+import { readSettingsSnapshot } from '../core/settings-snapshot.ts';
+import { bumpCacheGeneration } from '../core/cache-generation.ts';
+import { bumpSitemap } from './sitemap-publication.ts';
 
 export interface SettingsEnv {
   DB: Bindings['DB'];
@@ -65,8 +68,8 @@ export const SETTING_REGISTRY: Readonly<Record<SettingKey, SettingSpec>> = {
   score_per_kb_private: { kind: 'integer', min: 0, max: 10_000 },
   score_per_closet_item: { kind: 'integer', min: 0, max: 1_000_000 },
   refund_on_delete: { kind: 'boolean' },
-  max_upload_size_kb: { kind: 'integer', min: 1, max: 100_000 },
-  max_texture_width: { kind: 'integer', min: 64, max: 65_536 },
+  max_upload_size_kb: { kind: 'integer', min: 1, max: 16_384 },
+  max_texture_width: { kind: 'integer', min: 64, max: 8_192 },
   allow_texture_download: { kind: 'boolean' },
   allow_anonymous_download: { kind: 'boolean' },
   official_resources_auto_update: { kind: 'boolean' },
@@ -259,33 +262,8 @@ export async function readAll(env: SettingsEnv): Promise<Record<string, string>>
 // 语言覆盖行的读缓存（全局值缓存之外的增量部分）。
 // 失效：writeMany / clearLocalized 里直接 clear 本缓存；
 // 全局层缓存（lib.ts 的 settingsCache）失效由 invalidateSettingsCache 负责。
-const localizedSettingsCache = new Map<string, { values: Record<string, string>; expiresAt: number }>();
-// 冷缓存并发去重：同一 locale 的多个调用方同时未命中时，只有首个真正查库
-const localizedInflight = new Map<string, Promise<Record<string, string>>>();
-
 async function readLocalizedOverrides(env: SettingsEnv, locale: string): Promise<Record<string, string>> {
-  const normalized = normalizeLocale(locale);
-  const cached = localizedSettingsCache.get(normalized);
-  if (cached && cached.expiresAt > Date.now()) return cached.values;
-  const inflight = localizedInflight.get(normalized);
-  if (inflight) return inflight;
-
-  const load = (async () => {
-    const rows = await createDb(env.DB)
-      .select({ key: settings.key, value: settings.value })
-      .from(settings)
-      .where(eq(settings.locale, normalized));
-    const values: Record<string, string> = {};
-    for (const r of rows) values[r.key] = r.value;
-    localizedSettingsCache.set(normalized, { values, expiresAt: Date.now() + 60_000 });
-    return values;
-  })();
-  localizedInflight.set(normalized, load);
-  try {
-    return await load;
-  } finally {
-    localizedInflight.delete(normalized);
-  }
+  return readSettingsSnapshot(env, normalizeLocale(locale));
 }
 
 /**
@@ -491,6 +469,8 @@ export async function writeMany(
   // 交叉校验必须针对"写入之后"的状态，且在写入**之前**完成。
   // 否则会有两个后果：写入成功了却返回错误；以及一旦数据落到不一致状态，
   // 所有后续写入都被永久拦住，连修都修不回来。
+  const version = await env.DB.prepare("SELECT version FROM public_cache_versions WHERE scope='settings'").first<{ version: number }>();
+  bumpCacheGeneration();
   const current = { ...await configurationValues(env as Bindings), ...await readAll(env) };
   const prospective = { ...current };
   for (const row of rows) {
@@ -523,20 +503,27 @@ export async function writeMany(
   }
 
   const db = createDb(env.DB);
-  for (const row of rows) {
-    await db.insert(settings)
-      .values(row)
+  const nonce = crypto.randomUUID();
+  const statements = rows.map(row => {
+    const query = db.insert(settings)
+      .select(db.select({ key: sql<string>`${row.key}`.as('key'), locale: sql<string>`${row.locale}`.as('locale'), value: sql<string>`${row.value}`.as('value'), updatedAt: sql<number>`${now}`.as('updated_at') }).from(settingsWriteLocks).where(and(eq(settingsWriteLocks.scope, 'settings'), eq(settingsWriteLocks.token, nonce))))
       .onConflictDoUpdate({
         target: [settings.key, settings.locale],
         set: { value: row.value, updatedAt: now },
-      });
-  }
+      }).toSQL();
+    return env.DB.prepare(query.sql).bind(...query.params);
+  });
+  const results = await env.DB.batch([
+    env.DB.prepare("UPDATE settings_write_locks SET token=? WHERE scope='settings' AND EXISTS (SELECT 1 FROM public_cache_versions WHERE scope='settings' AND version=?)").bind(nonce, version?.version ?? -1),
+    ...statements,
+    env.DB.prepare("UPDATE settings_write_locks SET token=NULL WHERE scope='settings' AND token=?").bind(nonce),
+  ]);
+  if (!results[0]?.meta.changes) throw fail.conflict('common.invalid_request');
 
   // 让本 isolate 的读缓存失效（全局层在 lib，语言覆盖层在本文件），
   // 否则"改了设置但没生效"会持续到 TTL 到期
   invalidateSettingsCache();
-  localizedSettingsCache.clear();
-
+  await bumpSitemap(env);
   return rows.length;
 }
 
@@ -572,5 +559,5 @@ export async function clearLocalized(env: SettingsEnv, key: string, locale: stri
   }
   await createDb(env.DB).delete(settings)
     .where(and(eq(settings.key, key), eq(settings.locale, locale)));
-  localizedSettingsCache.clear();
+  invalidateSettingsCache();
 }

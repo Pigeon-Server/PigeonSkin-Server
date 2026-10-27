@@ -47,6 +47,10 @@ import { blockedCrawlerGuard, csrfProtection, rateLimiter } from './middleware/s
 import { skinlibGuard } from './middleware/skinlib-guard.ts';
 import { oauthCors } from './middleware/oauth.ts';
 import { bearerAuthentication } from './middleware/bearer.ts';
+import { publicResponseCache } from './middleware/public-cache.ts';
+import { usageBudgetGuard } from './core/usage-budget.ts';
+import { withRequestCache } from './core/request-cache.ts';
+import { serveSitemap } from './services/sitemap-publication.ts';
 
 import { ensureDefaultCloset, ensureOfficialCatalog } from './services/official-catalog.ts';
 import { renderSearchPage } from './services/seo.ts';
@@ -55,11 +59,15 @@ import { isCaptchaEnabled } from './services/captcha.ts';
 
 export function createApp() {
   const app = new Hono<AppEnv>();
+  app.use('*', async (_c, next) => withRequestCache(next));
   // 被禁抓取代理最先拦掉：只比较一个请求头，比配置解析、限流、会话都便宜。
   // 纯静态文件（hashed 产物、blockbench、live2d 模型、手册截图等）由资产层
   // 直接服务、不进 Worker（见 wrangler.jsonc run_worker_first），其安全头与
   // 缓存声明在 web/public/_headers。
   app.use('*', blockedCrawlerGuard());
+  app.use('*', async (c, next) => /^\/(?:sitemap(?:-\d+)?\.xml|robots\.txt)$/.test(c.req.path) && ['GET', 'HEAD'].includes(c.req.method) ? serveSitemap(c.req.raw, c.env, c.executionCtx) : next());
+  app.use('*', publicResponseCache());
+  app.use('*', usageBudgetGuard());
   app.use('*', async (c, next) => {
     if (c.req.path !== '/api/v1/health') c.env = await resolveConfiguration(c.env);
     await next();

@@ -52,6 +52,14 @@ export interface PngSpec {
   readonly colorType?: number;
   /** 重复插入的 filler chunk 数量，用于触发 chunk 数量上限 */
   readonly fillerChunks?: number;
+  /** 改变像素内容（重编码会剥离元数据，只有像素差异能造出不同哈希） */
+  readonly seed?: number;
+  readonly highEntropy?: boolean;
+  /**
+   * 造出 slim 皮肤的判定特征:右臂第一层 unused 区 (50,16)/(54,20) 按
+   * width/64 缩放后置为透明。仅方形 64 倍数尺寸有意义,其余尺寸忽略。
+   */
+  readonly slim?: boolean;
 }
 
 // 返回 Uint8Array<ArrayBuffer> 而不是 Node 的 Buffer：
@@ -75,14 +83,35 @@ export function makePng(spec: PngSpec): Uint8Array<ArrayBuffer> {
   // 最小可用的像素数据：每行一个 filter 字节 + 每像素 4 字节
   const stride = width * 4;
   const raw = Buffer.alloc(height * (stride + 1));
+  const seed = spec.seed ?? 0;
+  let noise = seed || 1;
   for (let y = 0; y < height; y++) {
     raw[y * (stride + 1)] = 0;
     for (let x = 0; x < width; x++) {
       const o = y * (stride + 1) + 1 + x * 4;
-      raw[o] = (x * 4) & 0xff;
-      raw[o + 1] = (y * 4) & 0xff;
-      raw[o + 2] = 0x80;
+      if (spec.highEntropy) {
+        noise ^= noise << 13; noise ^= noise >>> 17; noise ^= noise << 5;
+        raw[o] = noise & 0xff;
+        raw[o + 1] = (noise >>> 8) & 0xff;
+        raw[o + 2] = (noise >>> 16) & 0xff;
+      } else {
+        raw[o] = (x * 4 + seed) & 0xff;
+        raw[o + 1] = (y * 4) & 0xff;
+        raw[o + 2] = (0x80 + seed) & 0xff;
+      }
       raw[o + 3] = 0xff;
+    }
+  }
+
+  // slim 判定特征:右臂第一层两块 unused 区挖成透明(按 width/64 缩放)
+  if (spec.slim && width === height && width % 64 === 0) {
+    const scale = width / 64;
+    for (const area of [{ x: 50, y: 16, w: 2, h: 4 }, { x: 54, y: 20, w: 2, h: 12 }]) {
+      for (let y = area.y * scale; y < (area.y + area.h) * scale; y++) {
+        for (let x = area.x * scale; x < (area.x + area.w) * scale; x++) {
+          raw[y * (stride + 1) + 1 + x * 4 + 3] = 0;
+        }
+      }
     }
   }
 

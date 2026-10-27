@@ -5,10 +5,11 @@ import { useTheme } from '@/composables/theme';
 import SkinPreview from '@/components/texture/SkinPreview.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import { defaultSkinUrl } from '@/lib/default-skin';
+import { detectSkinModelFromUrl } from '@/lib/skin-model';
 const props = withDefaults(defineProps<{
-  skinUrl?: string | null | undefined; capeUrl?: string | null | undefined; slim?: boolean;
+  skinUrl?: string | null | undefined; capeUrl?: string | null | undefined; slim?: boolean | undefined;
   height?: number; animated?: boolean; controls?: boolean; active?: boolean; name?: string;
-}>(), { slim: false, height: 380, animated: true, controls: true, active: true, name: '' });
+}>(), { slim: undefined, height: 380, animated: true, controls: true, active: true, name: '' });
 const i18n = useI18n();
 const { isDark } = useTheme();
 const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -73,7 +74,10 @@ async function build() {
     v.fov = 50; v.zoom = 0.9;
     v.cameraLight.intensity = isDark.value ? 0 : 0.6;
     v.globalLight.intensity = 3;
-    await v.loadSkin(props.skinUrl || defaultSkinUrl, { model: props.skinUrl && props.slim ? 'slim' : 'default' });
+    // slim 未指定时用与入库判定相同的规则按像素推断,保证服务端 model、
+    // 2D 预览与 3D 预览三处对同一张图给出一致结果。
+    const effectiveSlim = props.slim ?? (await detectSkinModelFromUrl(props.skinUrl || defaultSkinUrl)) === 'slim';
+    await v.loadSkin(props.skinUrl || defaultSkinUrl, { model: effectiveSlim ? 'slim' : 'default' });
     if (props.capeUrl) await v.loadCape(props.capeUrl, { backEquipment: equipment.value });
     if (id !== generation) { v.dispose(); return; }
     animations = [

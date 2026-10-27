@@ -14,7 +14,8 @@ import {
 } from './../../core/schemas.ts';
 import { LIMITS, type PlayerNameRule } from '@pigeon-skin/shared';
 import { normalizeLocale } from '@pigeon-skin/shared/locales';
-import { hashPassword, hashToken } from '@pigeon-skin/auth';
+import { hashToken } from '@pigeon-skin/auth';
+import { computePasswordHash } from '../../services/compute.ts';
 import { createDb } from '@pigeon-skin/db';
 
 import * as auth from '../../services/auth.ts';
@@ -354,7 +355,7 @@ authRoutes.post('/reset-password', async (c) => {
   const { userId } = await tokens.consumePasswordResetToken(c.env, body.token);
 
   const database = createDb(c.env.DB);
-  await repo.updatePasswordHash(database, userId, await hashPassword(body.password));
+  await repo.updatePasswordHash(database, userId, await computePasswordHash(c.env, body.password));
 
   // 重置密码后撤销全部会话并作废其余待处理令牌
   await revokeAllSessions(c.env, userId);

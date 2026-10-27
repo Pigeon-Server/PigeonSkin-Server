@@ -15,10 +15,27 @@ import { type AppEnv } from './../src/core/user.ts';
 import { createExecutionContext, env, SELF, waitOnExecutionContext } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
-import { sha256Hex } from '../../../packages/minecraft/src/png.ts';
+import { sha256Hex, inspectPng } from '../../../packages/minecraft/src/png.ts';
+import { sanitizeTexture } from '../../../packages/minecraft/src/sanitize.ts';
 import { avatarObjectKey, previewObjectKey } from '../../../packages/minecraft/src/texture.ts';
 
+/** 上传会把材质重编码（剥离元数据），内容哈希以重编码后的字节为准。 */
+async function sanitizedHash(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const result = await sanitizeTexture(bytes);
+  if (!result.ok) throw new Error(result.reason);
+  return sha256Hex(result.bytes);
+}
+
+/** 净化后字节数换算的 KB —— 计费按入库的净化字节算，不是上传的原始文件 */
+async function sanitizedKb(bytes: Uint8Array<ArrayBuffer>): Promise<number> {
+  const result = await sanitizeTexture(bytes);
+  if (!result.ok) throw new Error(result.reason);
+  return Math.ceil(result.bytes.length / 1024);
+}
+
 import { createApp } from '../src/app.ts';
+import { publishSitemap } from '../src/services/sitemap-publication.ts';
+import type { Bindings } from '../src/core/env.ts';
 import {
   runMigrations, markVerified, makeAdmin, readAudit,
 } from './setup.ts';
@@ -422,6 +439,7 @@ async function uploadTexture(
   const form = new FormData();
   form.set('file', new Blob([bytes], { type: 'image/png' }), 't.png');
   form.set('kind', opts.kind);
+  // 仍按老前端的方式发送 model:服务端应忽略它,模型只由像素决定
   if (opts.model) form.set('model', opts.model);
   if (opts.visibility) form.set('visibility', opts.visibility);
   if (opts.origin) form.set('origin', opts.origin);
@@ -578,8 +596,9 @@ describe('纹理上传', () => {
     const uploaderCookie = await login(uploader.email);
     const texIds: number[] = [];
     for (let i = 0; i < 4; i++) {
-      // 每张 PNG 内容不同（填充 chunk 数量不同），避免哈希重复被去重拦截
-      const up = await uploadTexture(uploaderCookie, makePng({ width: 64, height: 64, fillerChunks: i + 1 }), { kind: 'skin', model: 'default' });
+      // 每张 PNG 必须是不同的**像素**内容：上传时会剥离全部元数据后重编码，
+      // 只改填充 chunk 的图重编码后完全相同，会被去重拦下。
+      const up = await uploadTexture(uploaderCookie, makePng({ width: 64, height: 64, seed: i + 1 }), { kind: 'skin', model: 'default' });
       texIds.push((await up.json<{ id: number }>()).id);
     }
 
@@ -674,7 +693,7 @@ describe('纹理上传', () => {
     invalidateSettingsCache();
     const starting = await (await authedFetch(cookie, 'https://x/api/v1/me/score')).json<{ score: number }>();
     const bytes = makePng({ width: 64, height: 64 });
-    const kb = Math.ceil(bytes.byteLength / 1024);
+    const kb = await sanitizedKb(bytes);
     const privateTexture = await uploadTexture(cookie, bytes, { kind: 'skin', model: 'default', visibility: 'private' });
     const privateUpload = await privateTexture.json<{ id: number; scoreSpent: number }>();
     const privateId = privateUpload.id;
@@ -685,12 +704,16 @@ describe('纹理上传', () => {
     await authedFetch(cookie, `https://x/api/v1/textures/${privateId}`, { method: 'DELETE' });
     expect((await (await authedFetch(cookie, 'https://x/api/v1/me/score')).json<{ score: number }>()).score).toBe(starting.score);
 
-    const publicTexture = await uploadTexture(cookie, bytes, { kind: 'skin', model: 'slim', visibility: 'public' });
+    // 与第一张同尺寸但像素不同:模型自动识别后同一 PNG 恒为同一 model,
+    // 同字节会命中重复检测,不能再用它验证第二条计费路径
+    const publicBytes = makePng({ width: 64, height: 64, seed: 1 });
+    const publicKb = await sanitizedKb(publicBytes);
+    const publicTexture = await uploadTexture(cookie, publicBytes, { kind: 'skin', visibility: 'public' });
     const publicUpload = await publicTexture.json<{ id: number; scoreSpent: number }>();
     const publicId = publicUpload.id;
     const makePrivate = await authedFetch(cookie, `https://x/api/v1/textures/${publicId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ visibility: 'private' }) });
     expect(makePrivate.status, JSON.stringify(await makePrivate.clone().json())).toBe(200);
-    expect((await (await authedFetch(cookie, 'https://x/api/v1/me/score')).json<{ score: number }>()).score).toBe(starting.score - kb * 10);
+    expect((await (await authedFetch(cookie, 'https://x/api/v1/me/score')).json<{ score: number }>()).score).toBe(starting.score - publicKb * 10);
     await authedFetch(cookie, `https://x/api/v1/textures/${publicId}`, { method: 'DELETE' });
     expect((await (await authedFetch(cookie, 'https://x/api/v1/me/score')).json<{ score: number }>()).score).toBe(starting.score - 6);
     await env.DB.prepare("DELETE FROM settings WHERE key IN ('score_per_kb_public','score_per_kb_private','score_award_per_texture','clawback_award_on_delete')").run();
@@ -706,19 +729,32 @@ describe('纹理上传', () => {
     expect(res.status).toBe(201);
     const body = await res.json<{ id: number; hash: string }>();
     expect(body.hash).toMatch(/^[0-9a-f]{64}$/);
-    // 内容哈希 == 文件哈希
-    expect(body.hash).toBe(await sha256Hex(makePng({ width: 64, height: 64 })));
+    // 内容哈希 == 重编码后字节的哈希（上传会剥离元数据）
+    expect(body.hash).toBe(await sanitizedHash(makePng({ width: 64, height: 64 })));
+  });
+
+  it('高清 128x128 皮肤上传成功并保留尺寸', async () => {
+    const u = await registerUser();
+    const cookie = await login(u.email);
+    const res = await uploadTexture(cookie, makePng({ width: 128, height: 128 }), {
+      kind: 'skin', model: 'default',
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json<{ id: number }>();
+    const detail = await authedFetch(cookie, `https://x/api/v1/textures/${body.id}`);
+    expect(detail.status).toBe(200);
+    expect(await detail.json<{ width: number; height: number }>()).toMatchObject({ width: 128, height: 128 });
   });
 
   it('替换按大小差额结算，删除只退还实际净支出', async () => {
     const user = await registerUser();
     const cookie = await login(user.email);
     const initial = await (await authedFetch(cookie, 'https://x/api/v1/me/score')).json<{ score: number }>();
-    const created = await uploadTexture(cookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'default', visibility: 'public' });
+    const created = await uploadTexture(cookie, makePng({ width: 64, height: 32 }), { kind: 'skin', model: 'default', visibility: 'public' });
     expect(created.status).toBe(201);
     const { id } = await created.json<{ id: number }>();
     const small = await (await authedFetch(cookie, 'https://x/api/v1/me/score')).json<{ score: number }>();
-    const form = new FormData(); form.set('file', new Blob([makePng({ width: 128, height: 128 })], { type: 'image/png' }), 'large.png');
+    const form = new FormData(); form.set('file', new Blob([makePng({ width: 64, height: 64 })], { type: 'image/png' }), 'large.png');
     expect((await authedFetch(cookie, `https://x/api/v1/textures/${id}/content`, { method: 'PUT', body: form })).status).toBe(200);
     const large = await (await authedFetch(cookie, 'https://x/api/v1/me/score')).json<{ score: number }>();
     expect(large.score).toBeLessThan(small.score);
@@ -732,9 +768,11 @@ describe('纹理上传', () => {
     const cookie = await login(u.email);
     const bytes = makePng({ width: 64, height: 64, fillerChunks: 1 });
     const now = Date.now();
+    // 库里存的哈希是重编码后的那份（上传路径与手工插入必须同一套规则）
+    const storedHash = await sanitizedHash(bytes);
     await env.DB.prepare(`INSERT INTO textures (hash, kind, model, name, uploader_id, size_bytes, visibility, width, height, created_at, updated_at)
       VALUES (?, 'skin', 'default', ?, ?, ?, 'private', 64, 64, ?, ?)`)
-      .bind(await sha256Hex(bytes), uniq('private'), u.id, bytes.byteLength, now, now).run();
+      .bind(storedHash, uniq('private'), u.id, bytes.byteLength, now, now).run();
 
     const published = await uploadTexture(cookie, bytes, { kind: 'skin', visibility: 'public' });
     expect(published.status).toBe(201);
@@ -766,6 +804,22 @@ describe('纹理上传', () => {
     expect((await res.json<{ error: string }>()).error).toBe('texture.not_png');
   });
 
+  it('legacy 22×17 cape is padded to 64×32 with transparency', async () => {
+    const u = await registerUser();
+    const cookie = await login(u.email);
+    const res = await uploadTexture(cookie, makePng({ width: 22, height: 17 }), {
+      kind: 'cape', model: 'default',
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json<{ id: number; hash: string; width?: number; height?: number }>();
+    // 入库尺寸是按规范补边后的 64×32，不是上传时的 22×17
+    const row = await env.DB.prepare('SELECT width, height FROM textures WHERE id = ?').bind(body.id).first<{ width: number; height: number }>();
+    expect(row).toMatchObject({ width: 64, height: 32 });
+    const object = await env.BUCKET.get(`textures/${body.hash}.png`);
+    const inspection = inspectPng(new Uint8Array(await object!.arrayBuffer()));
+    expect(inspection.ok && [inspection.info.width, inspection.info.height]).toEqual([64, 32]);
+  });
+
   it('尺寸不是 64 的倍数被拒', async () => {
     const u = await registerUser();
     const cookie = await login(u.email);
@@ -784,14 +838,27 @@ describe('纹理上传', () => {
     expect((await res.json<{ error: string }>()).error).toBe('texture.ratio_invalid');
   });
 
-  it('slim 皮肤 64x32（比例 2）被拒', async () => {
+  it('64x32 皮肤即使表单声明 slim 也按像素入库为 default', async () => {
     const u = await registerUser();
     const cookie = await login(u.email);
     const res = await uploadTexture(cookie, makePng({ width: 64, height: 32 }), {
       kind: 'skin', model: 'slim',
     });
-    expect(res.status).toBe(422);
-    expect((await res.json<{ error: string }>()).error).toBe('texture.ratio_invalid');
+    // 模型是像素的函数:1:2 比例不可能是 slim,表单里的 model 被忽略
+    expect(res.status).toBe(201);
+    const { id } = await res.json<{ id: number }>();
+    const detail = await authedFetch(cookie, `https://x/api/v1/textures/${id}`);
+    expect(await detail.json<{ model: string }>()).toMatchObject({ model: 'default' });
+  });
+
+  it('slim 模板皮肤即使不传 model 也自动入库为 slim', async () => {
+    const u = await registerUser();
+    const cookie = await login(u.email);
+    const res = await uploadTexture(cookie, makePng({ width: 64, height: 64, slim: true }), { kind: 'skin' });
+    expect(res.status).toBe(201);
+    const { id } = await res.json<{ id: number }>();
+    const detail = await authedFetch(cookie, `https://x/api/v1/textures/${id}`);
+    expect(await detail.json<{ model: string }>()).toMatchObject({ model: 'slim' });
   });
 
   it('CRC 损坏的 PNG 被拒', async () => {
@@ -817,25 +884,44 @@ describe('纹理上传', () => {
     const saved = await authedFetch(cookie, `https://x/api/v1/textures/${id}/content`, { method: 'PUT', body: form });
     expect(saved.status).toBe(200);
     const value = await saved.json<{ hash: string; width: number; height: number }>();
-    expect(value.hash).toBe(await sha256Hex(changed));
+    expect(value.hash).toBe(await sanitizedHash(changed));
     expect(value).toMatchObject({ width: 64, height: 64 });
     const loaded = await authedFetch(cookie, `https://x/api/v1/textures/${id}/content`);
-    expect(new Uint8Array(await loaded.arrayBuffer())).toEqual(changed);
+    // 读回的是重编码后的字节（剥离了元数据），不是上传的原始文件
+    const sanitized = await sanitizeTexture(changed);
+    expect(sanitized.ok).toBe(true);
+    if (sanitized.ok) expect(new Uint8Array(await loaded.arrayBuffer())).toEqual(sanitized.bytes);
     expect((await (await authedFetch(cookie, `https://x/api/v1/textures/${id}`)).json<{ kind: string; model: string; name: string }>())).toMatchObject({ kind: 'skin', model: 'default' });
   });
 
-  it('替换内容仍按原皮肤类型校验且拒绝非所有者', async () => {
+  it('替换内容仍按皮肤类型校验比例且拒绝非所有者', async () => {
     const owner = await registerUser();
     const ownerCookie = await login(owner.email);
-    const created = await uploadTexture(ownerCookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'slim' });
+    const created = await uploadTexture(ownerCookie, makePng({ width: 64, height: 64, slim: true }), { kind: 'skin' });
     const id = (await created.json<{ id: number }>()).id;
     const form = new FormData();
-    form.set('file', new Blob([makePng({ width: 64, height: 32 })], { type: 'image/png' }), 'wrong.png');
+    form.set('file', new Blob([makePng({ width: 64, height: 64, corruptIdatCrc: true })], { type: 'image/png' }), 'broken.png');
     const invalid = await authedFetch(ownerCookie, `https://x/api/v1/textures/${id}/content`, { method: 'PUT', body: form });
     expect(invalid.status).toBe(422);
     const other = await registerUser();
-    const denied = await authedFetch(await login(other.email), `https://x/api/v1/textures/${id}/content`, { method: 'PUT', body: form });
+    const valid = new FormData();
+    valid.set('file', new Blob([makePng({ width: 64, height: 64 })], { type: 'image/png' }), 'ok.png');
+    const denied = await authedFetch(await login(other.email), `https://x/api/v1/textures/${id}/content`, { method: 'PUT', body: valid });
     expect(denied.status).toBe(404);
+  });
+
+  it('替换内容后模型按新像素重新判定', async () => {
+    const u = await registerUser();
+    const cookie = await login(u.email);
+    const created = await uploadTexture(cookie, makePng({ width: 64, height: 64, slim: true }), { kind: 'skin' });
+    const id = (await created.json<{ id: number }>()).id;
+    const form = new FormData();
+    // 换成经典布局:右臂区不透明,模型应回落到 default
+    form.set('file', new Blob([makePng({ width: 64, height: 64, seed: 2 })], { type: 'image/png' }), 'classic.png');
+    const saved = await authedFetch(cookie, `https://x/api/v1/textures/${id}/content`, { method: 'PUT', body: form });
+    expect(saved.status).toBe(200);
+    const detail = await authedFetch(cookie, `https://x/api/v1/textures/${id}`);
+    expect(await detail.json<{ model: string }>()).toMatchObject({ model: 'default' });
   });
 });
 
@@ -882,7 +968,30 @@ describe('Minecraft 协议', () => {
     expect(raw.status).toBe(200);
     expect(raw.headers.get('content-type')).toBe('image/png');
     const received = new Uint8Array(await raw.arrayBuffer());
-    expect(await sha256Hex(received)).toBe(hash);
+    // 分发字节带站点标识（tEXt），因此不再等于内容哈希；但必须是合法 PNG，
+    // 且像素数据（IDAT）与库内那份完全一致 —— 标识只加辅助块，不碰像素。
+    const receivedInspection = inspectPng(received);
+    expect(receivedInspection.ok).toBe(true);
+    if (!receivedInspection.ok) return;
+    expect(receivedInspection.info.chunkTypes).toEqual(['IHDR', 'IDAT', 'tEXt', 'IEND']);
+    expect(receivedInspection.info.width).toBe(64);
+    expect(receivedInspection.info.height).toBe(64);
+    // 去掉 tEXt 后应与库内字节逐字节相同（标记是唯一差异）
+    const withoutText = (png: Uint8Array) => {
+      const parts: Uint8Array[] = [];
+      let offset = 8;
+      parts.push(png.subarray(0, 8));
+      while (offset + 8 <= png.length) {
+        const length = ((png[offset]! << 24) | (png[offset + 1]! << 16) | (png[offset + 2]! << 8) | png[offset + 3]!) >>> 0;
+        const type = String.fromCharCode(png[offset + 4]!, png[offset + 5]!, png[offset + 6]!, png[offset + 7]!);
+        if (type !== 'tEXt') parts.push(png.subarray(offset, offset + 12 + length));
+        offset += 12 + length;
+      }
+      return new Uint8Array(parts.flatMap(p => [...p]));
+    };
+    const stored = await env.BUCKET.get(`textures/${hash}.png`);
+    const storedBytes = new Uint8Array(await stored!.arrayBuffer());
+    expect(Array.from(withoutText(received))).toEqual(Array.from(storedBytes));
   });
 
   it('If-None-Match 命中返回 304', async () => {
@@ -1190,17 +1299,16 @@ describe('管理员新动作', () => {
     const u = await registerUser();
     const cookie = await login(u.email);
     // makePng 是确定性的：同样尺寸产出同样字节，会被重复检测挡下。
-    // 用 (kind, model) 区分（重复检测按 kind+model 分域），外加一种披风尺寸。
+    // 模型自动识别后同一 PNG 恒为同一 model，只能靠尺寸/像素/slim 布局区分。
     const ids: number[] = [];
     const uploads = [
-      { kind: 'skin', model: 'default', width: 64, height: 64 },
-      { kind: 'skin', model: 'slim', width: 64, height: 64 },
-      { kind: 'cape', width: 128, height: 64 },
+      { kind: 'skin', width: 64, height: 64, slim: false },
+      { kind: 'skin', width: 64, height: 64, slim: true },
+      { kind: 'cape', width: 64, height: 32, slim: false },
     ] as const;
     for (const spec of uploads) {
-      const up = await uploadTexture(cookie, makePng({ width: spec.width, height: spec.height }), {
+      const up = await uploadTexture(cookie, makePng({ width: spec.width, height: spec.height, slim: spec.slim }), {
         kind: spec.kind,
-        ...(spec.kind === 'skin' ? { model: spec.model } : {}),
       });
       ids.push((await up.json<{ id: number }>()).id);
     }
@@ -1299,7 +1407,7 @@ describe('管理员新动作', () => {
     const peer = await registerUser();
     const peerCookie = await login(peer.email);
     await makeAdmin(peer.id);
-    const peerUp = await uploadTexture(peerCookie, makePng({ width: 128, height: 64 }), { kind: 'cape' });
+    const peerUp = await uploadTexture(peerCookie, makePng({ width: 64, height: 32 }), { kind: 'cape' });
     const peerTid = (await peerUp.json<{ id: number }>()).id;
 
     const mixed = await authedFetch(adminCookie, 'https://x/api/v1/admin/textures/batch', {
@@ -1477,7 +1585,9 @@ describe('sitemap 自动生成', () => {
       expect(res.headers.get('cache-control'), path).toBe('no-store');
     }
     // robots.txt 自身放行，否则合规爬虫读不到自己的禁止规则
-    expect((await SELF.fetch('https://x/robots.txt', bot)).status).toBe(200);
+    const robots = await SELF.fetch('https://x/robots.txt', bot);
+    expect(robots.status).toBe(200);
+    await robots.arrayBuffer();
     // 名单里每个 UA 在请求层都被拦，不依赖单测那份清单
     for (const agent of BLOCKED_CRAWLER_AGENTS) {
       const blocked = await SELF.fetch('https://x/api/v1/settings/public', { headers: { 'user-agent': `Mozilla/5.0 (compatible; ${agent}/1.0)` } });
@@ -1534,6 +1644,7 @@ describe('sitemap 自动生成', () => {
     });
     const { id: newId } = await up.json<{ id: number }>();
 
+    await publishSitemap(env as unknown as Bindings);
     const after = await (await SELF.fetch('https://x/sitemap.xml')).text();
     expect(after).toContain(`/skinlib/${newId}`);
     expect(after).not.toBe(before);
@@ -1736,7 +1847,10 @@ describe('私有纹理的游戏加载', () => {
       const loaded = await SELF.fetch(`https://x${prefix}/textures/${hash}`);
       expect(loaded.status).toBe(200);
       expect(loaded.headers.get('content-type')).toBe('image/png');
-      expect(new Uint8Array(await loaded.arrayBuffer())).toEqual(bytes);
+      // 私有材质同样走重编码 + 站点标识：字节合法、尺寸不变，但不等于原始上传文件
+      const inspection = inspectPng(new Uint8Array(await loaded.arrayBuffer()));
+      expect(inspection.ok).toBe(true);
+      if (inspection.ok) expect([inspection.info.width, inspection.info.height]).toEqual([64, 64]);
       const cached = await SELF.fetch(`https://x${prefix}/textures/${hash}`, {
         headers: { 'if-none-match': loaded.headers.get('etag')! },
       });
@@ -1826,7 +1940,11 @@ describe('未登录下载限制', () => {
       await writeSetting('allow_anonymous_download', 'true');
       const open = await SELF.fetch(`https://x/raw/${tid}`);
       expect(open.status).toBe(200);
-      expect((await open.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      // 下载入口同样带站点标识：字节是合法 PNG，且含站点名的 tEXt
+      const downloaded = new Uint8Array(await open.arrayBuffer());
+      const inspection = inspectPng(downloaded);
+      expect(inspection.ok).toBe(true);
+      expect(inspection.ok && inspection.info.chunkTypes).toContain('tEXt');
 
       await writeSetting('allow_anonymous_download', 'false');
       const blocked = await SELF.fetch(`https://x/raw/${tid}`);

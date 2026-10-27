@@ -14,6 +14,7 @@ const emptyDb = {
       raw: async () => [],
       all: async () => ({ results: [] }),
       first: async () => null,
+      run: async () => ({ success: true, meta: { changes: 0 } }),
     }),
   }),
 } as unknown as Bindings['DB'];

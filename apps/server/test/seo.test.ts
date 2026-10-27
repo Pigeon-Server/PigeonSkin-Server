@@ -7,7 +7,7 @@ import { createApp } from '../src/app.ts';
 
 import { renderSearchContent } from '../src/services/seo.ts';
 
-import { bumpSitemap } from '../src/services/sitemap-cache.ts';
+import { publishSitemap } from '../src/services/sitemap-publication.ts';
 
 beforeAll(runMigrations);
 
@@ -45,7 +45,7 @@ describe('公开 HTML 与搜索元数据', () => {
     expect(html).toContain('hreflang="ja"');
     expect(html).not.toContain('hreflang="en"');
     expect((await request(`/manual/${slug}?lang=en`)).status).toBe(404);
-    await bumpSitemap();
+    await publishSitemap({ ...env, ASSETS: assets } as Bindings);
     const sitemap = await (await request('/sitemap.xml')).text();
     expect(sitemap).toContain(`/manual/${slug}?lang=ja_JP`);
   });
@@ -91,7 +91,7 @@ describe('公开 HTML 与搜索元数据', () => {
     expect(html).toContain('TechArticle');
     const slug = `seo-${Date.now()}`;
     await env.DB.prepare("INSERT INTO manual_documents(slug, locale, value, updated_at) VALUES (?, '', ?, ?)").bind(slug, JSON.stringify({ title: '服务器指南', description: '连接指南', content: '## 接入\n\n{{site_url}}', group: '帮助' }), 1700000000000).run();
-    await bumpSitemap();
+    await publishSitemap({ ...env, ASSETS: assets } as Bindings);
     const page = await (await request(`/manual/${slug}`)).text();
     expect(page).toContain('服务器指南');
     const sitemap = await (await request('/sitemap.xml')).text();

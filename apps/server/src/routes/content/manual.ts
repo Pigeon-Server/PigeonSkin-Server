@@ -8,6 +8,8 @@ import { audit } from '../../services/audit.ts';
 import { bumpSitemap } from '../../services/sitemap-cache.ts';
 import { isLocale, DEFAULT_LOCALE, type Locale } from '@pigeon-skin/shared/locales';
 import { manualStorageLocale, readLocalizedManual } from '../../services/manual.ts';
+import { invalidatePublicCache } from '../../core/public-cache.ts';
+import { isAdmin } from '../../services/authorization.ts';
 
 export const manualRoutes = new Hono<AppEnv>();
 function slugFor(value: string) {
@@ -24,7 +26,7 @@ function localeFor(value: string | undefined): Locale {
 
 manualRoutes.get('/manual', async c => {
   const locale = localeFor(c.req.query('locale'));
-  const { items, overrides } = await readLocalizedManual(c.env, locale);
+  const { items, overrides } = await readLocalizedManual(c.env, locale, isAdmin(c.get('user')));
   c.header('Cache-Control', 'no-store');
   return c.json({ siteUrl: c.env.APP_URL, locale, items, overrides });
 });
@@ -43,7 +45,8 @@ manualRoutes.put('/admin/manual/:slug', bodyLimit({ maxSize: 1_300_000, onError:
     ? await c.env.DB.prepare("INSERT INTO manual_documents (slug, locale, value, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(slug, locale) DO NOTHING").bind(slug, storageLocale, value, now).run()
     : await c.env.DB.prepare('UPDATE manual_documents SET value = ?, updated_at = ? WHERE slug = ? AND locale = ? AND updated_at = ?').bind(value, now, slug, storageLocale, revision).run();
   if (!result.meta.changes) throw changed();
-  c.executionCtx.waitUntil(bumpSitemap());
+  invalidatePublicCache();
+  c.executionCtx.waitUntil(bumpSitemap(c.env));
   await audit(c.env, { actorId: actor.id, action: 'admin.settings.update', targetType: 'manual', detail: `${locale}:${slug || 'welcome'}` });
   c.header('Cache-Control', 'no-store');
   return c.json({ slug, locale, ...document, updatedAt: now } satisfies ManualDocument);
@@ -58,7 +61,8 @@ manualRoutes.delete('/admin/manual/:slug', async c => {
   const revision = Number(raw);
   const result = await c.env.DB.prepare('DELETE FROM manual_documents WHERE slug = ? AND locale = ? AND updated_at = ?').bind(slug, storageLocale, revision).run();
   if (!result.meta.changes && (revision !== 0 || await c.env.DB.prepare('SELECT slug FROM manual_documents WHERE slug = ? AND locale = ?').bind(slug, storageLocale).first())) throw changed();
-  c.executionCtx.waitUntil(bumpSitemap());
+  invalidatePublicCache();
+  c.executionCtx.waitUntil(bumpSitemap(c.env));
   await audit(c.env, { actorId: actor.id, action: 'admin.settings.update', targetType: 'manual', detail: `reset:${locale}:${slug || 'welcome'}` });
   return c.body(null, 204);
 });

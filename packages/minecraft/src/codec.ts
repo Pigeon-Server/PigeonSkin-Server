@@ -45,13 +45,6 @@ export type DecodeResult =
 /** PNG 支持的位深 → 每像素字节数查表（bitDepth 8 限定） */
 const CHANNELS: Readonly<Record<number, number>> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
 
-/** Uint8Array → 独立 ArrayBuffer（复制一份，规避 TS 5.7 的 ArrayBufferLike 变型差异） */
-function toArrayBuffer(data: Uint8Array): ArrayBuffer {
-  const out = new ArrayBuffer(data.length);
-  new Uint8Array(out).set(data);
-  return out;
-}
-
 /**
  * 收集流式 decompress 的全部输出，带硬上限。
  *
@@ -60,34 +53,50 @@ function toArrayBuffer(data: Uint8Array): ArrayBuffer {
  * GB 级的流，把 DO 内存打爆。所以按 expectedRaw 的 1.5 倍 + 1KB 余量
  * 截断：正常文件永远够用，炸弹在吃掉内存前先撞上限。
  */
-async function inflateZlib(data: Uint8Array, maxBytes: number): Promise<Uint8Array> {
-  const stream = new Blob([toArrayBuffer(data)])
-    .stream()
-    .pipeThrough(new DecompressionStream('deflate'));
+async function* inflateRows(data: Uint8Array[], rowLength: number, height: number): AsyncGenerator<Uint8Array> {
+  let index = 0;
+  let position = 0;
+  const input = new ReadableStream<Uint8Array<ArrayBuffer>>({ pull(controller) {
+    while (index < data.length && position >= data[index]!.length) { index++; position = 0; }
+    if (index >= data.length) { controller.close(); return; }
+    const chunk = data[index]!;
+    const end = Math.min(position + 65_536, chunk.length);
+    controller.enqueue(new Uint8Array(chunk.subarray(position, end)));
+    position = end;
+  } });
+  const stream = input.pipeThrough(new DecompressionStream('deflate'));
   const reader = (stream as ReadableStream<Uint8Array>).getReader();
-  const chunks: Uint8Array[] = [];
   let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.length;
-    if (total > maxBytes) {
-      await reader.cancel();
-      throw new Error(`解压输出超过上限 ${maxBytes} 字节（疑似解压炸弹）`);
+  const maxBytes = Math.ceil(rowLength * height * 1.5) + 1024;
+  let current: Uint8Array = new Uint8Array();
+  let offset = 0;
+  const next = async () => {
+    const part = await reader.read();
+    if (part.done) return false;
+    current = part.value;
+    offset = 0;
+    total += current.length;
+    if (total > maxBytes) throw new Error(`解压输出超过上限 ${maxBytes} 字节`);
+    return true;
+  };
+  try {
+    for (let y = 0; y < height; y++) {
+      const row = new Uint8Array(rowLength);
+      let filled = 0;
+      while (filled < rowLength) {
+        if (offset === current.length && !await next()) throw new Error(`扫描线 ${y} 被截断`);
+        const length = Math.min(rowLength - filled, current.length - offset);
+        row.set(current.subarray(offset, offset + length), filled);
+        filled += length;
+        offset += length;
+      }
+      yield row;
     }
-    chunks.push(value);
+    while (await next()) {}
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
-  const out = new Uint8Array(total);
-  let pos = 0;
-  for (const c of chunks) { out.set(c, pos); pos += c.length; }
-  return out;
-}
-
-async function deflateZlib(data: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([toArrayBuffer(data)])
-    .stream()
-    .pipeThrough(new CompressionStream('deflate'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
 /** Paeth 预测器（PNG 规范第 6.3 节） */
@@ -102,15 +111,15 @@ function paeth(a: number, b: number, c: number): number {
 }
 
 /** 解码 IDAT 原始扫描线（含去滤波），输出 RGBA8 */
-function unfilterAndConvert(
-  raw: Uint8Array,
+async function unfilterAndConvert(
+  raw: AsyncIterable<Uint8Array>,
   width: number,
   height: number,
   colorType: number,
   bitDepth: number,
   palette: Uint8Array | null,
   trns: Uint8Array | null,
-): Uint8Array {
+): Promise<Uint8Array> {
   const channels = CHANNELS[colorType]!;
   const stride = Math.ceil(width * channels * bitDepth / 8);
   const out = new Uint8Array(width * height * 4);
@@ -119,13 +128,10 @@ function unfilterAndConvert(
   const row = new Uint8Array(stride);
   const prevRow = new Uint8Array(stride); // 上一行**还原后**的值（Up/UpLeft 需要）
 
-  let pos = 0;
-  for (let y = 0; y < height; y++) {
-    if (pos + 1 + stride > raw.length) throw new Error(`扫描线 ${y} 被截断`);
-    const filter = raw[pos]!;
-    pos++;
-    const line = raw.subarray(pos, pos + stride);
-    pos += stride;
+  let y = 0;
+  for await (const scanline of raw) {
+    const filter = scanline[0]!;
+    const line = scanline.subarray(1);
 
     for (let x = 0; x < stride; x++) {
       const left = x >= bpp ? row[x - bpp]! : 0;
@@ -181,6 +187,7 @@ function unfilterAndConvert(
     }
 
     prevRow.set(row);
+    y++;
   }
   return out;
 }
@@ -189,9 +196,13 @@ function unfilterAndConvert(
  * 解码一个 PNG 为 RGBA8。
  *
  * 输入必须已通过 inspectPng 结构校验；这里对像素面再做一次防御性检查
- * （面积上限来自 LIMITS，防止解压炸弹吃掉 DO 内存）。
+ * （面积上限，防止解压炸弹吃掉内存）。默认值按衍生图生成的内存约束给，
+ * 上传路径传入自己的面积上限（材质允许的尺寸比衍生图大）。
  */
-export async function decodePng(bytes: Uint8Array): Promise<DecodeResult> {
+export async function decodePng(
+  bytes: Uint8Array,
+  maxArea: number = LIMITS.maxDerivativeSourceArea,
+): Promise<DecodeResult> {
   try {
     for (let i = 0; i < 8; i++) {
       if (bytes[i] !== PNG_SIGNATURE[i]) return { ok: false, reason: 'PNG 魔数不匹配' };
@@ -247,18 +258,12 @@ export async function decodePng(bytes: Uint8Array): Promise<DecodeResult> {
     if (!width || !height) return { ok: false, reason: '缺少 IHDR' };
     if (idat.length === 0) return { ok: false, reason: '缺少 IDAT' };
     if (colorType === 3 && !palette) return { ok: false, reason: '调色板图缺少 PLTE' };
-    if (width * height > LIMITS.maxDerivativeSourceArea) {
-      return { ok: false, reason: `面积 ${width * height} 超过生成上限 ${LIMITS.maxDerivativeSourceArea}` };
+    if (width * height > maxArea) {
+      return { ok: false, reason: `面积 ${width * height} 超过上限 ${maxArea}` };
     }
 
-    const total = idat.reduce((n, d) => n + d.length, 0);
-    const packed = new Uint8Array(total);
-    let p = 0;
-    for (const d of idat) { packed.set(d, p); p += d.length; }
-
-    const expectedRaw = height * (Math.ceil(width * CHANNELS[colorType]! * bitDepth / 8) + 1);
-    const raw = await inflateZlib(packed, Math.ceil(expectedRaw * 1.5) + 1024);
-    const rgba = unfilterAndConvert(raw, width, height, colorType, bitDepth, palette, trns);
+    const rowLength = Math.ceil(width * CHANNELS[colorType]! * bitDepth / 8) + 1;
+    const rgba = await unfilterAndConvert(inflateRows(idat, rowLength, height), width, height, colorType, bitDepth, palette, trns);
     return { ok: true, image: { width, height, rgba } };
   } catch (e) {
     return { ok: false, reason: String(e).slice(0, 120) };
@@ -284,13 +289,17 @@ export async function encodePng(
   width: number,
   height: number,
   rgba: Uint8Array,
+  layout: { sourceWidth: number; sourceHeight: number } = { sourceWidth: width, sourceHeight: height },
 ): Promise<Uint8Array> {
   const stride = width * 4;
-  const raw = new Uint8Array(height * (stride + 1));
-  for (let y = 0; y < height; y++) {
-    raw[y * (stride + 1)] = 0; // filter: None（皮肤尺寸小，压缩率损失可忽略）
-    raw.set(rgba.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
-  }
+  let y = 0;
+  const raw = new ReadableStream<Uint8Array<ArrayBuffer>>({ pull(controller) {
+    if (y === height) { controller.close(); return; }
+    const row = new Uint8Array(stride + 1);
+    if (y < layout.sourceHeight) row.set(rgba.subarray(y * layout.sourceWidth * 4, (y + 1) * layout.sourceWidth * 4), 1);
+    y++;
+    controller.enqueue(row);
+  } });
 
   const ihdr = new Uint8Array(13);
   const view = new DataView(ihdr.buffer);
@@ -300,19 +309,18 @@ export async function encodePng(
   ihdr[9] = 6;   // RGBA
   // 压缩/滤波/交错均为 0
 
-  const idat = await deflateZlib(raw);
-  return concat([
-    Uint8Array.from(PNG_SIGNATURE),
-    chunkBytes('IHDR', ihdr),
-    chunkBytes('IDAT', idat),
-    chunkBytes('IEND', new Uint8Array(0)),
-  ]);
-}
-
-function concat(parts: Uint8Array[]): Uint8Array {
-  const total = parts.reduce((n, p) => n + p.length, 0);
-  const out = new Uint8Array(total);
-  let pos = 0;
-  for (const part of parts) { out.set(part, pos); pos += part.length; }
+  const idat = new Uint8Array(await new Response(raw.pipeThrough(new CompressionStream('deflate'))).arrayBuffer());
+  const header = chunkBytes('IHDR', ihdr);
+  const end = chunkBytes('IEND', new Uint8Array(0));
+  const out = new Uint8Array(PNG_SIGNATURE.length + header.length + 12 + idat.length + end.length);
+  out.set(PNG_SIGNATURE, 0);
+  out.set(header, PNG_SIGNATURE.length);
+  const offset = PNG_SIGNATURE.length + header.length;
+  const resultView = new DataView(out.buffer);
+  resultView.setUint32(offset, idat.length);
+  out.set([0x49, 0x44, 0x41, 0x54], offset + 4);
+  out.set(idat, offset + 8);
+  resultView.setUint32(offset + 8 + idat.length, crc32(out, offset + 4, offset + 8 + idat.length));
+  out.set(end, offset + 12 + idat.length);
   return out;
 }

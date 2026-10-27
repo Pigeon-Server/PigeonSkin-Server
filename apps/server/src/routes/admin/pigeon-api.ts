@@ -1,9 +1,11 @@
 import { AppError, currentAdmin, paginate, readJson, readPagination, toErrorResponse } from '../../core/framework.ts';
 import { type AppEnv } from '../../core/user.ts';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 
 import { noCaseEq } from '@pigeon-skin/db';
+import { HARD_TEXTURE_MAX_BYTES } from '@pigeon-skin/minecraft';
 import { requirePigeonKey, newPigeonSecret, PIGEON_SCOPES } from '../../services/pigeon-api.ts';
 import { adminImportTexture } from '../../services/admin-import.ts';
 import { uuidForPlayer } from '../../services/ygg-profiles.ts';
@@ -11,6 +13,10 @@ import { audit } from '../../services/audit.ts';
 
 export function registerPigeonApi(app: Hono<AppEnv>) {
   const r = new Hono<AppEnv>();
+  const textureImportBodyLimit = bodyLimit({
+    maxSize: HARD_TEXTURE_MAX_BYTES + 256 * 1024,
+    onError: c => c.json({ error: 'texture.file_too_large', status: '-1', msg: '文件超过大小限制' }, 422),
+  });
   r.onError((error, c) => error instanceof AppError ? c.json({ error: error.code, status: '-1', msg: error.code === 'pigeon.key_invalid' ? 'API密钥无效或已停用' : error.code === 'pigeon.rate_limited' ? 'API请求达到上限' : 'API密钥权限不足' }, error.status) : toErrorResponse(error, c));
   r.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); await next(); });
   const missing = (message: string) => ({ status: '0', msg: message });
@@ -63,17 +69,12 @@ export function registerPigeonApi(app: Hono<AppEnv>) {
   // 管理级批量纹理导入：API key（admin.texture.import scope）鉴权，
   // 刻意挂在 /admin 之外 —— 全局 admin 会话守卫（app.ts）会先于路由执行，
   // 运维 CLI 没有 Web 会话。路径带 pigeon 前缀保持与 key 管理一致的命名空间。
-  app.post('/api/v1/pigeon/admin/import/textures', async c => {
+  app.post('/api/v1/pigeon/admin/import/textures', textureImportBodyLimit, async c => {
     c.header('Cache-Control', 'no-store');
     const key = await requirePigeonKey(c, 'admin.texture.import');
     const kind = c.req.query('kind');
     if (kind !== 'skin' && kind !== 'cape') throw new AppError('common.invalid_request', 422);
-    const modelText = c.req.query('model') ?? 'default';
-    if (kind === 'cape') {
-      if (modelText !== 'default') throw new AppError('common.invalid_request', 422);
-    } else if (modelText !== 'default' && modelText !== 'slim') {
-      throw new AppError('common.invalid_request', 422);
-    }
+    // 不再接受 model query 参数:模型由服务端按像素自动判定
     const visibilityText = c.req.query('visibility');
     if (visibilityText !== undefined && visibilityText !== 'public' && visibilityText !== 'private') {
       throw new AppError('common.invalid_request', 422);
@@ -100,7 +101,7 @@ export function registerPigeonApi(app: Hono<AppEnv>) {
     let result;
     try {
       result = await adminImportTexture(c.env, {
-        bytes, kind, model: kind === 'cape' ? null : modelText as 'default' | 'slim',
+        bytes, kind,
         name, visibility, origin, uploaderId,
       });
     } catch (e) {

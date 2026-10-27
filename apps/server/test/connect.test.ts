@@ -339,11 +339,81 @@ describe('Yggdrasil compatibility', () => {
     try { expect(await (await SELF.fetch(`https://x/api/yggdrasil/sessionserver/session/minecraft/profile/${uuid}?unsigned=false`)).json()).toEqual(official); }
     finally { fetchMock.deactivate(); }
   });
+  it('validates unbound tokens without rejecting them (multi-profile email login)', async () => {
+    // 多角色账号用邮箱登录：authenticate 不选定角色，令牌未绑定
+    const res = await json('/api/yggdrasil/authserver/authenticate', { username: 'connect@example.com', password: PASSWORD, requestUser: true }, 'POST', '');
+    expect(res.status).toBe(200);
+    const unbound = await res.json<{ accessToken: string; clientToken: string; selectedProfile?: unknown; availableProfiles: Array<{ id: string; name: string }> }>();
+    expect(unbound.availableProfiles.length).toBeGreaterThan(1);
+    // 原插件语义：validate 只验令牌有效性，未绑定角色不算无效
+    expect((await json('/api/yggdrasil/authserver/validate', { accessToken: unbound.accessToken, clientToken: unbound.clientToken }, 'POST', '')).status).toBe(204);
+    // 未绑定令牌仍不能进服（join 需要明确角色）
+    expect((await json('/api/yggdrasil/sessionserver/session/minecraft/join', { accessToken: unbound.accessToken, selectedProfile: unbound.availableProfiles[0]!.id, serverId: 'srv-unbound' }, 'POST', '')).status).toBe(403);
+  });
+  it('logs validate and has_joined actions', async () => {
+    const auth = await traditional();
+    const validateBefore = (await env.DB.prepare("SELECT count(*) AS n FROM ygg_log WHERE action = 'validate'").first<{ n: number }>())!.n;
+    await json('/api/yggdrasil/authserver/validate', { accessToken: auth.accessToken }, 'POST', '');
+    const validateAfter = (await env.DB.prepare("SELECT count(*) AS n FROM ygg_log WHERE action = 'validate'").first<{ n: number }>())!.n;
+    expect(validateAfter).toBe(validateBefore + 1);
+    const serverId = 'srv-hasjoined';
+    const joinedBefore = (await env.DB.prepare("SELECT count(*) AS n FROM ygg_log WHERE action = 'has_joined'").first<{ n: number }>())!.n;
+    expect((await json('/api/yggdrasil/sessionserver/session/minecraft/join', { accessToken: auth.accessToken, selectedProfile: auth.selectedProfile!.id, serverId }, 'POST', '')).status).toBe(204);
+    const response = await SELF.fetch(`https://x/api/yggdrasil/sessionserver/session/minecraft/hasJoined?username=${encodeURIComponent(auth.selectedProfile!.name)}&serverId=${serverId}`);
+    expect(response.status).toBe(200);
+    const joinedAfter = (await env.DB.prepare("SELECT count(*) AS n FROM ygg_log WHERE action = 'has_joined'").first<{ n: number }>())!.n;
+    expect(joinedAfter).toBe(joinedBefore + 1);
+  });
+  it('a rename consumes the archive entry for the new name', async () => {
+    const now = Date.now();
+    const created = await env.DB.prepare('INSERT INTO players (user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?) RETURNING id')
+      .bind(uid, 'RenameProbe', now, now).first<{ id: number }>();
+    // 先制造一条同名的历史归档（模拟该名字曾属于一个已删除角色）
+    await env.DB.prepare("INSERT INTO uuid_archive (name, uuid) VALUES ('RenameTarget', ?)").bind('a'.repeat(32)).run();
+    expect((await json(`/api/v1/players/${created!.id}`, { name: 'RenameTarget' }, 'PATCH')).status).toBe(200);
+    // 0029 触发器清掉新名字的残留归档；否则之后删角色再同名重建会拿回启动器没见过的旧 UUID
+    expect(await env.DB.prepare("SELECT uuid FROM uuid_archive WHERE name = 'RenameTarget'").first()).toBeNull();
+  });
+  it('deleting the account archives its profiles for same-name reuse', async () => {
+    const now = Date.now();
+    const other = await env.DB.prepare('INSERT INTO users (email, nickname, password_hash, role, score, email_verified_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id')
+      .bind('archive-account@example.com', 'Archive account', await hashPassword(PASSWORD), 'normal', 1000, now, now, now).first<{ id: number }>();
+    await env.DB.prepare('INSERT INTO players (user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+      .bind(other!.id, 'AccountProbe', now, now).run();
+    const before = await (await SELF.fetch('https://x/api/yggdrasil/api/users/profiles/minecraft/AccountProbe')).json<{ id: string }>();
+    const login = await json('/api/v1/auth/login', { identifier: 'archive-account@example.com', password: PASSWORD }, 'POST', '');
+    const session = (await login.json<{ accessToken: string }>()).accessToken;
+    expect((await json('/api/v1/me', undefined, 'DELETE', session)).status).toBe(204);
+    expect(await env.DB.prepare("SELECT uuid FROM uuid_archive WHERE name = 'AccountProbe'").first()).toMatchObject({ uuid: before.id });
+  });
+  it('signout revokes every token of the user, not just traditional ones', async () => {
+    const auth = await traditional(), tokens = await codeToken();
+    expect((await json('/api/yggdrasil/authserver/signout', { username: 'ConnectOne', password: PASSWORD }, 'POST', '')).status).toBe(204);
+    expect((await json('/api/yggdrasil/authserver/validate', { accessToken: auth.accessToken }, 'POST', '')).status).toBe(403);
+    expect((await userinfo(tokens.access_token)).status).toBe(401);
+  });
   it('deleting a profile removes UUID, grants, sessions and bound tokens', async () => {
     const auth = await traditional('ConnectTwo');
     await env.DB.prepare('DELETE FROM players WHERE id = ?').bind(secondPid).run();
     expect(await env.DB.prepare('SELECT uuid FROM uuid WHERE player_id = ?').bind(secondPid).first()).toBeNull();
     expect((await json('/api/yggdrasil/authserver/validate', { accessToken: auth.accessToken }, 'POST', '')).status).toBe(403);
+  });
+  it('reuses the archived UUID when a deleted profile name is recreated', async () => {
+    const now = Date.now();
+    const created = await env.DB.prepare('INSERT INTO players (user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?) RETURNING id')
+      .bind(uid, 'ArchiveProbe', now, now).first<{ id: number }>();
+    const before = await (await SELF.fetch('https://x/api/yggdrasil/api/users/profiles/minecraft/ArchiveProbe')).json<{ id: string }>();
+    // 走真实删除路径（service 层归档 uuid），而非裸 SQL
+    expect((await json(`/api/v1/players/${created!.id}`, undefined, 'DELETE')).status).toBe(204);
+    expect(await env.DB.prepare('SELECT uuid FROM uuid WHERE player_id = ?').bind(created!.id).first()).toBeNull();
+    expect(await env.DB.prepare('SELECT uuid FROM uuid_archive WHERE uuid = ?').bind(before.id).first()).toMatchObject({ uuid: before.id });
+    // 同名重建后沿用旧 UUID —— 启动器记住的 profileID 继续有效，不再报「此角色已被删除」
+    await env.DB.prepare('INSERT INTO players (user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+      .bind(uid, 'ArchiveProbe', Date.now(), Date.now()).run();
+    const after = await (await SELF.fetch('https://x/api/yggdrasil/api/users/profiles/minecraft/ArchiveProbe')).json<{ id: string }>();
+    expect(after.id).toBe(before.id);
+    // 复用即消费：归档行随之清除
+    expect(await env.DB.prepare('SELECT uuid FROM uuid_archive WHERE uuid = ?').bind(before.id).first()).toBeNull();
   });
   it('ban and password changes revoke both token sources', async () => {
     const auth = await traditional(), tokens = await codeToken();
@@ -354,15 +424,31 @@ describe('Yggdrasil compatibility', () => {
 });
 
 describe('in-game texture upload', () => {
-  function pngBytes(width = 64, height = 64): Uint8Array<ArrayBuffer> {
+  // 手写 zlib 流（stored block）：workerd 里没有 node:zlib，只能自己拼。
+  // 必须带 Adler-32 尾 —— 缺了它 DecompressionStream 会拒绝，重编码链路无法工作。
+  function pngBytes(width = 64, height = 64, slim = false): Uint8Array<ArrayBuffer> {
     const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
     const crc = (b: Uint8Array) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 0xff]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
     const chunk = (type: string, data: Uint8Array) => { const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, data.length); const body = new Uint8Array(4 + data.length); body.set(new TextEncoder().encode(type)); body.set(data, 4); const crcB = new Uint8Array(4); new DataView(crcB.buffer).setUint32(0, crc(body)); return new Uint8Array([...len, ...body, ...crcB]); };
     const ihdr = new Uint8Array(13); new DataView(ihdr.buffer).setUint32(0, width); new DataView(ihdr.buffer).setUint32(4, height); ihdr[8] = 8; ihdr[9] = 6;
     const raw = new Uint8Array(height * (1 + width * 4));
     for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) raw[y * (1 + width * 4) + 1 + x * 4 + 3] = 255;
+    // slim 判定特征:右臂第一层 unused 区挖透明(仅方形 64 倍数有效)
+    if (slim && width === height && width % 64 === 0) {
+      const scale = width / 64;
+      for (const area of [{ x: 50, y: 16, w: 2, h: 4 }, { x: 54, y: 20, w: 2, h: 12 }]) {
+        for (let y = area.y * scale; y < (area.y + area.h) * scale; y++) {
+          for (let x = area.x * scale; x < (area.x + area.w) * scale; x++) raw[y * (1 + width * 4) + 1 + x * 4 + 3] = 0;
+        }
+      }
+    }
     const store: number[] = [0x78, 0x01];
     for (let i = 0; i < raw.length; i += 65535) { const slice = raw.subarray(i, i + 65535); store.push(i + 65535 < raw.length ? 0 : 1, slice.length & 255, slice.length >> 8, (~slice.length) & 255, ((~slice.length) >> 8) & 255, ...slice); }
+    // Adler-32（zlib 流尾，大端）
+    let s1 = 1, s2 = 0;
+    for (const b of raw) { s1 = (s1 + b) % 65521; s2 = (s2 + s1) % 65521; }
+    const adler = ((s2 << 16) | s1) >>> 0;
+    store.push((adler >>> 24) & 255, (adler >>> 16) & 255, (adler >>> 8) & 255, adler & 255);
     return new Uint8Array([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', new Uint8Array(store)), chunk('IEND', new Uint8Array(0))].flatMap(c => [...c]));
   }
   async function putProfile(token: string, uuid: string, bytes: Uint8Array<ArrayBuffer>, type = 'skin') {
@@ -381,6 +467,18 @@ describe('in-game texture upload', () => {
     const tokens = await codeToken(); // GAME_SCOPES 只含 Join/Select，无 Upload
     const uuid = (await env.DB.prepare('SELECT uuid FROM uuid WHERE player_id = ?').bind(pid).first<{ uuid: string }>())!.uuid;
     expect((await putProfile(tokens.access_token, uuid, pngBytes())).status).toBe(403);
+  });
+
+  it('returns 401 for missing or invalid Bearer tokens on texture upload', async () => {
+    // 首次查询会为角色惰性分配 UUID
+    const uuid = (await (await SELF.fetch('https://x/api/yggdrasil/api/users/profiles/minecraft/' + encodeURIComponent('ConnectOne'))).json<{ id: string }>()).id;
+    const form = new FormData();
+    form.set('model', 'default');
+    form.set('file', new Blob([pngBytes()], { type: 'image/png' }), 'skin.png');
+    // 规范 §5：未包含 Authorization 头或 accessToken 无效 → 401
+    const missing = await SELF.fetch(`https://x/api/yggdrasil/api/user/profile/${uuid}/skin`, { method: 'PUT', body: form });
+    expect(missing.status).toBe(401);
+    expect((await putProfile('not-a-real-token', uuid, pngBytes())).status).toBe(401);
   });
 
   it('charges score on first in-game upload and reuses identical content for free', async () => {
@@ -408,5 +506,16 @@ describe('in-game texture upload', () => {
     expect(await scoreOf()).toBe(afterFirst);
     const again = await env.DB.prepare('SELECT skin_texture_id FROM players WHERE id = ?').bind(pid).first<{ skin_texture_id: number }>();
     expect(again!.skin_texture_id).toBe(textureId);
+  });
+
+  it('ignores the launcher-supplied model and detects slim from pixels', async () => {
+    await env.DB.prepare("UPDATE users SET role = 'super_admin' WHERE id = ?").bind(uid).run();
+    const auth = await traditional();
+    const uuid = auth.selectedProfile!.id;
+    // putProfile 固定发送 model=default;slim 布局的像素应被服务端判为 slim
+    expect((await putProfile(auth.accessToken, uuid, pngBytes(64, 64, true))).status).toBe(204);
+    const row = await env.DB.prepare('SELECT skin_texture_id FROM players WHERE id = ?').bind(pid).first<{ skin_texture_id: number }>();
+    const stored = await env.DB.prepare('SELECT model FROM textures WHERE id = ?').bind(row!.skin_texture_id).first<{ model: string }>();
+    expect(stored!.model).toBe('slim');
   });
 });

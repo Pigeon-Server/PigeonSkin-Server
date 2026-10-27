@@ -209,13 +209,13 @@ export const LIMITS = {
   playerNameMinLength: 3,
   playerNameMaxLength: 16,
 
-  /** 上传大小上限（KB）。旧版默认 1024。 */
+  /** Minecraft 标准纹理上传硬上限（KB）。 */
   maxUploadSizeKb: 1024,
 
-  /** 纹理宽度上限。旧版默认 8192。 */
+  /** 纹理宽度上限。保留高清材质兼容。 */
   maxTextureWidth: 8192,
 
-  /** 纹理面积上限（像素）。独立的解压缩炸弹防护：8192×8192 是 6700 万像素。 */
+  /** 纹理面积上限（独立防止解压缩炸弹）。 */
   maxTextureArea: 16_777_216,
 
   /** PNG chunk 数量上限，防 chunk 洪水。 */

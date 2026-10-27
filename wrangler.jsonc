@@ -9,6 +9,7 @@
   // D1 固定单一区域，每个请求至少一次 D1 往返（会话解析、设置缓存未命中）；
   // smart 让 Worker 计算靠近 D1 部署。静态资产仍由边缘直接服务，不受影响。
   "placement": { "mode": "smart" },
+  "triggers": { "crons": ["0 * * * *", "* * * * *"] },
   "observability": {
     "enabled": false,
     "head_sampling_rate": 1,
@@ -81,17 +82,23 @@
   "durable_objects": {
     "bindings": [
       { "name": "DERIVATIVES", "class_name": "DerivativeGenerator" },
-      { "name": "OFFICIAL_RESOURCES", "class_name": "OfficialResourceUpdater" }
+      { "name": "OFFICIAL_RESOURCES", "class_name": "OfficialResourceUpdater" },
+      { "name": "TEXTURE_SANITIZER", "class_name": "TextureSanitizer" },
+      { "name": "CACHE_PUBLISHER", "class_name": "CachePublisher" },
+      { "name": "WORKLOADS", "class_name": "Workloads" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["DerivativeGenerator"] },
-    { "tag": "v2", "new_sqlite_classes": ["OfficialResourceUpdater"] }
+    { "tag": "v2", "new_sqlite_classes": ["OfficialResourceUpdater"] },
+    { "tag": "v3", "new_sqlite_classes": ["TextureSanitizer"] },
+    { "tag": "v4", "new_sqlite_classes": ["CachePublisher", "Workloads"] }
   ],
 
   // ── 本地开发 ────────────────────────────────────────────────────────────────
   // 本地 D1 与本地 R2 都是文件型的，不需要网络、不需要 Docker、不需要账号。
   // npm run dev 同时启动前端、后端与本地存储。
+  "kv_namespaces": [{ "binding": "PUBLIC_CACHE" }],
   "d1_databases": [
     {
       "binding": "DB",
@@ -126,6 +133,7 @@
     // ── 本地开发 ──────────────────────────────────────────────────────────────
     // 本地 D1 与本地 R2 都是文件型的，不需要网络。npm run dev --env dev。
     "dev": {
+      "kv_namespaces": [{ "binding": "PUBLIC_CACHE", "id": "local-public-cache" }],
       "d1_databases": [
         {
           "binding": "DB",
@@ -143,7 +151,10 @@
       "durable_objects": {
         "bindings": [
           { "name": "DERIVATIVES", "class_name": "DerivativeGenerator" },
-          { "name": "OFFICIAL_RESOURCES", "class_name": "OfficialResourceUpdater" }
+          { "name": "OFFICIAL_RESOURCES", "class_name": "OfficialResourceUpdater" },
+          { "name": "TEXTURE_SANITIZER", "class_name": "TextureSanitizer" },
+          { "name": "CACHE_PUBLISHER", "class_name": "CachePublisher" },
+          { "name": "WORKLOADS", "class_name": "Workloads" }
         ]
       },
       "queues": {
@@ -156,6 +167,7 @@
       }
     },
     "preview": {
+      "kv_namespaces": [{ "binding": "PUBLIC_CACHE" }],
       "name": "pigeon-skin-preview",
       "queues": {
         "producers": [{ "binding": "SEARCH_SUBMISSIONS", "queue": "pigeon-search-preview" }, { "binding": "EMAIL_NOTIFICATIONS", "queue": "pigeon-email-preview" }],
@@ -177,7 +189,10 @@
       "durable_objects": {
         "bindings": [
           { "name": "DERIVATIVES", "class_name": "DerivativeGenerator" },
-          { "name": "OFFICIAL_RESOURCES", "class_name": "OfficialResourceUpdater" }
+          { "name": "OFFICIAL_RESOURCES", "class_name": "OfficialResourceUpdater" },
+          { "name": "TEXTURE_SANITIZER", "class_name": "TextureSanitizer" },
+          { "name": "CACHE_PUBLISHER", "class_name": "CachePublisher" },
+          { "name": "WORKLOADS", "class_name": "Workloads" }
         ]
       },
       "ratelimits": [
@@ -188,8 +203,8 @@
       ],
       "vars": {
         "ENVIRONMENT": "preview",
-        "DERIVATIVES_ENABLED": "true"
-        // APP_URL 待预览环境有确定域名后在此填写
+        "DERIVATIVES_ENABLED": "true",
+        "APP_URL": "https://pigeon-skin-preview.pigeon-server-team.workers.dev"
       }
     },
 

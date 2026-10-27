@@ -9,13 +9,13 @@
 import { type Bindings } from './../core/env.ts';
 import { AppError } from './../core/framework.ts';
 import { getSetting } from './../core/settings-reader.ts';
-import { validateTexture, textureObjectKey, DEFAULT_TEXTURE_LIMITS } from '@pigeon-skin/minecraft';
+import { sha256Hex, textureObjectKey, DEFAULT_TEXTURE_LIMITS } from '@pigeon-skin/minecraft';
+import { computeSanitize, computeValidateTexture } from './compute.ts';
 import type { TextureKind, TextureModel, TextureVisibility } from '@pigeon-skin/shared';
 
 export interface AdminImportInput {
   bytes: Uint8Array<ArrayBuffer>;
   kind: TextureKind;
-  model: TextureModel | null;
   name: string;
   visibility: TextureVisibility;
   origin: 'original' | 'repost';
@@ -40,17 +40,27 @@ export async function adminImportTexture(env: Pick<Bindings, 'DB' | 'BUCKET'>, i
     }
   }
 
-  const validated = await validateTexture(
+  const validated = await computeValidateTexture(
+    env,
     input.bytes,
-    { kind: input.kind, model: input.model },
+    // 模型是像素的函数,校验阶段先放行皮肤的全部合法比例
+    { kind: input.kind, model: null },
     DEFAULT_TEXTURE_LIMITS,
   );
   if (!validated.ok) throw new AppError(validated.code, 422, validated.message);
-  const { hash, info, byteLength } = validated.value;
+  // 与用户上传同一条链：净化(解码→重编码,旧披风补边)后以净化字节的哈希入库。
+  // 导入通道若存原始字节,同一张图会因元数据不同而得到两个 hash/两个对象。
+  const sanitized = await computeSanitize(env, input.bytes, input.kind, DEFAULT_TEXTURE_LIMITS.maxArea);
+  if (!sanitized.ok) throw new AppError('texture.malformed', 422, sanitized.reason);
+  const bytes = sanitized.bytes;
+  const model: TextureModel | null = sanitized.skinModel ?? null;
+  const hash = await sha256Hex(bytes);
+  const info = { width: sanitized.width, height: sanitized.height };
+  const byteLength = bytes.length;
 
   // R2 对象先于行：行可见时对象一定在（内容寻址键，同内容幂等覆盖）。
   // 已存在的行也补传——修复"上次 INSERT 成功但 put 失败"留下的对象缺口。
-  await env.BUCKET.put(textureObjectKey(hash), input.bytes, {
+  await env.BUCKET.put(textureObjectKey(hash), bytes, {
     httpMetadata: { contentType: 'image/png', cacheControl: 'public, max-age=31536000, immutable' },
   });
 
@@ -71,7 +81,7 @@ export async function adminImportTexture(env: Pick<Bindings, 'DB' | 'BUCKET'>, i
     `INSERT INTO textures (hash, kind, model, name, uploader_id, origin, size_bytes, visibility, width, height, likes, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
      RETURNING id`,
-  ).bind(hash, input.kind, input.model, input.name, input.uploaderId, input.origin, byteLength, input.visibility, info.width, info.height, now, now).first<{ id: number }>();
+  ).bind(hash, input.kind, model, input.name, input.uploaderId, input.origin, byteLength, input.visibility, info.width, info.height, now, now).first<{ id: number }>();
 
   if (!result) {
     // 行写入无返回（罕见）：回读以已存在的行为准（对象此刻已就位）

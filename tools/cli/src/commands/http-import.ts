@@ -51,11 +51,11 @@ async function uploadOnce(
 export async function httpUploadTexture(
   channel: HttpChannel,
   filePath: string,
-  params: { kind: string; model: string | null; visibility: string; origin: string; uploader: string | null; name: string },
+  // 不接受 model:服务端按像素自动判定,这里也不再发送
+  params: { kind: string; visibility: string; origin: string; uploader: string | null; name: string },
 ): Promise<HttpUploadResult> {
   const query = new URLSearchParams({
     kind: params.kind,
-    ...(params.model ? { model: params.model } : {}),
     visibility: params.visibility,
     origin: params.origin,
     ...(params.uploader ? { uploader: params.uploader } : {}),
@@ -85,7 +85,7 @@ export async function httpUploadTexture(
  * 两端校验实现若漂移，这里立即暴露而不是静默写错。 */
 export async function httpUploadBatch(
   channel: HttpChannel,
-  items: readonly { file: string; localHash: string; params: { kind: string; model: string | null; visibility: string; origin: string; uploader: string | null; name: string } }[],
+  items: readonly { file: string; localHash: string; params: { kind: string; visibility: string; origin: string; uploader: string | null; name: string } }[],
   baseDir: string,
   onProgress?: (done: number, total: number) => void,
 ): Promise<{ ok: number; skipped: number; failures: { file: string; reason: string }[] }> {

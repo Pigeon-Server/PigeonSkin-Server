@@ -3,14 +3,18 @@ import { type Bindings } from './core/env.ts';
 import { createApp } from './app.ts';
 import { DerivativeGenerator } from './do/derivatives.ts';
 import { OfficialResourceUpdater } from './do/official-resources.ts';
+import { TextureSanitizer } from './do/texture-sanitizer.ts';
+import { CachePublisher } from './do/cache-publisher.ts';
+import { Workloads } from './do/workloads.ts';
 
 import { runScheduledTasks, processQueueBatch } from './tasks.ts';
 import { processDueJobs } from './services/ai-jobs.ts';
 import type { SearchQueueMessage } from './services/search-submissions.ts';
 import type { EmailQueueMessage } from './services/email.ts';
+import { syncD1Usage, backgroundAllowed, noteD1Failure } from './core/usage-budget.ts';
 
 // DO 类必须从入口模块具名导出，wrangler 才能在部署时接线
-export { DerivativeGenerator, OfficialResourceUpdater };
+export { DerivativeGenerator, OfficialResourceUpdater, TextureSanitizer, CachePublisher, Workloads };
 
 export default {
   ...createApp(),
@@ -20,10 +24,12 @@ export default {
    * `* * * * *` 跑 AI 任务派发（processDueJobs，指数退避重试）。
    */
   async scheduled(event: ScheduledEvent, env: Bindings, ctx: ExecutionContext): Promise<void> {
+    await syncD1Usage(env);
+    if (!await backgroundAllowed(env)) return;
     if (event.cron === '* * * * *') {
       // 派发失败（认领/推后的 D1 写入出错）下一分钟会重来，记一条即可，不让它
       // 变成 scheduled 调用的未捕获异常
-      ctx.waitUntil(processDueJobs(env).catch((error) => console.warn('AI 任务派发失败', String(error))));
+      ctx.waitUntil(processDueJobs(env).catch(async error => { await noteD1Failure(env, error); console.warn('AI 任务派发失败', String(error)); }));
       return;
     }
     await runScheduledTasks(event, env, ctx);

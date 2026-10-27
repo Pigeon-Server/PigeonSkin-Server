@@ -171,10 +171,10 @@ function handleStartCreate() {
           </div>
         </div>
 
-        <!-- 适用模型（仅皮肤时显示） -->
+        <!-- 画布模板（仅皮肤时显示）：只决定起手胳膊宽度，最终模型由保存时按像素识别 -->
         <div v-if="kind === 'skin'">
           <label class="mb-1.5 block text-xs font-semibold text-ink">
-            {{ i18n.t('skinlib.show.model') }}
+            {{ i18n.t('skinlib.create.canvas_model') }}
           </label>
           <div class="grid grid-cols-2 gap-2.5">
             <button
@@ -213,6 +213,7 @@ function handleStartCreate() {
               </div>
             </button>
           </div>
+          <p class="mt-1.5 text-xs text-muted">{{ i18n.t('skinlib.create.canvas_model_hint') }}</p>
         </div>
 
         <!-- 开始创作按钮 -->

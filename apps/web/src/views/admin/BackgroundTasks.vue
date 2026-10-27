@@ -18,6 +18,8 @@ const jobStatus = ref('');
 const jobPage = ref(1);
 const jobTotal = ref(0);
 const jobTotalPages = ref(1);
+const aiQuota = ref({ paused: false, pausedUntil: 0 });
+const resettingQuota = ref(false);
 
 // 审核标记
 const flags = ref<TextureFlagItem[]>([]);
@@ -50,10 +52,23 @@ const JOB_STATUSES = ['pending', 'processing', 'done', 'failed', 'cancelled'] as
 const ENGINES = ['google', 'bing', 'baidu'] as const;
 
 async function loadJobs() {
-  const data = await adminApi.aiJobs({ kind: jobKind.value || undefined, status: jobStatus.value || undefined, page: jobPage.value });
+  const [data, quota] = await Promise.all([
+    adminApi.aiJobs({ kind: jobKind.value || undefined, status: jobStatus.value || undefined, page: jobPage.value }),
+    adminApi.aiQuota(),
+  ]);
+  aiQuota.value = quota;
   jobs.value = data.items;
   jobTotal.value = data.total;
   jobTotalPages.value = data.totalPages;
+}
+
+async function resetQuota() {
+  resettingQuota.value = true;
+  try {
+    await adminApi.resetAiQuota();
+    await loadJobs();
+  } catch { errMsg.value = i18n.t('common.internal_error'); }
+  finally { resettingQuota.value = false; }
 }
 
 async function loadFlags() {
@@ -184,6 +199,10 @@ onMounted(load);
     <template v-else>
       <!-- AI 任务队列 -->
       <template v-if="tab === 'ai'">
+        <div v-if="aiQuota.paused" class="alert alert-warning flex flex-wrap items-center gap-2" role="status">
+          <span>{{ i18n.t('admin.ai_daily_paused', { time: fmtTime(aiQuota.pausedUntil) }) }}</span>
+          <AppButton class="btn-sm ml-auto" :disabled="resettingQuota" @click="resetQuota">{{ i18n.t('admin.ai_quota_reset') }}</AppButton>
+        </div>
         <div class="flex flex-wrap items-center gap-2">
           <AppSelect v-model="jobKind" class="max-w-48" :options="[{ value: '', label: i18n.t('admin.task_all_types') }, ...JOB_KINDS.map(k => ({ value: k, label: jobKindLabel(k) }))]" @change="() => { jobPage = 1; void loadJobs(); }" />
           <AppSelect v-model="jobStatus" class="max-w-40" :options="[{ value: '', label: i18n.t('admin.task_all_statuses') }, ...JOB_STATUSES.map(s => ({ value: s, label: statusLabel(s) }))]" @change="() => { jobPage = 1; void loadJobs(); }" />

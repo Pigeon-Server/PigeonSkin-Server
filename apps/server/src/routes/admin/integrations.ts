@@ -12,6 +12,7 @@ import { configurationValues } from '../../services/configuration.ts';
 import { inspectSigningKey } from '../../services/ygg-key.ts';
 import { audit } from '../../services/audit.ts';
 import { officialResourceStatus, syncOfficialResources } from '../../services/official-updates.ts';
+import { startTextureSanitize, textureSanitizeStatus } from '../../services/texture-sanitize.ts';
 import { normalizeLocale } from './../../core/i18n.ts';
 
 export const integrationRoutes = new Hono<AppEnv>();
@@ -22,6 +23,20 @@ integrationRoutes.get('/admin/official-resources', async c => {
 integrationRoutes.post('/admin/official-resources/sync', async c => {
   currentAdmin(c);
   return c.json(await syncOfficialResources(c.env, true), 202);
+});
+
+/** 存量材质净化进度（规范 §2.7 要求的元数据剥离，历史数据由 DO 分批补齐）。 */
+integrationRoutes.get('/admin/texture-sanitizer', async c => {
+  currentAdmin(c);
+  return c.json(await textureSanitizeStatus(c.env));
+});
+
+/** 启动/续跑存量材质净化。幂等：已在跑的作业直接返回当前进度。 */
+integrationRoutes.post('/admin/texture-sanitizer/start', async c => {
+  const actor = currentAdmin(c);
+  const result = await startTextureSanitize(c.env);
+  await audit(c.env, { actorId: actor.id, action: 'admin.texture.sanitize', detail: `cursor:${result.cursor ?? 0}` });
+  return c.json(result, 202);
 });
 
 integrationRoutes.get('/admin/search-submissions', async (c) => {

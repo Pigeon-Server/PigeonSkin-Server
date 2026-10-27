@@ -74,7 +74,7 @@ const reportCaptchaRandstr = ref('');
 const reportChallenge = ref<InstanceType<typeof VerificationChallenge> | null>(null);
 const editName = ref('');
 const editVisibility = ref<'public' | 'private'>('public');
-const editType = ref<'default' | 'slim' | 'cape'>('default');
+const editType = ref<'skin' | 'cape'>('skin');
 
 const description = ref('');
 const translatedDescription = ref('');
@@ -163,12 +163,7 @@ onMounted(async () => {
     texture.value = await withSkinlibChallenge((headers) => textureApi.get(tid, i18n.locale.value, headers));
     editName.value = texture.value.name;
     editVisibility.value = texture.value.visibility;
-    editType.value =
-      texture.value.kind === 'cape'
-        ? 'cape'
-        : texture.value.model === 'slim'
-          ? 'slim'
-          : 'default';
+    editType.value = texture.value.kind === 'cape' ? 'cape' : 'skin';
 
     if (session.user.value) {
       const closet = await closetApi.list({ perPage: 1000 });
@@ -321,7 +316,7 @@ async function submitReport() {
 async function saveEdits() {
   if (
     texture.value &&
-    (editType.value === 'cape') !== (texture.value.kind === 'cape') &&
+    editType.value !== texture.value.kind &&
     !(await confirmAction(i18n.t('texture.type_change_confirm')))
   ) {
     return;
@@ -337,7 +332,6 @@ async function saveEdits() {
       name?: string;
       visibility?: 'public' | 'private';
       kind?: 'skin' | 'cape';
-      model?: 'default' | 'slim';
     } = {};
 
     if (editName.value !== texture.value?.name) patch.name = editName.value;
@@ -345,12 +339,8 @@ async function saveEdits() {
       patch.visibility = editVisibility.value;
     }
 
-    const currentType =
-      texture.value?.kind === 'cape' ? 'cape' : texture.value?.model;
-    if (editType.value !== currentType) {
-      patch.kind = editType.value === 'cape' ? 'cape' : 'skin';
-      if (editType.value !== 'cape') patch.model = editType.value;
-    }
+    // 模型不可在此修改:它是像素的函数,皮肤/披风切换后由服务端重新判定
+    if (editType.value !== texture.value?.kind) patch.kind = editType.value;
 
     await textureApi.patch(tid, patch);
     await session.fetchSession();
@@ -749,11 +739,13 @@ async function removeTexture() {
                 <AppSelect
                   v-model="editType"
                   :options="[
-                    { value: 'default', label: i18n.t('skinlib.model_classic') },
-                    { value: 'slim', label: i18n.t('skinlib.model_slim') },
+                    { value: 'skin', label: i18n.t('general.skin') },
                     { value: 'cape', label: i18n.t('general.cape') },
                   ]"
                 />
+                <p class="mt-1.5 text-xs text-muted">
+                  {{ i18n.t('skinlib.model_auto_hint') }}
+                </p>
               </div>
 
               <div class="flex items-center gap-2 pt-2">

@@ -222,6 +222,7 @@ describe('configurationValues: 旧 Turnstile 设置迁移', () => {
     return {
       prepare: () => ({
         bind: () => ({
+          first: async () => ({ value: JSON.stringify(stored) }),
           all: async () => ({ results: Object.entries(stored).map(([key, value]) => ({ key, value })) }),
         }),
       }),

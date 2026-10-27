@@ -1,19 +1,6 @@
-// DerivativeGenerator —— 衍生图生成的单飞协调者。
-//
-// 为什么是 Durable Object：生成是"每 (hash, kind, size) 只该发生一次"的
-// 写操作，而 Worker 是无状态多副本的 —— 两个 isolate 同时收到同一个
-// 缺失衍生图的请求，就会各自生成一遍并竞争写 R2。DO 以 hash 为名字
-// 实例化后，同名请求自动串行（input gates），天然是按哈希的分布式锁。
-//
-// 生成流水线：R2 查产物 → 命中直接回 → 未命中则读源纹理 → 纯 TS 解码
-// （codec.ts）→ 合成（derive.ts）→ 编码 → 写 R2 → 回字节。
-// 产物一旦写进 R2 就是 immutable 内容地址，此后请求不再进 DO。
-//
-// CPU 预算：64×64 皮肤的解码+合成+编码是毫秒级；面积超过
-// LIMITS.maxDerivativeSourceArea 的源图直接拒绝（404 路径），
-// 防止解压炸弹吃掉 DO 内存。
 
 import { flag, type Bindings } from './../core/env.ts';
+import { withRequestCache } from '../core/request-cache.ts';
 import {
   decodePng, encodePng, renderAvatar2d, renderAvatar3d, renderPreview,
   avatarObjectKey, previewObjectKey, textureObjectKey, isAllowedDerivativeSize,
@@ -31,32 +18,34 @@ interface GenerateSpec {
 }
 
 export class DerivativeGenerator {
-  readonly #state: DurableObjectState;
   readonly #env: Bindings;
+  readonly #pending = new Map<string, Promise<{ body: ArrayBuffer; status: number; headers: [string, string][] }>>();
 
-  constructor(state: DurableObjectState, env: Bindings) {
-    this.#state = state;
+  constructor(_state: DurableObjectState, env: Bindings) {
     this.#env = env;
   }
 
-  /**
-   * GET /generate?hash=…&kind=avatar-2d-100|avatar-3d-64|preview
-   *
-   * 返回产物字节（Content-Type: image/png）；无法生成时 404。
-   *
-   * 锁语义：input/output gates 只围绕 **storage 操作** 生效 —— 开头的
-   * `storage.get('__gate__')` 就是这个 gate 点。它让同一实例上的并发
-   * fetch 串行化：第一个请求做完生成前，后续请求在 gate 处排队，
-   * 排到时 R2 里已有产物、直接走第 1 步返回。没有这一行的话并发请求
-   * 会自由交错（产物是确定性的，last-write-wins 无差异，但会白白重复
-   * 解码烧 CPU）。
-   */
-  async fetch(request: Request): Promise<Response> {
+  fetch(request: Request): Promise<Response> { return withRequestCache(() => this.handleRequest(request)); }
+
+  private async handleRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const spec = parseSpec(url);
+    if (url.pathname !== '/generate' || !spec) return new Response(null, { status: 404 });
+    const key = `${spec.hash}:${spec.kind}:${spec.size}`;
+    let pending = this.#pending.get(key);
+    if (!pending) {
+      pending = this.generate(request).then(async response => ({ body: await response.arrayBuffer(), status: response.status, headers: [...response.headers] as [string, string][] }));
+      this.#pending.set(key, pending);
+    }
+    try {
+      const result = await pending;
+      return new Response(result.body, { status: result.status, headers: result.headers });
+    } finally { if (this.#pending.get(key) === pending) this.#pending.delete(key); }
+  }
+
+  private async generate(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname !== '/generate') return new Response(null, { status: 404 });
-
-    // gate 点：详见方法注释。读一个恒缺的键，成本≈0，只为挂起 gates。
-    await this.#state.storage.get('__gate__');
 
     const spec = parseSpec(url);
     if (!spec) return new Response(null, { status: 404 });

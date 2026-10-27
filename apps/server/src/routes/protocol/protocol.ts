@@ -6,12 +6,12 @@
 //
 // 性能设计：纹理字节走 Cache API 的 cache-aside。缓存命中时不做 D1 查询、
 // 不做 R2 读取，CPU 接近 0。
-import { getSettingBool, getSettingInt } from '../../core/settings-reader.ts';
+import { getSetting, getSettingBool, getSettingInt } from '../../core/settings-reader.ts';
 import { type AppEnv } from '../../core/user.ts';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import {
-  buildPlayerProfile, serializePlayerProfile, textureObjectKey,
+  buildPlayerProfile, serializePlayerProfile, textureObjectKey, withTextChunk,
   PLAYER_PROFILE_CACHE_CONTROL, TEXTURE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL,
   PLAYER_BANNED_MESSAGE, TEXTURE_OBJECT_MISSING_STATUS,
   textureEtag, playerProfileEtag,
@@ -132,6 +132,30 @@ app.get('/csl/:file', async (c, next) => {
 
 // ── 纹理字节 ─────────────────────────────────────────────────────────────────
 
+/** 站点标识：分发材质时写入的 tEXt 内容。
+ *  tag 由内容派生，参与 ETag 与 Cache API 键；站点改名后自动换 tag，
+ *  不会让客户端继续吃旧缓存。按进程内缓存，热路径只做一次字符串比较。 */
+let cachedMarkerKey = '';
+let cachedMarker: { tag: string; text: string } | null = null;
+function markerFor(key: string): { tag: string; text: string } | null {
+  if (key === cachedMarkerKey) return cachedMarker;
+  const [siteName, appUrl] = key.split('\u0000');
+  cachedMarkerKey = key;
+  cachedMarker = siteName && appUrl
+    ? { tag: fnv1a32(`${siteName}\u0000${appUrl}`), text: `${siteName} · ${appUrl}` }
+    : null;
+  return cachedMarker;
+}
+
+function fnv1a32(value: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    h ^= value.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
 async function textureHandler(c: Ctx) {
   const hash = c.req.param('hash');
   if (!hash || !/^[0-9a-f]{64}$/.test(hash)) return c.notFound();
@@ -141,9 +165,13 @@ async function textureHandler(c: Ctx) {
     return c.body(null, status === 404 ? 404 : 403, { 'Cache-Control': 'private, no-store' });
   }
 
-  // 条件请求要在读缓存/R2 之前判：ETag 就是哈希本身，无状态可查，
-  // 命中时连 Cache API 的 match 都省了。
-  const etag = textureEtag(hash);
+  // 站点标识：在分发字节里写 tEXt（不改像素），让下载/分发出去的材质带来源。
+  // 像素没变，但字节变了 —— 所以 ETag 与缓存键都必须绑定标记内容，否则
+  // 改了站点名之后客户端会继续拿旧缓存（内容变了而 ETag 没变）。
+  const marker = markerFor(`${await getSetting(c.env, 'site_name')}\u0000${c.env.APP_URL}`);
+  const etag = marker ? `${textureEtag(hash).slice(0, -1)}-${marker.tag}"` : textureEtag(hash);
+
+  // 条件请求要在读缓存/R2 之前判：ETag 只依赖哈希与站点标识，无状态可查。
   if (publicAccess && c.req.header('if-none-match') === etag) {
     return c.body(null, 304, {
       'ETag': etag,
@@ -152,7 +180,8 @@ async function textureHandler(c: Ctx) {
   }
 
   const cache = caches.default;
-  const cacheKey = new Request(new URL(`/textures/${hash}`, c.req.url).toString(), { method: 'GET' });
+  // 缓存键带标记版本：同一 hash 在不同站点标识下渲染出的字节不同
+  const cacheKey = new Request(new URL(`/textures/${hash}?m=${marker?.tag ?? 'none'}`, c.req.url).toString(), { method: 'GET' });
 
   // cache-aside：命中时不做 D1 查询、不读 R2，CPU 接近 0。
   //
@@ -186,12 +215,14 @@ async function textureHandler(c: Ctx) {
     return c.notFound();
   }
 
-  const response = new Response(object.body, {
+  // 标记只加在 png 文件本身（tEXt），像素不变；因此仍可按内容地址长缓存。
+  const body = marker ? withTextChunk(new Uint8Array(await object.arrayBuffer()), 'Software', marker.text) : null;
+  const response = new Response(body ?? object.body, {
     headers: {
       'Content-Type': 'image/png',
-      'Content-Length': String(object.size),
+      'Content-Length': String(body?.length ?? object.size),
       'Cache-Control': publicAccess ? TEXTURE_CACHE_CONTROL : 'private, no-store',
-      'ETag': textureEtag(hash),
+      'ETag': etag,
       'X-Content-Type-Options': 'nosniff',
     },
   });
@@ -229,11 +260,9 @@ app.get('/raw/:tid', async (c) => {
     return c.body(null, status === 404 ? 404 : 403, { 'Cache-Control': 'private, no-store' });
   }
 
-  // tid → 字节**不是**不变映射：在线编辑器的"覆盖保存"就地改掉行上的 hash
-  // （见 services/textures.ts replaceTextureContent），tid 与 URL 都不变。
-  // 所以这里不能按 immutable 下发，只能给短新鲜窗口 + 重验证；ETag 仍是内容
-  // 哈希，内容一换就变，未换时重验证是纯 304（契约 07 §2.4 已同步这条偏差）。
-  const rawEtag = textureEtag(hash);
+  // 与 /textures/:hash 同一套站点标识：下载入口同样带来源，ETag 绑定标记版本
+  const marker = markerFor(`${await getSetting(c.env, 'site_name')}\u0000${c.env.APP_URL}`);
+  const rawEtag = marker ? `${textureEtag(hash).slice(0, -1)}-${marker.tag}"` : textureEtag(hash);
   if (c.req.header('if-none-match') === rawEtag) {
     return c.body(null, 304, {
       'ETag': rawEtag,
@@ -244,9 +273,12 @@ app.get('/raw/:tid', async (c) => {
   const object = await c.env.BUCKET.get(textureObjectKey(hash));
   if (!object) return c.body(null, TEXTURE_OBJECT_MISSING_STATUS, { 'Retry-After': '60' });
 
-  return c.body(object.body, 200, {
+  // Hono 的 body 类型不接受 Uint8Array<ArrayBufferLike>：包成 ArrayBuffer
+  const marked = marker ? withTextChunk(new Uint8Array(await object.arrayBuffer()), 'Software', marker.text) : null;
+  const payload: ArrayBuffer | ReadableStream | null = marked ? marked.buffer.slice(marked.byteOffset, marked.byteOffset + marked.byteLength) as ArrayBuffer : null;
+  return c.body(payload ?? object.body, 200, {
     'Content-Type': 'image/png',
-    'Content-Length': String(object.size),
+    'Content-Length': String(marked?.length ?? object.size),
     'Cache-Control': REVALIDATE_CACHE_CONTROL,
     'ETag': rawEtag,
     'X-Content-Type-Options': 'nosniff',

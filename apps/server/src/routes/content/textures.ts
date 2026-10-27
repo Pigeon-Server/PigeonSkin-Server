@@ -9,6 +9,7 @@ import { type AppEnv } from '../../core/user.ts';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { textureListQuerySchema, texturePatchInputSchema } from './../../core/schemas.ts';
+import { HARD_TEXTURE_MAX_BYTES } from '@pigeon-skin/minecraft';
 
 import * as textures from '../../services/textures.ts';
 import { compileSearchInput } from '../../search/index.ts';
@@ -86,7 +87,7 @@ textureRoutes.get('/:id/content', async (c) => {
 
 // ── 上传 ─────────────────────────────────────────────────────────────────────
 
-const textureUploadBodyLimit = bodyLimit({ maxSize: 101 * 1024 * 1024, onError: c => c.json({ error: 'texture.file_too_large' }, 422) });
+const textureUploadBodyLimit = bodyLimit({ maxSize: HARD_TEXTURE_MAX_BYTES + 256 * 1024, onError: c => c.json({ error: 'texture.file_too_large' }, 422) });
 
 textureRoutes.post('/', textureUploadBodyLimit, async (c) => {
   const bodyLimitBytes = (await getSettingInt(c.env, 'max_upload_size_kb')) * 1024 + 256 * 1024;
@@ -108,9 +109,7 @@ textureRoutes.post('/', textureUploadBodyLimit, async (c) => {
   if ((file as Blob).size > bodyLimitBytes - 256 * 1024) throw fail.invalid('texture.file_too_large');
 
   const kind = form.get('kind') === 'cape' ? ('cape' as const) : ('skin' as const);
-  const model = kind === 'cape'
-    ? null
-    : (form.get('model') === 'slim' ? ('slim' as const) : ('default' as const));
+  // 不读取 form 的 model:模型由服务端按像素自动判定
 
   const description = String(form.get('description') ?? '');
   const sourceValue = String(form.get('sourceResourceId') ?? '').trim();
@@ -133,7 +132,6 @@ textureRoutes.post('/', textureUploadBodyLimit, async (c) => {
       sourceResourceId,
       origin: originValue === 'repost' ? 'repost' : 'original',
       kind,
-      model,
       visibility: form.get('visibility') === 'private' ? 'private' : 'public',
       nameRegexp: await getSetting(c.env, 'texture_name_regexp'),
       limits: {

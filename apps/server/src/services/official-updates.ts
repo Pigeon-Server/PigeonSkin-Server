@@ -1,6 +1,7 @@
 
 import { type Bindings } from './../core/env.ts';
-import { dialect, jsonArrayEachRows, boolToInt } from '@pigeon-skin/db';
+import { createDb, dialect, jsonArrayEachRows, textureCounts } from '@pigeon-skin/db';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { textureObjectKey } from '@pigeon-skin/minecraft';
 import { candidateTexture, type ResourceCandidate } from './official-sources.ts';
 
@@ -16,8 +17,9 @@ function jsonObjectField(expr: string, field: string): string {
 
 export async function officialResourceStatus(env: Bindings) {
   const state = await env.DB.prepare('SELECT * FROM official_resource_sync WHERE id = 1').first<SyncState>();
-  const counts = await env.DB.prepare(`SELECT sum(${boolToInt(`kind = 'skin'`)}) AS skins,sum(${boolToInt(`kind = 'cape'`)}) AS capes FROM textures WHERE official_key IS NOT NULL`).first<{ skins: number; capes: number }>();
-  return { checkedAt: state?.checked_at ?? null, succeededAt: state?.succeeded_at ?? null, running: state?.started_at != null, phase: state?.phase || 'idle', clientVersion: state?.client_version || '1.21.4', added: state?.added ?? 0, updated: state?.updated ?? 0, pending: state?.pending ?? 0, error: !!state?.error, skins: counts?.skins || 0, capes: counts?.capes || 0 };
+  const counts = Object.fromEntries((await createDb(env.DB).select({ kind: textureCounts.kind, n: sql<number>`SUM(${textureCounts.value})`.mapWith(Number) }).from(textureCounts)
+    .where(and(eq(textureCounts.official, 1), inArray(textureCounts.scope, ['p:public', 'p:private']))).groupBy(textureCounts.kind)).map(row => [row.kind, row.n]));
+  return { checkedAt: state?.checked_at ?? null, succeededAt: state?.succeeded_at ?? null, running: state?.started_at != null, phase: state?.phase || 'idle', clientVersion: state?.client_version || '1.21.4', added: state?.added ?? 0, updated: state?.updated ?? 0, pending: state?.pending ?? 0, error: !!state?.error, skins: counts.skin || 0, capes: counts.cape || 0 };
 }
 
 export async function applyOfficialUpdates(env: Bindings, candidates: ResourceCandidate[], batch?: { jobId: string; key: string }) {

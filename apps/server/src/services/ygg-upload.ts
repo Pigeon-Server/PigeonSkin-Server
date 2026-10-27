@@ -1,6 +1,5 @@
 import { type Bindings } from './../core/env.ts';
 import { getSettingBool, getSettingInt } from './../core/settings-reader.ts';
-import type { TextureModel } from '@pigeon-skin/shared';
 import { uploadTexture } from './textures.ts';
 
 import { DEFAULT_TEXTURE_LIMITS } from '@pigeon-skin/minecraft';
@@ -15,23 +14,21 @@ export async function uploadTextureViaYgg(
   userId: number,
   playerId: number,
   kind: 'skin' | 'cape',
-  model: string,
   bytes: Uint8Array<ArrayBuffer>,
 ): Promise<void> {
   const playerBefore = await env.DB.prepare('SELECT updated_at FROM players WHERE id=? AND user_id=?').bind(playerId, userId).first<{ updated_at: number }>();
   if (!playerBefore) throw new Error('Player not found');
-  const targetModel: TextureModel | null = kind === 'cape' ? null : model === 'slim' ? 'slim' : 'default';
   const readSetting = (key: 'max_upload_size_kb' | 'max_texture_width') => getSettingInt(env, key);
   const limits = {
     maxSizeBytes: (await readSetting('max_upload_size_kb')) * 1024,
     maxWidth: await readSetting('max_texture_width'),
     maxArea: DEFAULT_TEXTURE_LIMITS.maxArea,
   };
+  // 模型不接收调用方指定:uploadTexture 按像素自动判定
   const result = await uploadTexture(env, { id: userId }, {
     bytes,
     name: `${kind}_upload_${Date.now()}`,
     kind,
-    model: targetModel,
     visibility: 'private',
     limits,
     addToCloset: false,

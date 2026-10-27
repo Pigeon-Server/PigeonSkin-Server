@@ -102,6 +102,7 @@ vi.mock('@/stores/i18n', () => ({
         'skinlib.removeFromCloset': '从衣柜中移除',
         'skinlib.model_slim': 'Alex · 纤细',
         'skinlib.model_classic': 'Steve · 标准',
+        'skinlib.model_auto_hint': '模型由像素自动识别，不能在此修改',
         'skinlib.description': '材质描述',
         'skinlib.description_edit': '编辑描述',
         'skinlib.description_empty': '暂无描述',
@@ -246,6 +247,18 @@ describe('Skinlib Show View', () => {
     expect(text).toContain('管理');
     expect(text).toContain('拥有者');
     expect(text).toContain('保存');
+  });
+
+  it('author panel offers skin/cape only and explains the model is automatic', async () => {
+    const wrapper = createShowWrapper();
+    await flushPromises();
+    const text = wrapper.text();
+    // 模型是像素的函数:编辑区只留类型切换,不再提供 classic/slim 选项。
+    // 详情副标题仍会展示识别出的模型(此处为 Alex · 纤细),那是只读结果。
+    expect(text).toContain('模型由像素自动识别');
+    const manage = wrapper.findAll('select, .app-select').map(node => node.text()).join('\n');
+    expect(manage).not.toContain('Steve · 标准');
+    expect(manage).not.toContain('Alex · 纤细');
   });
 
   it('hides the SHA256 hash from visitors', async () => {

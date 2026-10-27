@@ -22,6 +22,10 @@ import { createRedisRateLimitBindings } from './ratelimit-redis.ts';
 import { createDoNamespace, ensureDoStorageTable, disposeAllDoAlarms } from './do.ts';
 import { DerivativeGenerator } from '../do/derivatives.ts';
 import { OfficialResourceUpdater } from '../do/official-resources.ts';
+import { TextureSanitizer } from '../do/texture-sanitizer.ts';
+import { CachePublisher } from '../do/cache-publisher.ts';
+import { CacheKV } from './kv.ts';
+import { Workloads } from '../do/workloads.ts';
 import { ensureJobsTable, QueueProducerShim, QueueConsumerRunner } from './queue.ts';
 import { createRateLimitBindings, type RateLimiterBinding } from './ratelimit.ts';
 import { createRedisQueueSystem, type RedisQueueConsumerRunner } from './queue-redis.ts';
@@ -122,6 +126,10 @@ export async function createNodeRuntime(): Promise<NodeRuntime> {
   bindings.BUCKET = bucket as never;
   bindings.DERIVATIVES = createDoNamespace('DerivativeGenerator', DerivativeGenerator as never, doEnv, doDb) as never;
   bindings.OFFICIAL_RESOURCES = createDoNamespace('OfficialResourceUpdater', OfficialResourceUpdater as never, doEnv, doDb) as never;
+  bindings.TEXTURE_SANITIZER = createDoNamespace('TextureSanitizer', TextureSanitizer as never, doEnv, doDb) as never;
+  bindings.PUBLIC_CACHE = new CacheKV() as never;
+  bindings.CACHE_PUBLISHER = createDoNamespace('CachePublisher', CachePublisher as never, doEnv, doDb) as never;
+  bindings.WORKLOADS = createDoNamespace('Workloads', Workloads as never, doEnv, doDb) as never;
   bindings.ASSETS = new AssetsFetcherShim(resolve(optional('ASSETS_DIR') ?? resolve(here, '../../../web/dist'))) as never;
 
   // ── 限流 ─────────────────────────────────────────────────────────────────
@@ -197,6 +205,7 @@ export async function createNodeRuntime(): Promise<NodeRuntime> {
   assignOptional(bindings as unknown as Record<string, unknown>, 'TYPESAFE_API_KEY', optional('TYPESAFE_API_KEY'));
   assignOptional(bindings as unknown as Record<string, unknown>, 'CLOUDFLARE_ACCOUNT_ID', optional('CLOUDFLARE_ACCOUNT_ID'));
   assignOptional(bindings as unknown as Record<string, unknown>, 'CLOUDFLARE_API_TOKEN', optional('CLOUDFLARE_API_TOKEN'));
+  assignOptional(bindings as unknown as Record<string, unknown>, 'CLOUDFLARE_ANALYTICS_TOKEN', optional('CLOUDFLARE_ANALYTICS_TOKEN'));
 
   // ── 队列（REDIS_URL 配置时用 Redis List/ZSET，否则落业务库 node_jobs 表）──
   let queueRunner: QueueConsumerRunner | RedisQueueConsumerRunner;

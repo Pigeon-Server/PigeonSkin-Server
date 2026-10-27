@@ -11,9 +11,14 @@ export interface Bindings {
   DB: D1Database;
   /** R2 桶：纹理与衍生图 */
   BUCKET: R2Bucket;
+  PUBLIC_CACHE?: KVNamespace;
+  CACHE_PUBLISHER?: DurableObjectNamespace;
+  WORKLOADS?: DurableObjectNamespace;
   /** 衍生图生成器（按 hash 命名实例，见 src/do/derivatives.ts） */
   DERIVATIVES: DurableObjectNamespace;
   OFFICIAL_RESOURCES: DurableObjectNamespace;
+  /** 存量材质净化批处理（规范 §2.7，见 src/do/texture-sanitizer.ts） */
+  TEXTURE_SANITIZER: DurableObjectNamespace;
   /** 前端静态资源（Worker 同源托管 SPA） */
   ASSETS: Fetcher;
   SEARCH_SUBMISSIONS?: Queue<SearchQueueMessage>;
@@ -116,6 +121,7 @@ export interface Bindings {
   /** Node 自托管经 Cloudflare REST API 调用 Clef 判别模型时的账户与凭据 */
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;
+  CLOUDFLARE_ANALYTICS_TOKEN?: string;
 }
 
 /** 判断是否启用了某个布尔型部署配置（'true' / '1' 都算开） */
@@ -183,16 +189,18 @@ export const SETTING_DEFAULTS = {
   gtag_id: '',
   // mojang-verification
   mojang_verification_score_award: '0',
-  // yggdrasil-api（10 项）
+  // yggdrasil-api（10 项）—— 除 uuid 算法外，默认值对齐上游 yggdrasil-connect/callbacks.php。
+  // uuid 算法保持 v4：本站约定 UUID 关联角色 PID、改名保留 UUID（见 37-yggdrasil-connect.md），
+  // 而上游 v3 改名会按新名字重算 UUID；两者不可混用，改由管理员显式选择。
   ygg_uuid_algorithm: 'v4',
-  ygg_token_expire_1: '604800',
-  ygg_token_expire_2: '1209600',
+  ygg_token_expire_1: '259200',
+  ygg_token_expire_2: '604800',
   ygg_tokens_limit: '10',
   ygg_rate_limit: '1000',
   ygg_skin_domain: '',
-  ygg_search_profile_max: '20',
+  ygg_search_profile_max: '5',
   ygg_show_config_section: 'true',
-  ygg_enable_ali: 'false',
+  ygg_enable_ali: 'true',
   ygg_private_key: '',
   ygg_connect_enabled: 'false',
   oauth_enabled: 'true',

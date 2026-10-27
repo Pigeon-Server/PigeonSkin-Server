@@ -7,9 +7,10 @@ import { and, eq, sql } from 'drizzle-orm';
 import {
   createDb, mojangVerifications, players, textures, users, uuidMap, yggLog, yggTokens, noCaseEq,
 } from '@pigeon-skin/db';
-import { verifyStoredPassword, hashToken, hashPassword } from '@pigeon-skin/auth';
+import { hashToken } from '@pigeon-skin/auth';
+import { computePasswordHash, computePasswordVerify } from '../../services/compute.ts';
 
-import { REVALIDATE_CACHE_CONTROL } from '@pigeon-skin/minecraft';
+import { HARD_TEXTURE_MAX_BYTES, REVALIDATE_CACHE_CONTROL } from '@pigeon-skin/minecraft';
 import { verifyConnectToken } from '../../services/connect.ts';
 import { gameProfiles, uuidForPlayer, publicProfile, userUuid, type GameProfile } from '../../services/ygg-profiles.ts';
 import { inspectSigningKey, privateKeyBytes } from '../../services/ygg-key.ts';
@@ -28,8 +29,15 @@ class ForbiddenOperation extends Error {
 
 class IllegalArgument extends Error {}
 
+/** 材质上传接口的认证失败：规范要求 401，而非 authserver 的 403。 */
+class Unauthorized extends Error {}
+
 function forbidden(message: string): ForbiddenOperation {
   return new ForbiddenOperation(message);
+}
+
+function unauthorized(message: string): Unauthorized {
+  return new Unauthorized(message);
 }
 
 async function throttle(c: Ctx, username: string) {
@@ -163,7 +171,12 @@ async function logYgg(c: Ctx, action: string, body?: string, userId: number | nu
   } catch { /* 日志失败不影响主流程 */ }
 }
 
-async function requireToken(c: Ctx, accessToken: string, clientToken?: string, refresh = false, requiredScope?: string): Promise<{ userId: number; profile: GameProfile | null; source: string; clientToken: string; tokenId: string }> {
+/** 日志里的登录标识脱敏：邮箱打码，角色名原样（管理员靠角色名定位账号）。 */
+function maskIdentifier(username: string): string {
+  return username.includes('@') ? username.replace(/^(.{1,2}).*(@.*)$/, '$1***$2') : username;
+}
+
+async function requireToken(c: Ctx, accessToken: string, clientToken?: string, refresh = false, requiredScope?: string, allowUnbound = false): Promise<{ userId: number; profile: GameProfile | null; source: string; clientToken: string; tokenId: string }> {
   const row = await readYggToken(c.env.DB, accessToken, refresh);
   if (!row) throw forbidden('Invalid token.');
   const user = await c.env.DB.prepare('SELECT role, email, password_hash, needs_initialization, email_verified_at FROM users WHERE id = ?').bind(row.user_id).first<{ role: string; email: string; password_hash: string; needs_initialization: number; email_verified_at: number | null }>();
@@ -171,7 +184,15 @@ async function requireToken(c: Ctx, accessToken: string, clientToken?: string, r
   if (needsAccountInitialization(user.email, user.password_hash, user.needs_initialization)) throw forbidden('Invalid token.');
   if (row.source === 'connect') {
     if (refresh) throw forbidden('Use the Connect token endpoint to refresh this token.');
-    try { await verifyConnectToken(c, accessToken, requiredScope || 'Yggdrasil.Server.Join'); } catch { throw forbidden('Invalid token.'); }
+    try {
+      await verifyConnectToken(c, accessToken, requiredScope || 'Yggdrasil.Server.Join');
+    } catch (e) {
+      // scope 不足不是令牌无效：保留 403 语义供上传接口区分 401/403
+      if (e instanceof Error && 'code' in e && (e as { code?: string }).code === 'insufficient_scope') {
+        throw forbidden(e.message);
+      }
+      throw forbidden('Invalid token.');
+    }
   }
   if (clientToken !== undefined && clientToken !== row.client_token) throw forbidden('Invalid client token.');
   let profile: GameProfile | null = null;
@@ -179,7 +200,7 @@ async function requireToken(c: Ctx, accessToken: string, clientToken?: string, r
     const p = await c.env.DB.prepare('SELECT u.uuid AS id, u.name, u.player_id AS playerId, u.version FROM uuid u JOIN players p ON p.id = u.player_id WHERE u.player_id = ? AND p.user_id = ?').bind(row.player_id, row.user_id).first<GameProfile>();
     if (!p || p.id !== row.profile_uuid || (!refresh && p.version !== row.profile_version)) throw forbidden('Invalid token.');
     profile = p;
-  } else if (!refresh) throw forbidden('No selected profile.');
+  } else if (!refresh && !allowUnbound) throw forbidden('No selected profile.');
   return { userId: row.user_id, profile, source: row.source, clientToken: row.client_token, tokenId: row.id };
 }
 
@@ -224,6 +245,8 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
     if (err instanceof ForbiddenOperation) {
       return c.json({ error: 'ForbiddenOperationException', errorMessage: err.message }, 403);
     }
+    // 材质上传认证失败按规范返回 401（不带 error/errorMessage，规范未定义其正文）
+    if (err instanceof Unauthorized) return c.body(null, 401);
     throw err;
   });
 
@@ -286,11 +309,9 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
           .where(sql`${players.name} = ${username} COLLATE NOCASE`).limit(1))[0];
 
     // 不存在也做等价哈希（与主站登录同一防时序策略）
-    const loggedUsername = username.includes('@') ? username.replace(/^(.{1,2}).*(@.*)$/, '$1***$2') : username;
-    await logYgg(c, 'authenticate', loggedUsername, user?.id ?? null);
     const ok = user === undefined
-      ? (await verifyStoredPassword(password, await hashPassword('timing-equalizer'), { legacySalt: c.env.LEGACY_SALT ?? '' }), false)
-      : await verifyStoredPassword(password, user.passwordHash, { legacySalt: c.env.LEGACY_SALT ?? '' });
+      ? (await computePasswordVerify(c.env, password, await computePasswordHash(c.env, 'timing-equalizer'), { legacySalt: c.env.LEGACY_SALT ?? '' }), false)
+      : await computePasswordVerify(c.env, password, user.passwordHash, { legacySalt: c.env.LEGACY_SALT ?? '' });
     if (!ok || !user) throw forbidden('Invalid credentials. Invalid username or password.');
 
     if (user.role === 'banned') throw forbidden('This account is banned.');
@@ -315,6 +336,9 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
     }
 
     const selected = profiles.length === 1 ? profiles[0] : (!username.includes('@') ? profiles.find(p => p.name.toLowerCase() === username.toLowerCase()) : undefined);
+    // 照上游语义：认证成功后才记录「登录」，并带上本次绑定的角色
+    //（多角色邮箱登录未定角色时为 null，待 refresh 选定后由 refresh 日志补上）
+    await logYgg(c, 'authenticate', maskIdentifier(username), user.id, selected?.playerId ?? null);
     const accessToken = await issueToken(c, user.id, clientToken, selected ?? null);
     const resp: Record<string, unknown> = {
       accessToken,
@@ -342,8 +366,7 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
     // 规范：selectedProfile 可选——原令牌已绑定则保持；未绑定且请求未指定时
     // 直接轮换出一个同样未绑定的令牌（响应省略 selectedProfile），不得拒绝。
     const selected = token.profile ?? (requested ? profiles.find(p => p.id === requested.id) : null);
-    if (requested && !selected) throw new IllegalArgument('Invalid selected profile.');
-    if (!token.profile && requested && !profiles.some(p => p.id === requested.id)) throw forbidden('Invalid profile.');
+    if (requested && !selected) throw forbidden('Invalid profile.');
     const newClientToken = clientToken || token.clientToken;
     const newAccessToken = await rotateYggToken(c.env.DB, accessToken, await tokenInput(c, token.userId, newClientToken, selected ?? null));
     if (!newAccessToken) throw forbidden('Invalid token.');
@@ -360,7 +383,10 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
 
   r.post('/authserver/validate', async (c) => {
     const body = await readJsonBody(c);
-    await requireToken(c, str(body, 'accessToken'), str(body, 'clientToken') || undefined);
+    // 原插件语义：validate 只验令牌有效性，不要求已绑定角色
+    //（多角色账号用邮箱登录后令牌尚未绑定，启动器仍可据此判定登录态）
+    const token = await requireToken(c, str(body, 'accessToken'), str(body, 'clientToken') || undefined, false, undefined, true);
+    await logYgg(c, 'validate', undefined, token.userId, token.profile?.playerId ?? null);
     return c.body(null, 204);
   });
 
@@ -385,12 +411,15 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
       ? (await db.select({ id: users.id, passwordHash: users.passwordHash }).from(users).where(sql`${users.email} = ${username} COLLATE NOCASE`).limit(1))[0]
       : (await db.select({ id: users.id, passwordHash: users.passwordHash }).from(players).innerJoin(users, eq(users.id, players.userId)).where(sql`${players.name} = ${username} COLLATE NOCASE`).limit(1))[0];
     const ok = user
-      ? await verifyStoredPassword(password, user.passwordHash, { legacySalt: c.env.LEGACY_SALT ?? '' })
+      ? await computePasswordVerify(c.env, password, user.passwordHash, { legacySalt: c.env.LEGACY_SALT ?? '' })
       : false;
-    await logYgg(c, 'signout', username, user?.id ?? null);
     if (!user || !ok) return c.body(null, 204);
+    // 与 authenticate 一致：成功后才记录，且登录标识脱敏
+    await logYgg(c, 'signout', maskIdentifier(username), user.id);
 
-    await db.delete(yggTokens).where(and(eq(yggTokens.userId, user.id), eq(yggTokens.source, 'traditional')));
+    // signout 吊销该用户全部令牌：本站 connect 令牌与传统令牌同表，
+    // 只删 traditional 会让已登出的客户端仍能进服/上传
+    await db.delete(yggTokens).where(eq(yggTokens.userId, user.id));
     return c.body(null, 204);
   });
 
@@ -419,11 +448,12 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
     c.header('Cache-Control', 'no-store');
     if (!username || !serverId) return c.body(null, 204);
 
-    const join = await c.env.DB.prepare(`SELECT u.uuid AS id, p.name, s.ip FROM ygg_sessions s JOIN uuid u ON u.player_id = s.player_id JOIN players p ON p.id = s.player_id JOIN users a ON a.id = p.user_id JOIN ygg_tokens t ON t.id = s.token_id WHERE s.server_hash = ? AND ${noCaseEq('p.name', '?')} AND s.expires_at > ? AND t.expires_at > ? AND u.uuid = s.profile_uuid AND u.version = s.profile_version AND a.role != 'banned'`)
-      .bind(await hashToken(serverId), username, Date.now(), Date.now()).first<{ id: string; name: string; ip: string }>();
+    const join = await c.env.DB.prepare(`SELECT u.uuid AS id, p.name, p.id AS playerId, p.user_id AS userId, s.ip FROM ygg_sessions s JOIN uuid u ON u.player_id = s.player_id JOIN players p ON p.id = s.player_id JOIN users a ON a.id = p.user_id JOIN ygg_tokens t ON t.id = s.token_id WHERE s.server_hash = ? AND ${noCaseEq('p.name', '?')} AND s.expires_at > ? AND t.expires_at > ? AND u.uuid = s.profile_uuid AND u.version = s.profile_version AND a.role != 'banned'`)
+      .bind(await hashToken(serverId), username, Date.now(), Date.now()).first<{ id: string; name: string; playerId: number; userId: number; ip: string }>();
     if (!join || (ip && ip !== join.ip)) return c.body(null, 204);
     const profile = await fullProfile(c, join.id, join.name);
     if (!profile) return c.body(null, 204);
+    await logYgg(c, 'has_joined', username, join.userId, join.playerId);
     // Mojang 正版回退：官方签名原样透传（与 profile/:uuid 裁定一致）
     if ((profile as { __mojang?: boolean }).__mojang === true) {
       delete (profile as { __mojang?: boolean }).__mojang;
@@ -486,7 +516,7 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
   });
 
   // 游戏内上传/清除材质（Bearer accessToken）
-  r.put('/api/user/profile/:uuid/:type', bodyLimit({ maxSize: 101 * 1024 * 1024, onError: c => c.json({ error: 'IllegalArgumentException', errorMessage: 'File is too large.' }, 413) }), async (c) => {
+  r.put('/api/user/profile/:uuid/:type', bodyLimit({ maxSize: HARD_TEXTURE_MAX_BYTES + 256 * 1024, onError: c => c.json({ error: 'IllegalArgumentException', errorMessage: 'File is too large.' }, 413) }), async (c) => {
     const user = await requireBearer(c, 'Yggdrasil.PlayerProfiles.Upload');
     const maxBytes = (await getSettingInt(c.env, 'max_upload_size_kb')) * 1024;
     const rawLength = c.req.header('content-length');
@@ -510,14 +540,14 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
 
     const form = await c.req.formData().catch(() => null);
     const file = form?.get('file');
-    const model = String(form?.get('model') ?? 'default');
     if (!file || typeof file === 'string') return c.body(null, 400);
     if ((file as Blob).size > maxBytes) return c.body(null, 413);
 
-    // 复用主站上传管线：走内部 service（校验/扣分/去重/写 R2/建行全一致）
+    // 复用主站上传管线：走内部 service（校验/扣分/去重/写 R2/建行全一致）。
+    // form 里的 model 字段不读取:模型由服务端按像素自动判定
     const { uploadTextureViaYgg } = await import('../../services/ygg-upload.ts');
     const bytes = new Uint8Array(await (file as Blob).arrayBuffer());
-    await uploadTextureViaYgg(c.env, user.userId, player.pid, type, model, bytes);
+    await uploadTextureViaYgg(c.env, user.userId, player.pid, type, bytes);
 
     await logYgg(c, `upload-${type}`, player.name, user.userId, player.pid);
     return c.body(null, 204);
@@ -587,12 +617,21 @@ async function issueToken(c: Ctx, userId: number, clientToken: string, profile: 
   return issueYggToken(c.env.DB, await tokenInput(c, userId, clientToken, profile));
 }
 
-/** Bearer accessToken（游戏内上传用） */
+/** Bearer accessToken（游戏内上传用）。
+ *  规范只对「未带 Authorization 头」或「accessToken 无效」要求 401；
+ *  令牌有效但缺少 Upload scope 仍按 ForbiddenOperationException 返回 403。 */
 async function requireBearer(c: Ctx, requiredScope?: string): Promise<{ userId: number; profile: GameProfile | null }> {
   const header = c.req.header('authorization') ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (!token) throw forbidden('Invalid token.');
-  return await requireToken(c, token, undefined, false, requiredScope);
+  if (!token) throw unauthorized('Invalid token.');
+  try {
+    return await requireToken(c, token, undefined, false, requiredScope);
+  } catch (e) {
+    // scope 不足是 rbAC 层面的拒绝，不是令牌无效
+    const message = e instanceof Error ? e.message : '';
+    if (message.includes('scope') || message.includes('Scope')) throw forbidden(message);
+    throw unauthorized('Invalid token.');
+  }
 }
 
 /** 完整 profile（材质信息 + Mojang 正版回退；回退结果带 __mojang 标记） */

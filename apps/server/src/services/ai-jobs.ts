@@ -1,13 +1,3 @@
-// AI 后台任务队列：ai_jobs 表做唯一事实源，cron / 入队路径派发。
-//
-// 为什么不用 Queues / DO alarm（已核对官方计费与 API）：
-// - Queues 按操作计费且无去重，队列内容管理员不可列举、失败项不可重驱；
-// - DO duration 按墙钟计费，在 DO 里 await LLM 的 25 秒照常计费。
-// D1 表天然支持 (kind, tid) 去重、管理员可见可重跑，Node 自托管复用同一执行器。
-//
-// 执行器 processDueJobs 与触发器分离：Workers 走 Cron Triggers（分钟级），
-// Node 走 setInterval；路由层入队后也 waitUntil 立即触发一次（廉价，cron 兜底）。
-// 失败任务按 attempts 指数退避（2^n 分钟），超过上限置 failed 等管理员处理。
 
 import { type Bindings } from './../core/env.ts';
 import { getSettingInt, readSettings } from './../core/settings-reader.ts';
@@ -15,8 +5,10 @@ import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { aiJobs, createDb, notificationTranslations, textures, textureTranslations, texturesDescription } from '@pigeon-skin/db';
 
 import { LOCALES } from '@pigeon-skin/shared/locale';
-import { AI_JOB_DEFINITIONS, parseJsonOutput, runAiJob, toVerdict, parseVerdict, aiProviderFailureAfter, aiProviderFailureSeq, type AiProviderFailure } from './ai-gateway.ts';
-import { writeTaskRun } from './task-runs.ts';
+import { AI_JOB_DEFINITIONS, aiJobProvider, parseJsonOutput, runAiJob, toVerdict, parseVerdict, aiProviderFailureAfter, aiProviderFailureSeq, type AiProviderFailure } from './ai-gateway.ts';
+import { readWorkersAiQuota } from './ai-quota.ts';
+import { listTaskRuns, writeTaskRun } from './task-runs.ts';
+import { backgroundAllowed } from '../core/usage-budget.ts';
 
 const TEXTURE_TRANSLATE_DEF = AI_JOB_DEFINITIONS.texture_translate;
 const TEXTURE_MODERATE_DEF = AI_JOB_DEFINITIONS.texture_moderate;
@@ -93,18 +85,18 @@ export async function backfillAiJobs(
 const PROCESSING_STALE_MS = 10 * 60 * 1000;
 
 /** 认领一批到期任务（条件 UPDATE 防跨 isolate 抢占），返回被认领的行。 */
-async function claimDueJobs(env: Bindings, limit: number) {
+async function claimDueJobs(env: Bindings, limit: number, kinds: AiJobKind[]) {
   const db = createDb(env.DB);
   const now = Date.now();
   // 先回收僵尸 processing：超时未完成的任务放回 pending 队尾
   await db
     .update(aiJobs)
     .set({ status: 'pending', nextRunAt: now, updatedAt: now })
-    .where(and(eq(aiJobs.status, 'processing'), lte(aiJobs.updatedAt, now - PROCESSING_STALE_MS)));
+    .where(and(inArray(aiJobs.kind, kinds), eq(aiJobs.status, 'processing'), lte(aiJobs.updatedAt, now - PROCESSING_STALE_MS)));
   const candidates = await db
     .select({ id: aiJobs.id })
     .from(aiJobs)
-    .where(and(eq(aiJobs.status, 'pending'), lte(aiJobs.nextRunAt, now)))
+    .where(and(inArray(aiJobs.kind, kinds), eq(aiJobs.status, 'pending'), lte(aiJobs.nextRunAt, now)))
     .orderBy(aiJobs.nextRunAt)
     .limit(limit);
   if (candidates.length === 0) return [];
@@ -127,8 +119,26 @@ function backoffSeconds(attempts: number): number {
  * 只会被一个调用者拿到。
  */
 export async function processDueJobs(env: Bindings): Promise<void> {
+  if (!await backgroundAllowed(env)) return;
+  const settings = await readSettings(env);
+  let kinds: AiJobKind[] = [];
+  if (settings.texture_ai_translation === 'true') kinds.push('translate_texture');
+  if (settings.texture_ai_moderation === 'true') kinds.push('moderate_texture_name', 'moderate_texture_description');
+  if (settings.notification_ai_translation === 'true') kinds.push('translate_notification');
+  if (kinds.length === 0) return;
+  const quota = await readWorkersAiQuota(env);
+  const enabled = await Promise.all(kinds.map(async kind => ({ kind, provider: await aiJobProvider(env, kind === 'translate_texture' ? TEXTURE_TRANSLATE_DEF : kind === 'translate_notification' ? NOTIFICATION_TRANSLATE_DEF : TEXTURE_MODERATE_DEF) })));
+  kinds = enabled.filter(item => item.provider !== null && (!quota.paused || item.provider !== 'workers')).map(item => item.kind);
+  if (kinds.length === 0) return;
+  if (env.WORKLOADS) {
+    const target = env.WORKLOADS.get(env.WORKLOADS.idFromName(crypto.randomUUID()));
+    const response = await target.fetch('https://workload/ai-jobs', { method: 'POST' });
+    await response.arrayBuffer();
+    if (!response.ok) throw new Error('AI job worker unavailable');
+    return;
+  }
   const maxConcurrency = Math.max(1, Math.min(10, await getSettingInt(env, 'ai_max_concurrency') || MAX_CONCURRENCY_FALLBACK));
-  const claimed = await claimDueJobs(env, maxConcurrency * 2);
+  const claimed = await claimDueJobs(env, maxConcurrency * 2, kinds);
   if (claimed.length === 0) return;
 
   const outages = (await Promise.all(claimed.map((job) => runClaimedJob(env, job))))
@@ -158,14 +168,14 @@ async function pauseDueJobs(env: Bindings, pausing: AiProviderFailure[]): Promis
   const now = Date.now();
   const waitMs = Math.max(...pausing.map((outage) => outage.retryAfterMs));
   const worst = pausing.find((outage) => outage.retryAfterMs === waitMs)!;
-  await createDb(env.DB)
+  const temporary = pausing.filter(outage => !outage.dailyQuota);
+  if (temporary.length > 0) await createDb(env.DB)
     .update(aiJobs)
-    .set({ nextRunAt: now + waitMs, updatedAt: now })
+    .set({ nextRunAt: now + Math.max(...temporary.map(outage => outage.retryAfterMs)), updatedAt: now })
     .where(and(eq(aiJobs.status, 'pending'), lte(aiJobs.nextRunAt, now)));
   const detail = `AI 渠道不可用（${worst.kind}）：${worst.message}（队列推后 ${Math.round(waitMs / 60_000)} 分钟）`;
-  const last = await env.DB.prepare("SELECT detail, ran_at FROM task_runs WHERE name = 'ai_jobs' ORDER BY id DESC LIMIT 1")
-    .first<{ detail: string; ran_at: number }>();
-  if (last && now - last.ran_at < PAUSE_RECORD_INTERVAL_MS && last.detail.includes(`（${worst.kind}）`)) return;
+  const last = (await listTaskRuns(env)).find(row => row.name === 'ai_jobs');
+  if (last && now - last.ranAt < PAUSE_RECORD_INTERVAL_MS && last.detail.includes(`（${worst.kind}）`)) return;
   await writeTaskRun(env, 'ai_jobs', false, detail, now);
 }
 
@@ -208,7 +218,7 @@ async function runClaimedJob(
       // 计次数会让一批任务在配额耗尽后接连撞满 MAX_ATTEMPTS 被永久判失败，
       // 配额次日重置也不会自动恢复，管理员只能逐条手动重跑。
       await db.update(aiJobs)
-        .set({ status: 'pending', lastError: message, nextRunAt: Date.now() + outage.retryAfterMs, updatedAt: Date.now() })
+        .set({ status: 'pending', lastError: message, nextRunAt: outage.dailyQuota ? Date.now() : Date.now() + outage.retryAfterMs, updatedAt: Date.now() })
         .where(eq(aiJobs.id, job.id));
       return outage;
     }

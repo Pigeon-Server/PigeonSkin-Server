@@ -3,6 +3,7 @@ import { fail } from './../core/framework.ts';
 import { invalidateSettingsCache } from './../core/settings-reader.ts';
 import { Unzip, UnzipInflate } from 'fflate';
 import { builtinLive2DModels, type Live2DModelInfo, type Live2DDisplay } from '@pigeon-skin/shared/live2d';
+import { computeLive2DUpload } from './compute.ts';
 
 const maxArchiveBytes = 20 * 1024 * 1024;
 const maxExpandedBytes = 32 * 1024 * 1024;
@@ -149,6 +150,7 @@ export async function listModels(env: Bindings): Promise<Live2DModelInfo[]> {
 }
 
 export async function uploadModel(env: Bindings, name: string, bytes: Uint8Array): Promise<Live2DModelInfo> {
+  if (env.WORKLOADS) return computeLive2DUpload(env, name, bytes);
   const { files, entry, version, sizeBytes } = unpackModel(bytes);
   const id = crypto.randomUUID();
   const prefix = `live2d/models/${id}/`;

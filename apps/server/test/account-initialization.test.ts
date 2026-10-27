@@ -9,7 +9,9 @@ import { runMigrations, mintRawToken } from './setup.ts';
 let uid = 0, cookie = '', otherCookie = '', adminCookie = '';
 const pendingEmail = 'oauth-init@example.com';
 async function request(path: string, body?: unknown, method = 'GET', session = cookie, origin?: string) {
-  return SELF.fetch('https://x' + path, { method, headers: { ...(session ? { authorization: `Bearer ${session}` } : {}), 'content-type': 'application/json', ...(origin ? { origin } : { 'sec-fetch-site': 'same-origin' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const response = await SELF.fetch('https://x' + path, { method, headers: { ...(session ? { authorization: `Bearer ${session}` } : {}), 'content-type': 'application/json', ...(origin ? { origin } : { 'sec-fetch-site': 'same-origin' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const bytes = await response.arrayBuffer();
+  return new Response([204, 205, 304].includes(response.status) ? null : bytes, { status: response.status, headers: response.headers });
 }
 async function status(session = cookie) { return (await request('/api/v1/auth/initialize', undefined, 'GET', session)).json<{ ticket: string; email: string; emailVerified: boolean; needsInitialization: boolean; playerRequired: boolean }>(); }
 async function payload(extra: Record<string, unknown> = {}) { return { ticket: (await status()).ticket, nickname: 'Initialized player', email: pendingEmail, password: 'initialized-password-9', playerName: 'InitializedOne', redirect: '/user', ...extra }; }

@@ -4,7 +4,7 @@
 // IEND 后追加载荷这类样本，所以畸形样本由 test/png-builder.ts 专门构造。
 import { describe, it, expect } from 'vitest';
 import { inspectPng, sha256Hex } from '../src/png.ts';
-import { validateTexture, textureObjectKey, isAllowedDerivativeSize, previewRenderQuery, previewRenderSignature, parsePreviewRenderSignature } from '../src/texture.ts';
+import { validateTexture, textureObjectKey, isAllowedDerivativeSize, previewRenderQuery, previewRenderSignature, parsePreviewRenderSignature, HARD_TEXTURE_MAX_BYTES, HARD_TEXTURE_MAX_WIDTH, HARD_TEXTURE_MAX_AREA } from '../src/texture.ts';
 import {
   buildPlayerProfile,
   serializePlayerProfile,
@@ -173,6 +173,16 @@ describe('validateTexture — 尺寸与宽高比（旧版规则逐条保留）',
     expect((await v(128, 64, SKIN_DEFAULT)).ok).toBe(true);
   });
 
+  it('调用方传入更宽松的限制也不能绕过解压缩炸弹硬上限', async () => {
+    const r = await validateTexture(
+      makePng({ width: 8256, height: 32 }),
+      SKIN_DEFAULT,
+      { maxSizeBytes: 100 * 1024 * 1024, maxWidth: 8192, maxArea: 16_777_216 },
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toMatch(new RegExp(`${HARD_TEXTURE_MAX_WIDTH}|${HARD_TEXTURE_MAX_AREA}`));
+  });
+
   it('T10 拒绝超过宽度上限的图', async () => {
     const r = await v(LIMITS.maxTextureWidth + 64, 64, SKIN_DEFAULT);
     expect(r.ok).toBe(false);
@@ -202,7 +212,7 @@ describe('validateTexture — 尺寸与宽高比（旧版规则逐条保留）',
   });
 
   it('T17 在解析之前就拒绝超大文件', async () => {
-    const big = new Uint8Array(2 * 1024 * 1024);
+    const big = new Uint8Array(HARD_TEXTURE_MAX_BYTES + 1);
     const r = await validateTexture(big, SKIN_DEFAULT);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('texture.file_too_large');

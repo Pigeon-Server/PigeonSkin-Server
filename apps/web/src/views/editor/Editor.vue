@@ -7,6 +7,8 @@ import { useI18n } from '@/stores/i18n';
 import { useSessionStore } from '@/stores/session';
 import { confirmAction } from '@/stores/dialog';
 import { apiErrorMessage } from '@/lib/api-error';
+import { detectSkinModelFromUrl } from '@/lib/skin-model';
+import { adaptLegacySkin, finalizeEditedSkin, type LegacySkinAdaptation } from '@/lib/skin-layout';
 import { withSkinlibChallenge } from '@/stores/skinlib-challenge';
 
 const route = useRoute();
@@ -20,13 +22,18 @@ const dirty = ref(false);
 const textureId = Number(route.query.texture) || 0;
 const isDraft = route.query.draft === '1';
 const kind = computed<EditorKind>(() => route.params.kind === 'cape' ? 'cape' : 'skin');
-const model = ref<'default' | 'slim'>(route.query.model === 'slim' ? 'slim' : 'default');
+// 模型只是 Blockbench 的编辑 preset(3px/4px 胳膊参考),不影响入库值:
+// 保存时服务端按像素重新判定。草稿与空白画布按图像自动选 preset,
+// 编辑已有材质沿用其当前模型。
+const model = ref<'default' | 'slim'>('default');
 const initialName = ref(String(route.query.name || i18n.t(kind.value === 'cape' ? 'editor.default_cape_name' : 'editor.default_skin_name')));
 const blank = route.query.blank === '1' || (!textureId && !isDraft);
 const initialized = ref(false);
 const saveDialog = ref(false);
 const pendingBlob = ref<Blob | null>(null);
 const canOverwrite = ref(false);
+// 2:1 经典布局在编辑器里被展开成方块画布，保存时需要知道它原本的布局
+let legacyAdaptation: LegacySkinAdaptation | null = null;
 let frameLoadTimer = 0;
 const blockbenchLanguage = (() => {
   const locale = document.documentElement.lang.toLowerCase();
@@ -46,7 +53,11 @@ async function initialize() {
       const response = await fetch(draft.dataUrl);
       image = await response.blob();
       if (draft.name) initialName.value = draft.name;
-    } else if (!blank) {
+      if (kind.value === 'skin') model.value = await detectSkinModelFromUrl(draft.dataUrl);
+    } else if (blank) {
+      // 空白画布无像素可判,沿用新建页选择的画布模板
+      model.value = route.query.model === 'slim' ? 'slim' : 'default';
+    } else {
       const metadata = await withSkinlibChallenge((headers) => textureApi.get(textureId, undefined, headers));
       if (metadata.kind !== kind.value) throw new Error(i18n.t('editor.wrong_kind'));
       model.value = metadata.model === 'slim' ? 'slim' : 'default';
@@ -54,6 +65,12 @@ async function initialize() {
       ownerId = metadata.uploaderId;
       canOverwrite.value = !!session.user.value && (metadata.uploaderId === session.user.value.id || session.isAdmin.value) && !metadata.official;
       image = await textureApi.content(textureId);
+    }
+    // 2:1 经典布局没有独立的左肢区块，编辑器按 64×64 语义绘制。
+    // 载入前把右肢镜像成左肢展开成方块画布，保存时再还原（见 finalizeEditedSkin）。
+    if (image && kind.value === 'skin') {
+      legacyAdaptation = await adaptLegacySkin(image);
+      if (legacyAdaptation) image = legacyAdaptation.image;
     }
     frame.value.contentWindow.postMessage({ type: 'editor:init', kind: kind.value, model: model.value, name: initialName.value, image, ...(textureId ? { resourceId: textureId, ownerId, editable: canOverwrite.value } : {}) }, location.origin);
   } catch (e) {
@@ -75,19 +92,20 @@ async function onMessage(event: MessageEvent) {
   if (message.type === 'editor:ready') { await initialize(); return; }
   if (message.type === 'editor:change') { dirty.value = message.dirty; if (message.model) model.value = message.model; return; }
   if (message.type === 'editor:error') { error.value = message.message; return; }
-  if (message.type === 'editor:export') { downloadBlob(message.image); return; }
+  if (message.type === 'editor:export') { downloadBlob(await finalizeEditedSkin(message.image, legacyAdaptation)); return; }
   if (message.type !== 'editor:save') return;
+  const image = await finalizeEditedSkin(message.image, legacyAdaptation);
   if (textureId) {
-    pendingBlob.value = message.image;
+    pendingBlob.value = image;
     if (canOverwrite.value) saveDialog.value = true;
-    else await saveAs(message.image);
+    else await saveAs(image);
     return;
   }
   if (busy.value) return;
   busy.value = true;
   error.value = '';
   try {
-    await saveAs(message.image);
+    await saveAs(image);
   } catch (e) {
     error.value = apiErrorMessage(e);
   } finally { busy.value = false; }
@@ -102,9 +120,9 @@ async function saveAs(blob: Blob) {
   });
   const draft = isDraft ? JSON.parse(sessionStorage.getItem('editor-draft') || 'null') as Record<string, unknown> | null : null;
   const resourceName = textureId ? i18n.t('editor.copy_name', { name: initialName.value }) : initialName.value;
-  sessionStorage.setItem('editor-result', JSON.stringify({ dataUrl, kind: kind.value, model: model.value, name: resourceName, sourceResourceId: textureId || (typeof draft?.sourceResourceId === 'number' ? draft.sourceResourceId : null), form: draft }));
+  sessionStorage.setItem('editor-result', JSON.stringify({ dataUrl, kind: kind.value, name: resourceName, sourceResourceId: textureId || (typeof draft?.sourceResourceId === 'number' ? draft.sourceResourceId : null), form: draft }));
   dirty.value = false;
-  await router.push(`/skinlib/upload?editor=1&kind=${kind.value}&model=${model.value}`);
+  await router.push(`/skinlib/upload?editor=1&kind=${kind.value}`);
 }
 
 async function overwrite() {

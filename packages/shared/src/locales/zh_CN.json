@@ -665,6 +665,7 @@
     "description_too_long": "描述超过长度限制",
     "model_classic": "Steve · 标准",
     "model_slim": "Alex · 纤细",
+    "model_auto_hint": "模型（标准 / 纤细）由皮肤像素自动识别，不能在此修改。需要换模型时请调整胳膊区域的像素后覆盖保存。",
     "collection_count": "{count} 次收藏",
     "download": "下载材质",
     "raw": "原始材质",
@@ -690,7 +691,9 @@
     "create": {
       "title": "创作材质",
       "description": "选择皮肤或披风并进入编辑器创作，完成后可以在皮肤库中填写资源信息并保存。",
-      "start": "开始创作"
+      "start": "开始创作",
+      "canvas_model": "画布模板",
+      "canvas_model_hint": "模板只决定起手时胳膊的宽度；保存后模型会按实际像素自动识别。"
     },
     "origin": "来源标记",
     "origin_original": "原创",
@@ -1147,9 +1150,12 @@
       "search_submissions_retry": "重试搜索提交",
       "texture_flags_clear": "清除审核标记",
       "ai_jobs_cancel": "取消 AI 任务",
+      "ai_jobs_quota_reset": "重置 Workers AI 暂停状态",
       "ai_jobs_retry": "重试 AI 任务",
       "ai_jobs_backfill": "补跑存量材质",
-      "texture_import": "批量导入纹理"
+      "texture_import": "批量导入纹理",
+      "texture_sanitize": "清理材质元数据",
+      "texture_model_redetect": "重检皮肤模型"
     },
     "anonymous": "已注销",
     "role_normal": "普通",
@@ -1359,6 +1365,8 @@
     "task_clear_flag": "清除标记",
     "task_cancel": "取消",
     "task_backfill": "补跑存量材质",
+    "ai_daily_paused": "Workers AI 今日额度已耗尽，相关任务暂停至 {time}。修改 AI 配置或重置暂停状态后可提前重试。",
+    "ai_quota_reset": "重置暂停状态",
     "task_backfill_empty": "没有需要补建的任务",
     "task_backfill_confirm": "为所有还没有 AI 任务的材质补建翻译与审核任务？已有任务不会被重置。",
     "task_backfill_done": "已补建任务：{detail}",
@@ -1640,6 +1648,8 @@
         "signout": "登出",
         "refresh": "刷新令牌",
         "join": "加入服务器",
+        "validate": "验证令牌",
+        "has_joined": "进入服务器",
         "upload-skin": "上传皮肤",
         "upload-cape": "上传披风"
       },
@@ -2145,5 +2155,17 @@
   "mojang_takeover": {
     "title": "角色属主更改通知",
     "content": "你的角色 {player} 已被正版用户接管，系统已为你发放补偿积分。"
+  },
+  "sanitize": {
+    "title": "材质元数据清理",
+    "start": "开始清理",
+    "total": "材质总数",
+    "pending": "待清理",
+    "processed": "本次已处理",
+    "changed": "内容已更新",
+    "running": "正在清理…",
+    "remaining": "还有 {count} 个材质等待清理",
+    "complete": "全部材质已清理完成",
+    "hint": "清理完成后，玩家下载到的材质文件里不再包含原始图片附带的作者、软件等附加信息。"
   }
 }

@@ -12,6 +12,7 @@ import type { Context } from 'hono';
 import type { ZodType } from 'zod';
 import { ZodError } from 'zod';
 import { roleRank, type ErrorCode } from '@pigeon-skin/shared';
+import { isD1QuotaError, noteD1Failure, quotaResetAt } from './usage-budget.ts';
 
 export { isAdmin } from '../services/authorization.ts';
 
@@ -58,6 +59,11 @@ export const fail = {
  * Zod 的校验失败也在这里转成 422 + 字段级细节，所以路由里不需要 try/catch。
  */
 export function toErrorResponse(err: unknown, c: Context<AppEnv>): Response {
+  if (isD1QuotaError(err)) {
+    const record = noteD1Failure(c.env, err);
+    try { c.executionCtx.waitUntil(record); } catch { void record; }
+    return c.json({ error: 'common.internal_error' }, 503, { 'Retry-After': String(Math.max(1, Math.ceil((quotaResetAt() - Date.now()) / 1000))), 'Cache-Control': 'no-store' });
+  }
   if (err instanceof AppError) {
     return c.json({
       error: err.code,

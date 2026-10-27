@@ -5,7 +5,7 @@ import { useI18n } from '@/stores/i18n';
 import SearchExpressionField from '@/components/search/SearchExpressionField.vue';
 import { apiErrorMessage } from '@/lib/api-error';
 const i18n = useI18n();
-const actions = ['authenticate', 'refresh', 'signout', 'join', 'upload-skin', 'upload-cape'];
+const actions = ['authenticate', 'refresh', 'validate', 'signout', 'join', 'has_joined', 'upload-skin', 'upload-cape'];
 const items = ref<YggLogItem[]>([]);
 const action = ref('');
 const search = ref('');

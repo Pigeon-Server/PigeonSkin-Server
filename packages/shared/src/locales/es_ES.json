@@ -665,6 +665,7 @@
     "description_too_long": "La descripción es demasiado larga.",
     "model_classic": "Steve · Clásico",
     "model_slim": "Alex · Delgado",
+    "model_auto_hint": "El modelo (Clásico / Delgado) se detecta a partir de los píxeles de la skin y no se puede cambiar aquí. Para cambiarlo, edita los píxeles del brazo y sobrescribe la textura.",
     "collection_count": "{count} colecciones",
     "download": "Descargar textura",
     "raw": "textura cruda",
@@ -690,7 +691,9 @@
     "create": {
       "title": "Crear textura",
       "description": "Elige una skin o una capa para crearla en el editor. Añade sus datos en la biblioteca y guárdala al terminar.",
-      "start": "Empezar a crear"
+      "start": "Empezar a crear",
+      "canvas_model": "Plantilla de lienzo",
+      "canvas_model_hint": "La plantilla solo define el ancho inicial del brazo; el modelo se detecta a partir de los píxeles reales al guardar."
     },
     "origin": "Tipo de fuente",
     "origin_original": "Original",
@@ -1147,9 +1150,12 @@
       "search_submissions_retry": "Reintentar envíos a buscadores",
       "texture_flags_clear": "Quitar marca de moderación",
       "ai_jobs_cancel": "Cancelar tarea de IA",
+      "ai_jobs_quota_reset": "Restablecer pausa de Workers AI",
       "ai_jobs_retry": "Reintentar tarea de IA",
       "ai_jobs_backfill": "Completar texturas existentes",
-      "texture_import": "Importar texturas en lote"
+      "texture_import": "Importar texturas en lote",
+      "texture_sanitize": "Limpiar metadatos de texturas",
+      "texture_model_redetect": "Redetectar modelos de skin"
     },
     "anonymous": "Anónimo",
     "role_normal": "normales",
@@ -1359,6 +1365,8 @@
     "task_clear_flag": "Quitar marca",
     "task_cancel": "Cancelar",
     "task_backfill": "Completar texturas existentes",
+    "ai_daily_paused": "Se ha agotado la cuota diaria de Workers AI. Las tareas relacionadas están en pausa hasta {time}. Cambia la configuración de IA o restablece la pausa para reintentar antes.",
+    "ai_quota_reset": "Restablecer pausa",
     "task_backfill_empty": "No hay tareas que completar",
     "task_backfill_confirm": "¿Crear tareas de traducción y moderación para todas las texturas que aún no tienen una? Las tareas existentes no se restablecerán.",
     "task_backfill_done": "Tareas creadas: {detail}",
@@ -1640,6 +1648,8 @@
         "signout": "Cerrar sesión",
         "refresh": "Actualizar token",
         "join": "Unirse al servidor",
+        "validate": "Validar token",
+        "has_joined": "Se unió al servidor",
         "upload-skin": "Subir skin",
         "upload-cape": "Subir capa"
       },
@@ -1938,7 +1948,7 @@
     "compatibility": "Compatible con CustomSkinLoader y authlib-injector",
     "expression": "SKINS · CAPAS · JUGADORES",
     "f_upload_title": "Tus skins y capas",
-    "f_upload_body": "Sube, guarda y comparte skins y capas. Compatible con modelos clásicos, delgados y texturas de alta resolución.",
+    "f_upload_body": "Sube, guarda y comparte skins y capas con modelos clásicos, delgados y texturas de alta resolución.",
     "f_player_title": "Una cuenta, muchos personajes.",
     "f_player_body": "Gestiona aspectos y capas para cada personaje y cambia de ropa cómodamente desde tu armario.",
     "f_api_title": "Conéctate a tu mundo",
@@ -2145,5 +2155,17 @@
   "mojang_takeover": {
     "title": "Notificación de cambio de propietario del jugador",
     "content": "Tu jugador {player} ha sido reclamado por un usuario verificado de Mojang y se han añadido puntos de compensación a tu cuenta."
+  },
+  "sanitize": {
+    "title": "Limpieza de metadatos de texturas",
+    "start": "Iniciar limpieza",
+    "total": "Texturas totales",
+    "pending": "Pendientes de limpieza",
+    "processed": "Procesadas en esta ejecución",
+    "changed": "Archivos reescritos",
+    "running": "Limpiando…",
+    "remaining": "Quedan {count} texturas pendientes de limpieza",
+    "complete": "Todas las texturas se han limpiado",
+    "hint": "Tras la limpieza, los archivos de textura descargados ya no incluyen metadatos incrustados como el autor o el software de la imagen original."
   }
 }

@@ -21,7 +21,6 @@ const name = ref('');
 const description = ref('');
 const descriptionLimit = computed(() => Number(site.get('textures_description_limit')) || 0);
 const kind = ref<'skin' | 'cape'>('skin');
-const model = ref<'default' | 'slim'>('default');
 const visibility = ref<'public' | 'private'>('public');
 const origin = ref<'original' | 'repost'>('original');
 const error = ref('');
@@ -94,7 +93,6 @@ async function submit() {
       file: file.value,
       name: name.value.trim(),
       kind: kind.value,
-      model: kind.value === 'skin' ? model.value : undefined,
       visibility: visibility.value,
       origin: origin.value,
       description: description.value,
@@ -137,7 +135,6 @@ async function openEditor() {
       JSON.stringify({
         dataUrl,
         kind: kind.value,
-        model: model.value,
         name: name.value,
         description: description.value,
         visibility: visibility.value,
@@ -145,7 +142,8 @@ async function openEditor() {
         sourceResourceId: sourceResourceId.value,
       }),
     );
-    await router.push(`/editor/${kind.value}?draft=1&model=${model.value}`);
+    // 编辑器的模型 preset 由 Editor.vue 从草稿图像按像素自动判定
+    await router.push(`/editor/${kind.value}?draft=1`);
   } catch {
     error.value = i18n.t('common.internal_error');
   } finally {
@@ -156,7 +154,6 @@ async function openEditor() {
 function restoreDraft(result: {
   dataUrl?: string;
   kind?: 'skin' | 'cape';
-  model?: 'default' | 'slim';
   name?: string;
   description?: string;
   visibility?: 'public' | 'private';
@@ -165,7 +162,6 @@ function restoreDraft(result: {
 }) {
   if (!result.dataUrl) return;
   kind.value = result.kind === 'cape' ? 'cape' : 'skin';
-  model.value = result.model === 'slim' ? 'slim' : 'default';
   name.value = result.name || '';
   description.value = result.description || '';
   visibility.value = result.visibility === 'private' ? 'private' : 'public';
@@ -192,7 +188,8 @@ onMounted(() => {
         | ({
             dataUrl?: string;
             kind?: 'skin' | 'cape';
-            model?: 'default' | 'slim';
+            /** 仅兼容旧草稿里残留的 model 字段,读取时忽略 */
+            model?: unknown;
             name?: string;
             description?: string;
             visibility?: 'public' | 'private';
@@ -222,6 +219,7 @@ onMounted(() => {
             : {}),
         };
       }
+      // 旧草稿里的 model 字段被有意忽略:模型现在按像素自动识别
       if (result) restoreDraft(result);
     } catch {
       sessionStorage.removeItem('editor-result');
@@ -322,7 +320,6 @@ onBeforeUnmount(() => {
               v-if="objectUrl"
               :skin-url="kind === 'skin' ? objectUrl : null"
               :cape-url="kind === 'cape' ? objectUrl : null"
-              :slim="model === 'slim'"
               :height="440"
               :name="name"
             />
@@ -404,30 +401,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- 适用模型（仅皮肤时露出） -->
-          <div v-if="kind === 'skin'">
-            <label class="mb-1.5 block text-xs font-semibold text-ink">
-              {{ i18n.t('skinlib.show.model') }}
-            </label>
-            <div class="grid grid-cols-2 gap-2">
-              <AppButton
-                type="button"
-                class="btn justify-center !py-2.5 !text-xs font-medium"
-                :class="model === 'default' ? '!border-brand-500 !bg-brand-500/10 !text-brand-600' : ''"
-                @click="model = 'default'"
-              >
-                <span>{{ i18n.t('skinlib.model_classic') }} (4px)</span>
-              </AppButton>
-              <AppButton
-                type="button"
-                class="btn justify-center !py-2.5 !text-xs font-medium"
-                :class="model === 'slim' ? '!border-brand-500 !bg-brand-500/10 !text-brand-600' : ''"
-                @click="model = 'slim'"
-              >
-                <span>{{ i18n.t('skinlib.model_slim') }} (3px)</span>
-              </AppButton>
-            </div>
-          </div>
+          <!-- 模型不提供选择:classic/slim 由服务端按像素自动识别,预览同步自动判定 -->
 
           <!-- 公开范围与私密说明 -->
           <div>

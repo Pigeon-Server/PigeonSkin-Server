@@ -665,6 +665,7 @@
     "description_too_long": "描述超過長度限制",
     "model_classic": "Steve · 標準",
     "model_slim": "Alex · 纖細",
+    "model_auto_hint": "模型（標準 / 纖細）由皮膚像素自動辨識，不能在此修改。需要換模型時請調整手臂區域的像素後覆蓋儲存。",
     "collection_count": "{count} 次收藏",
     "download": "下載材質",
     "raw": "原始材質",
@@ -690,7 +691,9 @@
     "create": {
       "title": "創作材質",
       "description": "選擇皮膚或披風並進入編輯器創作，完成後可在皮膚庫填寫資源資訊並儲存。",
-      "start": "開始創作"
+      "start": "開始創作",
+      "canvas_model": "畫布範本",
+      "canvas_model_hint": "範本只決定起手時手臂的寬度；儲存後模型會依實際像素自動辨識。"
     },
     "origin": "來源標記",
     "origin_original": "原創",
@@ -1147,9 +1150,12 @@
       "search_submissions_retry": "重試搜尋提交",
       "texture_flags_clear": "清除審核標記",
       "ai_jobs_cancel": "取消 AI 任務",
+      "ai_jobs_quota_reset": "重設 Workers AI 暫停狀態",
       "ai_jobs_retry": "重試 AI 任務",
       "ai_jobs_backfill": "補跑存量材質",
-      "texture_import": "批次匯入紋理"
+      "texture_import": "批次匯入紋理",
+      "texture_sanitize": "清理材質中繼資料",
+      "texture_model_redetect": "重檢皮膚模型"
     },
     "anonymous": "已註銷",
     "role_normal": "普通用戶",
@@ -1359,6 +1365,8 @@
     "task_clear_flag": "清除標記",
     "task_cancel": "取消",
     "task_backfill": "補跑存量材質",
+    "ai_daily_paused": "Workers AI 今日額度已耗盡，相關任務暫停至 {time}。修改 AI 設定或重設暫停狀態後可提前重試。",
+    "ai_quota_reset": "重設暫停狀態",
     "task_backfill_empty": "沒有需要補建的任務",
     "task_backfill_confirm": "為所有還沒有 AI 任務的材質補建翻譯與審核任務？已有任務不會被重置。",
     "task_backfill_done": "已補建任務：{detail}",
@@ -1640,6 +1648,8 @@
         "signout": "登出",
         "refresh": "刷新令牌",
         "join": "加入伺服器",
+        "validate": "驗證令牌",
+        "has_joined": "進入伺服器",
         "upload-skin": "上傳皮膚",
         "upload-cape": "上傳披風"
       },
@@ -2145,5 +2155,17 @@
   "mojang_takeover": {
     "title": "角色屬主變更通知",
     "content": "你的角色 {player} 已被正版使用者接管，系統已為你發放補償積分。"
+  },
+  "sanitize": {
+    "title": "材質中繼資料清理",
+    "start": "開始清理",
+    "total": "材質總數",
+    "pending": "待清理",
+    "processed": "本次已處理",
+    "changed": "內容已更新",
+    "running": "正在清理…",
+    "remaining": "還有 {count} 個材質等待清理",
+    "complete": "全部材質已清理完成",
+    "hint": "清理完成後，玩家下載到的材質檔案裡不再包含原始圖片附帶的作者、軟體等附加資訊。"
   }
 }

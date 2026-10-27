@@ -2,7 +2,8 @@ import { type Bindings } from './../core/env.ts';
 import { fail } from './../core/framework.ts';
 import { getSetting, getSettingBool, getSettingInt } from './../core/settings-reader.ts';
 import { needsAccountInitialization } from './../core/user.ts';
-import { hashPassword, hashToken } from '@pigeon-skin/auth';
+import { hashToken } from '@pigeon-skin/auth';
+import { computePasswordHash } from './compute.ts';
 import { isValidPlayerName, type PlayerNameRule } from '@pigeon-skin/shared';
 import { emailSchema, nicknameSchema, passwordSchema, playerNameSchema } from './../core/schemas.ts';
 import { z } from 'zod';
@@ -56,7 +57,7 @@ export async function initializeAccount(env: Bindings, id: number, sessionId: st
     if (!isValidPlayerName(name, await getSetting(env, 'player_name_rule') as PlayerNameRule, await getSetting(env, 'player_name_regexp')) || name.length < status.playerNameMin || name.length > status.playerNameMax) throw fail.invalid('player.name_invalid', { playerName: 'invalid' });
     if (await env.DB.prepare(`SELECT id FROM players WHERE ${noCaseEq('name', '?')}`).bind(name).first()) throw fail.conflict('auth.player_name_taken');
   }
-  const passwordHash = await hashPassword(input.password), now = Date.now();
+  const passwordHash = await computePasswordHash(env, input.password), now = Date.now();
   const verifiedAt = user.email.toLowerCase() === input.email.toLowerCase() ? user.email_verified_at : null;
   try {
     const results = await env.DB.batch([

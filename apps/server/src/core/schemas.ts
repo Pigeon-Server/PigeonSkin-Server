@@ -169,7 +169,7 @@ export const texturePatchInputSchema = z.object({
   name: textureNameSchema.optional(),
   visibility: textureVisibilitySchema.optional(),
   kind: textureKindSchema.optional(),
-  model: z.enum(['default', 'slim']).optional(),
+  // 没有模型字段:模型按像素自动判定,不接受补丁指定
 });
 
 /**

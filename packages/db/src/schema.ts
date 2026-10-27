@@ -122,6 +122,8 @@ export const textures = sqliteTable('textures', {
   nameFlagReason: text('name_flag_reason').notNull().default(''),
   descriptionFlagged: integer('description_flagged').notNull().default(0),
   descriptionFlagReason: text('description_flag_reason').notNull().default(''),
+  /** 字节是否已剥离元数据（规范 §2.7）。存量行默认 0，由后台批处理逐步补齐 */
+  sanitized: integer('sanitized').notNull().default(0),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });
@@ -530,3 +532,51 @@ export type TextureTranslationRow = typeof textureTranslations.$inferSelect;
 export type AiJobRow = typeof aiJobs.$inferSelect;
 export type TaskRunRow = typeof taskRuns.$inferSelect;
 export type TicketRow = typeof tickets.$inferSelect;
+
+export const settingsSnapshots = sqliteTable('settings_snapshots', {
+  locale: text('locale').primaryKey(),
+  value: text('value').notNull(),
+  revision: integer('revision').notNull().default(1),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export const settingsWriteLocks = sqliteTable('settings_write_locks', {
+  scope: text('scope').primaryKey(),
+  token: text('token'),
+});
+
+export const publicCacheVersions = sqliteTable('public_cache_versions', {
+  scope: text('scope').primaryKey(),
+  version: integer('version').notNull().default(1),
+});
+
+export const siteStats = sqliteTable('site_stats', {
+  metric: text('metric').primaryKey(),
+  value: integer('value').notNull().default(0),
+});
+
+export const dailyStats = sqliteTable('daily_stats', {
+  metric: text('metric').notNull(),
+  day: integer('day').notNull(),
+  value: integer('value').notNull().default(0),
+}, t => [primaryKey({ columns: [t.metric, t.day] })]);
+
+export const textureCounts = sqliteTable('texture_counts', {
+  scope: text('scope').notNull(),
+  kind: text('kind').notNull(),
+  model: text('model').notNull(),
+  official: integer('official').notNull(),
+  value: integer('value').notNull().default(0),
+}, t => [primaryKey({ columns: [t.scope, t.kind, t.model, t.official] })]);
+
+export const notificationCounts = sqliteTable('notification_counts', {
+  userId: integer('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  unread: integer('unread').notNull().default(0),
+});
+
+export const aiRuntimeState = sqliteTable('ai_runtime_state', {
+  provider: text('provider').primaryKey(),
+  pausedUntil: integer('paused_until').notNull().default(0),
+  revision: integer('revision').notNull().default(0),
+  configFingerprint: text('config_fingerprint').notNull().default(''),
+});

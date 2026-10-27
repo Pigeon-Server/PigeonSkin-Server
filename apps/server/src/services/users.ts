@@ -9,7 +9,7 @@ import { AppError, fail } from './../core/framework.ts';
 import { revokeAllSessions } from './../core/session.ts';
 import { eq } from 'drizzle-orm';
 import { createDb, users } from '@pigeon-skin/db';
-import { hashPassword, verifyStoredPassword } from '@pigeon-skin/auth';
+import { computePasswordHash, computePasswordVerify } from './compute.ts';
 
 import { checkEmailDomain } from './email-policy.ts';
 import * as repo from '../repositories/users.ts';
@@ -98,12 +98,12 @@ export async function changePassword(
   const user = await repo.findUserCredentials(database, userId);
   if (!user) throw fail.notFound('user.not_found');
 
-  const ok = !user.passwordHash || await verifyStoredPassword(input.currentPassword, user.passwordHash, {
+  const ok = !user.passwordHash || await computePasswordVerify(env, input.currentPassword, user.passwordHash, {
     legacySalt: env.LEGACY_SALT ?? '',
   });
   if (!ok) throw fail.forbidden('user.invalid_current_password');
 
-  await repo.updateUserPassword(database, userId, await hashPassword(input.newPassword));
+  await repo.updateUserPassword(database, userId, await computePasswordHash(env, input.newPassword));
   await revokePendingTokens(env, userId);
   // 改密码后撤销其他会话，但保留当前这个 —— 否则用户会被自己踢下线
   await repo.revokeOtherSessions(env.DB, userId, currentSessionId);
@@ -269,7 +269,11 @@ export async function signIn(
 export async function deleteAccount(env: UserEnv, userId: number): Promise<void> {
   const database = db(env);
   const players = await env.DB.prepare('SELECT name,skin_texture_id as skinTextureId,cape_texture_id as capeTextureId FROM players WHERE user_id=?').bind(userId).all<{ name: string; skinTextureId: number | null; capeTextureId: number | null }>();
+  // 名下角色 uuid 随级联消失，删除前先取出、删除成功后归档（同名重建复用旧 UUID）
+  const profiles = await import('./ygg-profiles.ts');
+  const archivedUuids = await profiles.userUuidEntries(env.DB, userId);
   await database.delete(users).where(eq(users.id, userId));
+  await profiles.insertUuidArchive(env.DB, archivedUuids);
   await revokeAllSessions(env, userId);
   for (const player of players.results) {
     await (await import('./texture-access.ts')).purgePlayerProfiles(env, player.name);

@@ -13,6 +13,7 @@ import SettingField from '@/components/settings/SettingField.vue';
 import CopyField from '@/components/ui/CopyField.vue';
 import SearchSubmissionPanel from '@/components/SearchSubmissionPanel.vue';
 import OfficialResourcePanel from '@/components/OfficialResourcePanel.vue';
+import TextureSanitizePanel from '@/components/TextureSanitizePanel.vue';
 import { apiErrorMessage } from '@/lib/api-error';
 
 const i18n = useI18n();
@@ -192,6 +193,7 @@ onMounted(load);
         </section>
         <SearchSubmissionPanel v-if="active.id === 'search'" :key="notice" />
         <OfficialResourcePanel v-if="active.id === 'resources'" :key="notice" />
+        <TextureSanitizePanel v-if="active.id === 'resources'" :key="`sanitize-${notice}`" />
         <section v-if="active.id === 'oauth'" class="space-y-3">
           <router-link to="/admin/integrations/connect" class="btn">{{ i18n.t('oauth.server_title') }}</router-link>
           <p class="text-sm text-muted">{{ i18n.t('integration.oauth.help') }}</p>

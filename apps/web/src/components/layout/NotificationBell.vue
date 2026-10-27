@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify';
 import { notificationApi, type NotificationItem } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import { apiErrorMessage } from '@/lib/api-error';
+import { useSessionStore } from '@/stores/session';
 const i18n = useI18n();
 const open = ref(false);
 const selected = ref<NotificationItem | null>(null);
@@ -15,6 +16,28 @@ const error = ref('');
 const busy = ref(false);
 const loading = ref(true);
 let timer: number | undefined;
+const session = useSessionStore();
+const summaryKey = () => `pigeon:notifications:${session.user.value?.id ?? ''}`;
+function saveSummary() {
+  try { localStorage.setItem(summaryKey(), JSON.stringify({ at: Date.now(), unread: unread.value })); } catch {}
+}
+async function poll() {
+  if (document.hidden) return;
+  const update = async () => {
+    try {
+      const cached = JSON.parse(localStorage.getItem(summaryKey()) || 'null') as { at: number; unread: number } | null;
+      if (cached && Date.now() - cached.at < 60_000) { unread.value = cached.unread; return; }
+    } catch {}
+    try { unread.value = (await notificationApi.summary()).unread; saveSummary(); } catch {}
+  };
+  if (navigator.locks) await navigator.locks.request(summaryKey(), { ifAvailable: true }, async lock => { if (lock) await update(); });
+  else await update();
+}
+function visible() { if (!document.hidden) void poll(); }
+function shared(event: StorageEvent) {
+  if (event.key !== summaryKey() || !event.newValue) return;
+  try { unread.value = (JSON.parse(event.newValue) as { unread: number }).unread; } catch {}
+}
 
 const title = (item: NotificationItem) =>
   item.type === 'report_reviewed' || item.type === 'mojang_takeover' || i18n.te(item.title)
@@ -49,10 +72,12 @@ const detailKind = computed<'html' | 'text'>(() => (selected.value && isHtmlBody
 const sanitizedBody = computed(() => (detailKind.value === 'html' ? DOMPurify.sanitize(body(selected.value!)) : ''));
 
 async function refresh() {
+  if (!items.value.length) loading.value = true;
   try {
     const data = await notificationApi.list();
     items.value = data.items;
     unread.value = data.unread;
+    saveSummary();
     error.value = '';
   } catch (e) {
     if (open.value) error.value = apiErrorMessage(e);
@@ -85,10 +110,16 @@ async function show(item: NotificationItem) {
   }
 }
 onMounted(() => {
-  void refresh();
-  timer = window.setInterval(refresh, 60000);
+  void poll();
+  timer = window.setInterval(() => { void poll(); }, 60000);
+  document.addEventListener('visibilitychange', visible);
+  window.addEventListener('storage', shared);
 });
-onUnmounted(() => window.clearInterval(timer));
+onUnmounted(() => {
+  window.clearInterval(timer);
+  document.removeEventListener('visibilitychange', visible);
+  window.removeEventListener('storage', shared);
+});
 </script>
 <template>
   <Popover.Root v-model="open" position-area="bottom span-left">

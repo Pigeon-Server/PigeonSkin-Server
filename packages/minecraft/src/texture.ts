@@ -6,10 +6,12 @@
 //   alex（slim）：宽高比只能是 1（旧版显式拒绝 64×32）
 //   cape：宽高比只能是 2
 //
-// 注意 22×17 会被拒绝 —— 它不满足"64 的倍数/32 的倍数"。
+// 例外：旧版披风允许 22×17 的整数倍（规范 §2.7 要求补足成 64×32 的倍数），
+// 这类图在这里放行，由 sanitizeTexture 补透明边后入库。
 
 import { LIMITS, type ErrorCode, type TextureKind, type TextureModel } from '@pigeon-skin/shared';
 import { inspectPng, sha256Hex, type PngInfo } from './png.ts';
+import { padLegacyCape } from './sanitize.ts';
 
 export interface TextureLimits {
   /** 最大文件字节数 */
@@ -25,6 +27,11 @@ export const DEFAULT_TEXTURE_LIMITS: TextureLimits = {
   maxWidth: LIMITS.maxTextureWidth,
   maxArea: LIMITS.maxTextureArea,
 };
+
+/** 防止异常大的压缩 PNG 在进入解析/解码路径前占满 Worker 内存。 */
+export const HARD_TEXTURE_MAX_BYTES = 16 * 1024 * 1024;
+export const HARD_TEXTURE_MAX_WIDTH = 8_192;
+export const HARD_TEXTURE_MAX_AREA = 16_777_216;
 
 export interface ValidatedTexture {
   readonly info: PngInfo;
@@ -56,10 +63,14 @@ export async function validateTexture(
   if (bytes.length === 0) {
     return fail('texture.file_missing', '文件为空');
   }
-  if (bytes.length > limits.maxSizeBytes) {
+  const maxSizeBytes = Math.min(limits.maxSizeBytes, HARD_TEXTURE_MAX_BYTES);
+  const maxWidth = Math.min(limits.maxWidth, HARD_TEXTURE_MAX_WIDTH);
+  const maxArea = Math.min(limits.maxArea, HARD_TEXTURE_MAX_AREA);
+
+  if (bytes.length > maxSizeBytes) {
     return fail(
       'texture.file_too_large',
-      `文件 ${bytes.length} 字节超过上限 ${limits.maxSizeBytes} 字节`,
+      `文件 ${bytes.length} 字节超过上限 ${maxSizeBytes} 字节`,
     );
   }
 
@@ -69,31 +80,40 @@ export async function validateTexture(
   const { width, height } = inspection.info;
 
   // 3. 尺寸倍数
-  if (width % 64 !== 0 || height % 32 !== 0) {
+  //    旧版披风允许 22×17 的整数倍（规范 §2.7：服务端需用透明像素补足到
+  //    64×32 的整数倍后再保存）。这类图在这一步放行，由 sanitizeTexture 补边。
+  //    注意旧版语义里的皮肤仍是 64×32 的倍数，不能跟着放宽。
+  const legacyCape = target.kind === 'cape' && padLegacyCape(width, height) !== null;
+  if (!legacyCape && (width % 64 !== 0 || height % 32 !== 0)) {
     return fail(
       'texture.dimension_invalid',
       `尺寸 ${width}×${height} 非法：宽必须是 64 的倍数、高必须是 32 的倍数`,
     );
   }
 
-  // 4. 宽度上限（先于面积，给出更易理解的报错）
-  if (width > limits.maxWidth) {
-    return fail('texture.width_too_large', `宽度 ${width} 超过上限 ${limits.maxWidth}`);
+  // 4. 宽度上限（先于面积，给出更易理解的报错）。
+  //    用补边后的实际存储尺寸判断，22×17 披风补边后变大，不能按原尺寸放行。
+  const padded = legacyCape ? padLegacyCape(width, height) : null;
+  const storedWidth = padded?.width ?? width;
+  const storedHeight = padded?.height ?? height;
+  if (storedWidth > maxWidth) {
+    return fail('texture.width_too_large', `宽度 ${storedWidth} 超过上限 ${maxWidth}`);
   }
 
   // 5. 面积上限 —— 独立的解压缩炸弹防护。
   //    没有它的话，8192×8192 这种"宽度合法但面积灾难"的图会通过前面的检查。
-  if (width * height > limits.maxArea) {
+  if (storedWidth * storedHeight > maxArea) {
     return fail(
       'texture.dimension_invalid',
-      `面积 ${width * height} 像素超过上限 ${limits.maxArea}`,
+      `面积 ${storedWidth * storedHeight} 像素超过上限 ${maxArea}`,
     );
   }
 
   // 6. 宽高比（按类型）
   const ratio = width / height;
   if (target.kind === 'cape') {
-    if (ratio !== 2) {
+    // 22×17 是 1.294…，不满足宽高比 2，但它是旧版披风的合法形态
+    if (ratio !== 2 && !legacyCape) {
       return fail('texture.ratio_invalid', `披风要求宽高比为 2，实际 ${ratio}（${width}×${height}）`);
     }
   } else if (target.model === 'slim') {

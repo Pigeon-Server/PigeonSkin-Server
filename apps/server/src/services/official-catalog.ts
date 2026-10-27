@@ -41,7 +41,7 @@ async function initialize(env: Pick<Bindings, 'DB' | 'BUCKET'>) {
 // 用户回填缓存带 60 秒 TTL：official_catalog_state.revision 被官方更新任务推高
 // 后，已达标用户的增量回填最多延迟一个窗口，与 settingsCache 失效节奏一致。
 // 测试的 isolatedStorage 只重置存储、env.DB 对象复用，用例间需手动 reset。
-const initialized = new WeakMap<Bindings['DB'], Promise<void>>();
+const initialized = new WeakSet<Bindings['DB']>();
 const defaultClosetSettled = new WeakMap<Bindings['DB'], Map<number, number>>();
 const DEFAULT_CLOSET_TTL_MS = 60_000;
 
@@ -53,16 +53,9 @@ export function resetOfficialCatalogCache(db: Bindings['DB']): void {
 
 export async function ensureOfficialCatalog(env: Pick<Bindings, 'DB' | 'BUCKET' | 'OFFICIAL_CATALOG_ENABLED'>) {
   if (env.OFFICIAL_CATALOG_ENABLED === 'false') return;
-  let pending = initialized.get(env.DB);
-  if (!pending) {
-    pending = initialize(env).catch(error => {
-      // 失败不缓存，下个请求重试；initialize 内部已保证幂等
-      initialized.delete(env.DB);
-      throw error;
-    });
-    initialized.set(env.DB, pending);
-  }
-  await pending;
+  if (initialized.has(env.DB)) return;
+  await initialize(env);
+  initialized.add(env.DB);
 }
 
 export async function ensureDefaultCloset(env: Pick<Bindings, 'DB' | 'OFFICIAL_CATALOG_ENABLED'>, userId: number) {

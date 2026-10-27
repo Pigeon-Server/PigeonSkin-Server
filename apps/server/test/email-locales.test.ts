@@ -44,7 +44,7 @@ describe('localized email', () => {
     });
     const env = {
       RESEND_API_KEY: 'test', MAIL_FROM: 'noreply@example.com', APP_URL: 'https://skin.example',
-      DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [
+      DB: { prepare: () => ({ bind: () => ({ first: async () => null, all: async () => ({ results: [
         { key: 'mail.security_title', value: "Security {'@'} Skin" },
         { key: 'mail.security_body', value: 'Code {code}; repeat {code}' },
       ] }) }) }) },
@@ -91,7 +91,7 @@ describe('localized email', () => {
     const sent: EmailQueueMessage[] = [];
     const env = {
       APP_URL: 'https://skin.example', MAIL_FROM: 'Skin <noreply@skin.example>', RESEND_API_KEY: 'test',
-      DB: { prepare: (sql: string) => ({ bind: (..._values: unknown[]) => ({ all: async () => ({ results: sql.includes('id >') ? Array.from({ length: 50 }, (_, index) => ({ id: index + 1, email: `u${index}@example.test`, locale: 'en' })) : [] }) }) }) },
+      DB: { prepare: (sql: string) => ({ bind: (..._values: unknown[]) => ({ first: async () => null, all: async () => ({ results: sql.includes('id >') ? Array.from({ length: 50 }, (_, index) => ({ id: index + 1, email: `u${index}@example.test`, locale: 'en' })) : [] }) }) }) },
       EMAIL_NOTIFICATIONS: { send: async (body: EmailQueueMessage) => { sent.push(body); } },
     } as unknown as Parameters<typeof processBroadcastEmail>[0];
     const message = { broadcastId: 'broadcast-1', receiver: 'all' as const, title: 'Update', content: 'Hello', afterId: 0 };

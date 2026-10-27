@@ -9,8 +9,9 @@ import { fail, type Pagination } from './../core/framework.ts';
 import { revokeAllSessions } from './../core/session.ts';
 import { getSetting, readSettings } from './../core/settings-reader.ts';
 import { createDb, notificationTranslations } from '@pigeon-skin/db';
-import { hashPassword } from '@pigeon-skin/auth';
+import { computePasswordHash } from './compute.ts';
 import { ASSIGNABLE_ROLES, canModifyUser, isSuperAdmin, type Role } from '@pigeon-skin/shared';
+import { decodePng, detectSkinModel, textureObjectKey, HARD_TEXTURE_MAX_AREA } from '@pigeon-skin/minecraft';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 
 import { audit, auditBatch } from './audit.ts';
@@ -154,7 +155,11 @@ export async function deleteUser(
   // players/sessions/notifications/closet 级联删除；
   // textures.uploader_id 与 players 的纹理引用置 NULL —— 删除用户不应销毁
   // 其他玩家正在使用的纹理，所以那些纹理被匿名化保留。
+  // 名下角色 uuid 随级联消失，删除前先取出、删除成功后归档（同名重建复用旧 UUID）
+  const profiles = await import('./ygg-profiles.ts');
+  const archivedUuids = await profiles.userUuidEntries(env.DB, targetId);
   await repo.deleteUser(database, targetId);
+  await profiles.insertUuidArchive(env.DB, archivedUuids);
   for (const player of playerRows.results) {
     await (await import('./texture-access.ts')).purgePlayerProfiles(env, player.name);
     if (env.BUCKET) await (await import('./texture-access.ts')).purgeUnsharedPrivateHashes({ ...env, BUCKET: env.BUCKET }, [player.skinTextureId, player.capeTextureId]);
@@ -263,7 +268,7 @@ export async function batchTextures(
     detail: action === 'delete' ? `hash:${target.hash}` : `visibility:${visibility}`,
   })));
 
-  await bumpSitemap();
+  await bumpSitemap(env);
   await queueTextureSubmissions(env, targetIds);
   return { affected: targets.length };
 }
@@ -357,7 +362,7 @@ export async function patchPlayer(
     input.skin !== undefined ? player.skinTextureId : null,
     input.cape !== undefined ? player.capeTextureId : null,
   ]);
-  await bumpSitemap();
+  await bumpSitemap(env);
 }
 
 export async function deletePlayer(
@@ -369,14 +374,18 @@ export async function deletePlayer(
   const player = await repo.findAnyPlayer(database, playerId);
   if (!player) throw fail.notFound('player.not_found');
   if (!canModifyUser(actor.role, player.ownerRole as Role)) throw fail.forbidden('admin.cannot_modify_peer');
+  // uuid 行随外键级联消失，删除前先取出、删除成功后归档（同名重建复用旧 UUID）
+  const profiles = await import('./ygg-profiles.ts');
+  const archived = await profiles.playerUuidEntry(env.DB, playerId);
   await repo.deleteAnyPlayer(database, playerId);
+  if (archived) await profiles.insertUuidArchive(env.DB, [archived]);
   await (await import('./texture-access.ts')).purgePlayerProfiles(env, player.name);
   if (env.BUCKET) await (await import('./texture-access.ts')).purgeUnsharedPrivateHashes({ ...env, BUCKET: env.BUCKET }, [player.skinTextureId, player.capeTextureId]);
   await audit(env, {
     actorId: actor.id, action: 'admin.player.delete',
     targetType: 'player', targetId: playerId,
   });
-  await bumpSitemap();
+  await bumpSitemap(env);
 }
 
 // ── 重置用户密码 ─────────────────────────────────────────────────────────────
@@ -416,7 +425,7 @@ export async function resetUserPassword(
   }
 
   await repo.updateUser(database, targetId, {
-    passwordHash: await hashPassword(password),
+    passwordHash: await computePasswordHash(env, password),
     updatedAt: Date.now(),
   });
   await revokePendingTokens(env, targetId);
@@ -507,7 +516,6 @@ export async function createUser(
   if (await authRepo.findUserByEmail(database, input.email)) {
     throw fail.conflict('auth.email_taken');
   }
-  const { hashPassword } = await import('@pigeon-skin/auth');
   const now = Date.now();
   let userId: number;
   try {
@@ -515,7 +523,7 @@ export async function createUser(
       email: input.email,
       nickname: input.nickname,
       score: 0,
-      passwordHash: await hashPassword(input.password),
+      passwordHash: await computePasswordHash(env, input.password),
       registrationIp: null as unknown as string,
       createdAt: now,
     });
@@ -567,7 +575,7 @@ export async function deleteAnyTexture(env: AdminEnv, actor: { id: number; role:
     actorId: actor.id, action: 'admin.texture.delete', targetType: 'texture', targetId: textureId,
     detail: `hash:${texture.hash}`,
   });
-  await bumpSitemap();
+  await bumpSitemap(env);
   await queueTextureSubmission(env, textureId);
 }
 
@@ -598,8 +606,53 @@ export async function patchAnyTexture(
     actorId: actor.id, action: 'admin.texture.update', targetType: 'texture', targetId: textureId,
     detail: `fields:${Object.keys(update).filter((k) => k !== 'updatedAt').join(',')}`,
   });
-  await bumpSitemap();
+  await bumpSitemap(env);
   await queueTextureSubmission(env, textureId);
+}
+
+/**
+ * 存量皮肤模型重检：模型一度由用户手选、可能标错，按像素重新判定。
+ * 变化的行推进 updated_at 并清角色协议缓存、删衍生图 —— 与 patchTexture
+ * 类型变更走同一套失效路径（texture_counts 触发器自动跟随，无需处理）。
+ * 游标分批，由 tools 脚本驱动跑完全量；批内逐条顺序处理。
+ */
+export async function redetectSkinModels(
+  env: AdminEnv & { BUCKET: NonNullable<AdminEnv['BUCKET']> },
+  actor: AdminActor,
+  options: { lastId: number; limit: number },
+): Promise<{ processed: number; changed: number; skipped: number; nextCursor: number | null }> {
+  const { results } = await env.DB
+    .prepare('SELECT id, hash, model FROM textures WHERE kind = ? AND id > ? ORDER BY id LIMIT ?')
+    .bind('skin', options.lastId, options.limit)
+    .all<{ id: number; hash: string; model: string | null }>();
+  const { playersWearingTexture, purgePlayerProfiles, purgeTextureDerivatives } = await import('./texture-access.ts');
+  let changed = 0;
+  let skipped = 0;
+  const changedHashes: string[] = [];
+  for (const row of results) {
+    const object = await env.BUCKET.get(textureObjectKey(row.hash));
+    const decoded = object ? await decodePng(new Uint8Array(await object.arrayBuffer()), HARD_TEXTURE_MAX_AREA) : null;
+    if (!decoded?.ok) { skipped++; continue; }
+    const detected = detectSkinModel(decoded.image.width, decoded.image.height, decoded.image.rgba);
+    if (detected === (row.model ?? 'default')) continue;
+    // 先推进穿戴者指纹再改行：/{name}.json 的 ETag 取自 players.updated_at，
+    // 不推进则客户端带旧 ETag 重验证拿到 304，继续用旧模型渲染的资料
+    for (const name of await playersWearingTexture(env, row.id, Date.now())) await purgePlayerProfiles(env, name);
+    await env.DB.prepare('UPDATE textures SET model = ?, updated_at = ? WHERE id = ?').bind(detected, Date.now(), row.id).run();
+    await purgeTextureDerivatives(env, row.hash);
+    await queueTextureSubmission(env, row.id);
+    changed++;
+    changedHashes.push(row.hash.slice(0, 12));
+  }
+  if (changed > 0) {
+    await audit(env, {
+      actorId: actor.id,
+      action: 'admin.texture.model.redetect',
+      detail: `lastId:${options.lastId} changed:${changed} skipped:${skipped} hashes:${changedHashes.slice(0, 5).join(',')}`,
+    });
+  }
+  const last = results.at(-1);
+  return { processed: results.length, changed, skipped, nextCursor: last ? last.id : null };
 }
 
 /** 审计日志查询（分页 + action/actor 过滤） */

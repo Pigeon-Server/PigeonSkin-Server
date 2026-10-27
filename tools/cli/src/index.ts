@@ -51,16 +51,18 @@ users:
 
 textures:
   textures import --dir <目录> [--manifest <manifest.json>] --kind skin|cape
-                  [--model default|slim] [--visibility public|private]
+                  [--visibility public|private]
                   [--origin original|repost] [--uploader <email|id>]
                   [--api-key <密钥> [--site-url <url>]]
-      目录内全部 PNG 逐一校验（与 API 上传同一实现）→ 按 sha256 上传 R2 →
-      写 textures 元数据。管理导入不扣积分。同 hash+uploader 已存在则跳过。
+      目录内全部 PNG 逐一校验（与 API 上传同一实现）→ 解码重编码净化 →
+      按净化后字节的 sha256 上传 R2 → 写 textures 元数据。管理导入不扣积分。
+      同 hash+uploader 已存在则跳过。模型（default/slim）按像素自动识别，
+      不接受 --model 指定（该参数已废弃：仍被接受但忽略，兼容旧脚本）。
       --api-key 走站点管理端点（warm 连接并发，批量导入推荐）；
       缺省走 wrangler（本地必须串行，慢）。密钥在管理界面「Pigeon API」
       签发，需勾选 admin.texture.import 权限。
       manifest.json 需位于 --dir 内，格式:
-        { "<文件名>": { name, kind, model, visibility, origin } }
+        { "<文件名>": { name, kind, visibility, origin } }
   textures export --out <目录> [--kind skin|cape] [--limit <n>]
       导出 PNG 文件 + manifest.json（可直接作为 import --manifest 输入）+ export-meta.json。
       注意 manifest 只含 name/kind/model/visibility/origin，不含

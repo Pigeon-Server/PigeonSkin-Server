@@ -1,0 +1,7 @@
+INSERT INTO site_stats(metric,value) SELECT 'unsanitized_textures',COUNT(*) FROM textures WHERE sanitized=0;
+CREATE FUNCTION texture_sanitized_stats_insert_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN UPDATE site_stats SET value=value+(CASE WHEN NEW.sanitized=0 THEN 1 ELSE 0 END) WHERE metric='unsanitized_textures' AND (CASE WHEN NEW.sanitized=0 THEN 1 ELSE 0 END)<>0; RETURN NULL; END; $$;
+CREATE TRIGGER texture_sanitized_stats_insert AFTER INSERT ON textures FOR EACH ROW EXECUTE FUNCTION texture_sanitized_stats_insert_fn();
+CREATE FUNCTION texture_sanitized_stats_delete_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN UPDATE site_stats SET value=value+(-(CASE WHEN OLD.sanitized=0 THEN 1 ELSE 0 END)) WHERE metric='unsanitized_textures' AND (-(CASE WHEN OLD.sanitized=0 THEN 1 ELSE 0 END))<>0; RETURN NULL; END; $$;
+CREATE TRIGGER texture_sanitized_stats_delete AFTER DELETE ON textures FOR EACH ROW EXECUTE FUNCTION texture_sanitized_stats_delete_fn();
+CREATE FUNCTION texture_sanitized_stats_update_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN UPDATE site_stats SET value=value+((CASE WHEN NEW.sanitized=0 THEN 1 ELSE 0 END)-(CASE WHEN OLD.sanitized=0 THEN 1 ELSE 0 END)) WHERE metric='unsanitized_textures' AND ((CASE WHEN NEW.sanitized=0 THEN 1 ELSE 0 END)-(CASE WHEN OLD.sanitized=0 THEN 1 ELSE 0 END))<>0; RETURN NULL; END; $$;
+CREATE TRIGGER texture_sanitized_stats_update AFTER UPDATE OF sanitized ON textures FOR EACH ROW EXECUTE FUNCTION texture_sanitized_stats_update_fn();

@@ -418,6 +418,7 @@ describe('mail driver dispatch', () => {
         // settings 查询(带 IN 列表)回存档配置;用户游标查询回第一批 50 人,再往后为空
         prepare: (sql: string) => ({
           bind: (..._values: unknown[]) => ({
+            first: async () => null,
             all: async () => ({ results: sql.includes('FROM settings') ? [] : (users.length ? users.splice(0, 50) : []) }),
           }),
         }),

@@ -133,7 +133,12 @@ export async function list(
     };
   });
 
-  return { items, unread: rows.filter(r => r.readAt === null).length };
+  return { items, unread: await unreadCount(env, userId) };
+}
+
+export async function unreadCount(env: NotificationEnv, userId: number): Promise<number> {
+  const row = await env.DB.prepare('SELECT unread FROM notification_counts WHERE user_id=?').bind(userId).first<{ unread: number }>();
+  return Number(row?.unread ?? 0);
 }
 
 /**

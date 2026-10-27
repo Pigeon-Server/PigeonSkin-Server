@@ -54,7 +54,7 @@ export async function textureRenderIdentity(
   env: Pick<Bindings, 'DB'>, hash: string,
 ): Promise<PreviewRenderIdentity> {
   const row = await env.DB.prepare(
-    "SELECT kind, model FROM textures WHERE hash=? ORDER BY (kind = 'skin') DESC LIMIT 1",
+    "SELECT kind, model FROM textures WHERE hash=? ORDER BY kind DESC,id LIMIT 1",
   ).bind(hash).first<{ kind: string; model: string | null }>();
   if (row?.kind === 'cape') return { kind: 'cape', model: 'default' };
   return { kind: 'skin', model: row?.model === 'slim' ? 'slim' : 'default' };

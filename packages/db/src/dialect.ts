@@ -104,6 +104,13 @@ export function noCaseEq(left: string, right: string): string {
   return `${left} = ${right} COLLATE NOCASE`;
 }
 
+export function deleteBatchSql(table: string, key: string | readonly string[], predicate: string, order: string, limit = 200): string {
+  const keys = typeof key === 'string' ? [key] : key;
+  if (!keys.length || ![table, ...keys, order].every(value => /^[a-z_]+$/.test(value)) || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('Invalid cleanup batch');
+  const target = keys.length === 1 ? keys[0] : `(${keys.join(',')})`;
+  return `DELETE FROM ${table} WHERE ${target} IN (SELECT ${keys.map(key => `cleanup_batch.${key}`).join(',')} FROM (SELECT ${keys.join(',')} FROM ${table} WHERE ${predicate} ORDER BY ${order},${keys.join(',')} LIMIT ${limit}) AS cleanup_batch)`;
+}
+
 /** 转成文本形态：MySQL 没有 TEXT 转换目标，`CAST(x AS CHAR)` 在 PG 会截断成 char(1)。 */
 export function textCast(expr: string): string {
   if (current === 'mysql') return `CAST(${expr} AS CHAR)`;

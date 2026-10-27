@@ -96,6 +96,21 @@ export function r2Put(env: TargetEnv, key: string, filePath: string): void {
   if (result.status !== 0) failWrangler(`R2 上传失败: ${key}`, result);
 }
 
+/**
+ * 上传内存中的字节（wrangler 只接受文件路径，这里落临时文件）。
+ * 导入链路存的是净化后的字节，其 sha256 才是对象键 —— 必须写这份而不是原始文件。
+ */
+export function r2PutBytes(env: TargetEnv, key: string, bytes: Uint8Array): void {
+  const dir = mkdtempSync(join(tmpdir(), 'pigeon-cli-'));
+  const file = join(dir, 'object.bin');
+  try {
+    writeFileSync(file, bytes, { mode: 0o600 });
+    r2Put(env, key, file);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** r2Put 的异步并发版：用异步 spawn，支持多路并发（wrangler 单次调用含冷启动，串行太慢）。
  * 偶发的 workerd 僵死用一次重试兜底。 */
 export async function r2PutAsync(env: TargetEnv, key: string, filePath: string): Promise<void> {

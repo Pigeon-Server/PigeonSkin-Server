@@ -6,7 +6,7 @@ import { defaultAvatarModel, defaultAvatarUrls } from '@pigeon-skin/shared/defau
 import { hashToken } from '@pigeon-skin/auth';
 import {
   avatarObjectKey, previewObjectKey, isAllowedDerivativeSize,
-  DERIVATIVE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, previewEtag, decodePng, encodePng,
+  DERIVATIVE_CACHE_CONTROL, REVALIDATE_CACHE_CONTROL, previewEtag,
   parsePreviewRenderSignature, previewRenderSignature, type PreviewRenderIdentity,
 } from '@pigeon-skin/minecraft';
 
@@ -14,6 +14,7 @@ import {
   canViewTextureHash, texturePubliclyReachable, textureRenderIdentity,
 } from '../../services/texture-access.ts';
 import { isAdmin } from '../../services/authorization.ts';
+import { computeResize } from '../../services/compute.ts';
 
 type Ctx = Context<AppEnv>;
 
@@ -101,17 +102,8 @@ async function userAvatar(c: Ctx, userId: number) {
   }
   const uri = defaultAvatarUrls[defaultAvatarModel(userId)][mode];
   const bytes = Uint8Array.from(atob(uri.split(',')[1]!), ch => ch.charCodeAt(0));
-  const decoded = await decodePng(bytes);
-  if (!decoded.ok) return c.notFound();
-  const { width, height, rgba } = decoded.image;
-  if (width === size && height === size) return c.body(bytes, 200, { ...headers, 'Content-Type': 'image/png' });
-  const resized = new Uint8Array(size * size * 4);
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const source = (Math.floor(y * height / size) * width + Math.floor(x * width / size)) * 4;
-    resized.set(rgba.subarray(source, source + 4), (y * size + x) * 4);
-  }
-  const png = await encodePng(size, size, resized);
-  return c.body(new Uint8Array(png), 200, { ...headers, 'Content-Type': 'image/png' });
+  const png = await computeResize(c.env, bytes, size);
+  return png ? c.body(png, 200, { ...headers, 'Content-Type': 'image/png' }) : c.notFound();
 }
 
 async function servePreview(

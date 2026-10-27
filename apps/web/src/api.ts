@@ -528,7 +528,6 @@ export const textureApi = {
     file: Blob;
     name: string;
     kind: 'skin' | 'cape';
-    model?: 'default' | 'slim' | undefined;
     visibility: 'public' | 'private';
     description?: string | undefined;
     sourceResourceId?: number | null | undefined;
@@ -538,7 +537,6 @@ export const textureApi = {
     form.set('file', input.file, 'texture.png');
     form.set('name', input.name);
     form.set('kind', input.kind);
-    if (input.model) form.set('model', input.model);
     form.set('visibility', input.visibility);
     if (input.description) form.set('description', input.description);
     if (input.sourceResourceId) form.set('sourceResourceId', String(input.sourceResourceId));
@@ -548,7 +546,7 @@ export const textureApi = {
     });
   },
 
-  patch: (id: number, body: { name?: string; visibility?: 'public' | 'private'; kind?: 'skin' | 'cape'; model?: 'default' | 'slim' }) =>
+  patch: (id: number, body: { name?: string; visibility?: 'public' | 'private'; kind?: 'skin' | 'cape' }) =>
     request<{ ok: boolean; scoreDelta: number }>(`/api/v1/textures/${id}`, {
       method: 'PATCH', json: body,
     }),
@@ -593,6 +591,13 @@ export interface OfficialResourceStatus { checkedAt: number | null; succeededAt:
 export const officialResourceApi = {
   status: () => request<OfficialResourceStatus>('/api/v1/admin/official-resources'),
   sync: () => request<OfficialResourceStatus>('/api/v1/admin/official-resources/sync', { method: 'POST' }),
+};
+
+export interface TextureSanitizeJob { cursor: number; processed: number; changed: number; skipped: number; failed: number; retries: number; done: boolean }
+export interface TextureSanitizeStatus { total: number; pending: number; job: TextureSanitizeJob | null }
+export const textureSanitizeApi = {
+  status: () => request<TextureSanitizeStatus>('/api/v1/admin/texture-sanitizer'),
+  start: () => request<{ cursor: number; started: boolean }>('/api/v1/admin/texture-sanitizer/start', { method: 'POST' }),
 };
 
 export const commentApi = {
@@ -750,6 +755,7 @@ export interface NotificationItem {
 }
 
 export const notificationApi = {
+  summary: () => request<{ unread: number }>('/api/v1/notifications/summary'),
   list: (unreadOnly = false) =>
     request<{ items: NotificationItem[]; unread: number }>(
       `/api/v1/notifications${unreadOnly ? '?unread=true' : ''}`),
@@ -1047,6 +1053,8 @@ export const adminApi = {
     return request<Paged<AiJobItem>>(`/api/v1/admin/ai-jobs?${p}`);
   },
   retryAiJob: (id: number) => request<{ ok: boolean }>(`/api/v1/admin/ai-jobs/${id}/retry`, { method: 'POST' }),
+  aiQuota: () => request<{ paused: boolean; pausedUntil: number }>('/api/v1/admin/ai-jobs/quota'),
+  resetAiQuota: () => request<{ ok: boolean }>('/api/v1/admin/ai-jobs/quota/reset', { method: 'POST' }),
   cancelAiJob: (id: number) => request<{ ok: boolean }>(`/api/v1/admin/ai-jobs/${id}/cancel`, { method: 'POST' }),
   backfillAiJobs: () => request<{ results: Array<{ kind: string; queued: number }> }>('/api/v1/admin/ai-jobs/backfill', { method: 'POST' }),
 

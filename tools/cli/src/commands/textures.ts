@@ -1,13 +1,14 @@
 // textures 命令组：import / export。
-// 关键不变量：textures.hash = sha256(字节) = R2 键 textures/<hash>.png。
+// 关键不变量：textures.hash = sha256(净化后的字节) = R2 键 textures/<hash>.png。
+// 与用户上传走同一套「解码重编码 → 哈希 → 存储」，两条通道产出的 hash 才一致。
 // 管理导入不扣积分、不发通知 —— 这是运维通道，不是用户上传通道。
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { validateTexture, textureObjectKey } from '@pigeon-skin/minecraft';
+import { validateTexture, sanitizeTexture, decodePng, detectSkinModel, sha256Hex, textureObjectKey, DEFAULT_TEXTURE_LIMITS } from '@pigeon-skin/minecraft';
 import type { TextureKind, TextureModel } from '@pigeon-skin/shared';
 import type { TargetEnv } from '../lib/env.ts';
-import { d1Query, d1ExecuteFile, r2Put, r2Get } from '../lib/wrangler.ts';
+import { d1Query, d1ExecuteFile, r2PutBytes, r2Get } from '../lib/wrangler.ts';
 import { sqlText, sqlIntOrNull, isHashHex } from '../lib/sql.ts';
 import { resolveExistingDir, resolveOutputPath } from '../lib/paths.ts';
 import { flagString, flagInt, hasFlag, type ParsedArgs } from '../lib/args.ts';
@@ -27,6 +28,7 @@ export async function runTextures(env: TargetEnv, action: string, parsed: Parsed
 interface ManifestEntry {
   name?: string;
   kind?: string;
+  /** 已废弃:模型按像素自动识别,manifest 里的 model 被忽略(保留字段以兼容旧清单) */
   model?: string | null;
   visibility?: string;
   origin?: string;
@@ -47,23 +49,14 @@ interface ImportPlanItem {
 
 function parseKindModel(
   kindText: string | undefined,
-  modelText: string | undefined,
   entry: ManifestEntry,
-): { kind: TextureKind; model: TextureModel | null } {
+): { kind: TextureKind } {
   const kind = (entry.kind ?? kindText) as TextureKind | undefined;
   if (kind !== 'skin' && kind !== 'cape') {
     throw new Error('需要 --kind skin|cape（manifest 里可用 kind 覆盖）');
   }
-  let model: TextureModel | null;
-  const modelStr = kind === 'cape' ? null : (entry.model !== undefined ? entry.model : (modelText ?? 'default'));
-  if (kind === 'cape') {
-    model = null;
-  } else if (modelStr === 'default' || modelStr === 'slim') {
-    model = modelStr;
-  } else {
-    throw new Error(`model 只支持 default|slim（收到 ${modelStr}）`);
-  }
-  return { kind, model };
+  // 模型不接收调用方指定:与站点上传一致,按像素自动识别
+  return { kind };
 }
 
 function parseVisibility(v: string | undefined, fallback: 'public' | 'private'): 'public' | 'private' {
@@ -76,6 +69,32 @@ function parseOrigin(v: string | undefined, fallback: 'original' | 'repost'): 'o
   if (v === undefined) return fallback;
   if (v === 'original' || v === 'repost') return v;
   throw new Error(`origin 只支持 original|repost（收到 ${v}）`);
+}
+
+/**
+ * 把一个原始 PNG 准备成入库项：校验 → 净化 → 按净化后字节算 hash 与模型。
+ *
+ * 关键不变量：返回的 `bytes` 与 `hash` 必须同源 —— R2 对象键由 hash 推导，
+ * 写入的必须是这份 bytes（不是磁盘上的原始文件），否则对象内容与键不符。
+ * 无失败时返回 null，失败时返回原因字符串。
+ */
+export async function prepareImportItem(
+  original: Uint8Array<ArrayBuffer>,
+  kind: TextureKind,
+): Promise<{ item: { bytes: Uint8Array<ArrayBuffer>; hash: string; width: number; height: number; model: TextureModel | null } } | { reason: string }> {
+  const validated = await validateTexture(original, { kind, model: null });
+  if (!validated.ok) return { reason: `${validated.code}: ${validated.message}` };
+  const sanitized = await sanitizeTexture(original, { kind, maxArea: DEFAULT_TEXTURE_LIMITS.maxArea });
+  if (!sanitized.ok) return { reason: `texture.malformed: ${sanitized.reason}` };
+  const bytes = sanitized.bytes;
+  const hash = await sha256Hex(bytes);
+  let model: TextureModel | null = sanitized.skinModel ?? null;
+  if (kind === 'skin' && model === null) {
+    const decoded = await decodePng(bytes, DEFAULT_TEXTURE_LIMITS.maxArea);
+    if (!decoded.ok) return { reason: `texture.malformed: ${decoded.reason}` };
+    model = detectSkinModel(decoded.image.width, decoded.image.height, decoded.image.rgba);
+  }
+  return { item: { bytes, hash, width: sanitized.width, height: sanitized.height, model } };
 }
 
 async function texturesImport(env: TargetEnv, flags: ReadonlyMap<string, string | true>): Promise<number> {
@@ -97,7 +116,6 @@ async function texturesImport(env: TargetEnv, flags: ReadonlyMap<string, string 
   }
 
   const defaultKind = flagString(flags, 'kind');
-  const defaultModel = flagString(flags, 'model');
   const defaultVisibility = parseVisibility(flagString(flags, 'visibility'), 'public');
   const defaultOrigin = parseOrigin(flagString(flags, 'origin'), 'original');
 
@@ -121,20 +139,22 @@ async function texturesImport(env: TargetEnv, flags: ReadonlyMap<string, string 
   const failures: { file: string; reason: string }[] = [];
   for (const file of files) {
     try {
-      const bytes = new Uint8Array(readFileSync(join(dir, file)));
+      const original = new Uint8Array(readFileSync(join(dir, file)));
       const entry = entries.get(file) ?? {};
-      const { kind, model } = parseKindModel(defaultKind, defaultModel, entry);
-      const validated = await validateTexture(bytes, { kind, model });
-      if (!validated.ok) {
-        failures.push({ file, reason: `${validated.code}: ${validated.message}` });
+      const { kind } = parseKindModel(defaultKind, entry);
+      // 与站点上传同序:校验 → 净化 → 按净化后字节算 hash 并判定模型
+      const prepared = await prepareImportItem(original, kind);
+      if ('reason' in prepared) {
+        failures.push({ file, reason: prepared.reason });
         continue;
       }
+      const { bytes, hash, width, height, model } = prepared.item;
       plan.push({
         file,
         bytes,
-        hash: validated.value.hash,
-        width: validated.value.info.width,
-        height: validated.value.info.height,
+        hash,
+        width,
+        height,
         kind,
         model,
         name: (entry.name ?? basename(file, '.png')).slice(0, 64),
@@ -192,7 +212,8 @@ async function texturesImport(env: TargetEnv, flags: ReadonlyMap<string, string 
       pending.map((item) => ({
         file: item.file,
         localHash: item.hash,
-        params: { kind: item.kind, model: item.model, visibility: item.visibility, origin: item.origin, uploader: uploaderEmail || null, name: item.name },
+        // 不传 model:服务端按像素判定,与本地计划里的判定结果一致
+        params: { kind: item.kind, visibility: item.visibility, origin: item.origin, uploader: uploaderEmail || null, name: item.name },
       })),
       dir,
       (done, total) => console.log(`  进度: ${done}/${total}`),
@@ -208,7 +229,9 @@ async function texturesImport(env: TargetEnv, flags: ReadonlyMap<string, string 
   let uploaded = 0;
   const statements: string[] = [];
   for (const item of pending) {
-    r2Put(env, textureObjectKey(item.hash), join(dir, item.file));
+    // 写净化后的字节:item.hash 是这份字节的 sha256,对象键必须与内容一致
+    // (原始文件可能带元数据,22×17 披风连尺寸都不同)
+    r2PutBytes(env, textureObjectKey(item.hash), item.bytes);
     uploaded++;
     statements.push(
       `INSERT OR IGNORE INTO textures (hash, kind, model, name, uploader_id, origin, size_bytes, visibility, width, height, likes, created_at, updated_at) `

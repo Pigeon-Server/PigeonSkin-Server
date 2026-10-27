@@ -7,6 +7,7 @@
 import { fail, paginate, readJson, readJsonOptional, readPagination, readQuery } from '../../core/framework.ts';
 import { type AppEnv } from '../../core/user.ts';
 import { Hono } from 'hono';
+import { z } from 'zod';
 import {
   adminBroadcastInputSchema, adminCreateUserInputSchema, adminListQuerySchema,
   adminPatchUserInputSchema, adminSettingsInputSchema, texturePatchInputSchema,
@@ -140,6 +141,21 @@ export function registerPigeonAdminApi(app: Hono<AppEnv>) {
     const targetId = Number(c.req.param('id'));
     await admin.deleteAnyTexture(c.env, actor, targetId);
     return c.body(null, 204);
+  });
+
+  /**
+   * 存量皮肤模型重检：按像素重新判定 model,游标分批。
+   * CLI 驱动循环调用直至 nextCursor 为 null(见 tools/scripts/redetect-skin-models.mjs)。
+   */
+  app.post('/api/v1/pigeon/admin/textures/redetect-skin-model', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const key = await requirePigeonKey(c, 'admin.textures.write');
+    const { actor } = await keyActor(c, key);
+    const body = await readJsonOptional(c, z.object({
+      lastId: z.number().int().min(0).default(0),
+      limit: z.number().int().min(1).max(200).default(50),
+    }));
+    return c.json(await admin.redetectSkinModels(c.env, actor, { lastId: body.lastId ?? 0, limit: body.limit ?? 50 }));
   });
 
   // ── 统计与审计查询（scope: admin.stats.read，只读不审计）──────────────────

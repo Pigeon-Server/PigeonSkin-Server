@@ -32,6 +32,15 @@ describe('rewriteSql（mysql 目标）', () => {
       .toBe('REPLACE INTO t (a) VALUES (?)');
   });
 
+  it('裸 ON CONFLICT DO NOTHING 在 MySQL 下被剥成普通 INSERT（必须用 INSERT OR IGNORE）', () => {
+    // 这条断言记录的是适配层的既有局限：冲突忽略语义在 MySQL 下不成立。
+    // 业务代码要跨方言忽略冲突，只能写 INSERT OR IGNORE。
+    expect(rewriteSql('INSERT INTO t (a) VALUES (?) ON CONFLICT DO NOTHING', 'mysql').sql)
+      .toBe('INSERT INTO t (a) VALUES (?)');
+    expect(rewriteSql('INSERT OR IGNORE INTO t (a) SELECT ? WHERE NOT EXISTS (SELECT 1 FROM t)', 'mysql').sql)
+      .toBe('INSERT IGNORE INTO t (a) SELECT ? WHERE NOT EXISTS (SELECT 1 FROM t)');
+  });
+
   it('INSERT...RETURNING id → 去掉 RETURNING 并标记模拟', () => {
     const r = rewriteSql('INSERT INTO t (a) VALUES (?) RETURNING id', 'mysql');
     expect(r.sql).toBe('INSERT INTO t (a) VALUES (?)');

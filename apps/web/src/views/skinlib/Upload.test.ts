@@ -50,9 +50,6 @@ vi.mock('@/stores/i18n', () => ({
         'skinlib.upload.texture-name': '材质名称',
         'skinlib.upload.button': '确认上传',
         'skinlib.texture_type': '材质类型',
-        'skinlib.show.model': '适用模型',
-        'skinlib.model_classic': 'Steve · 标准',
-        'skinlib.model_slim': 'Alex · 纤细',
         'skinlib.origin': '材质来源',
         'skinlib.origin_original': '原创',
         'skinlib.origin_repost': '转载',
@@ -114,5 +111,15 @@ describe('Skinlib Upload View', () => {
     expect(text).toContain('选择文件');
     expect(text).toContain('材质名称');
     expect(text).toContain('确认上传');
+  });
+
+  it('皮肤/披风类型可选，但不提供模型选择（模型由服务端自动识别）', () => {
+    const wrapper = createUploadWrapper();
+    const text = wrapper.text();
+    expect(text).toContain('材质类型');
+    // 模型是像素的函数，上传页不再暴露 classic/slim 选择
+    expect(text).not.toContain('适用模型');
+    expect(text).not.toContain('Steve · 标准');
+    expect(text).not.toContain('Alex · 纤细');
   });
 });

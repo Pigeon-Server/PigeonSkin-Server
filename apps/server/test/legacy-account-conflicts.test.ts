@@ -13,8 +13,9 @@ async function createConflict(label: string, differentPasswords = false) {
   return { email, first: first!.id, second: second!.id };
 }
 
-function login(body: unknown) {
-  return SELF.fetch('https://x/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify(body) });
+async function login(body: unknown) {
+  const response = await SELF.fetch('https://x/api/v1/auth/login', { method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify(body) });
+  return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
 }
 
 describe('legacy account conflicts', () => {

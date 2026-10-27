@@ -665,6 +665,7 @@
     "description_too_long": "説明が長すぎます",
     "model_classic": "スティーブ・クラシック",
     "model_slim": "アレックス・スリム",
+    "model_auto_hint": "モデル（クラシック / スリム）はスキンのピクセルから自動判定されるため、ここでは変更できません。変更したい場合は腕のピクセルを編集して上書き保存してください。",
     "collection_count": "{count} コレクション",
     "download": "テクスチャをダウンロードする",
     "raw": "生のテクスチャー",
@@ -690,7 +691,9 @@
     "create": {
       "title": "テクスチャを作成",
       "description": "エディターで作成するスキンまたはマントを選択してください。編集後、ライブラリ情報を入力して保存できます。",
-      "start": "作成を開始"
+      "start": "作成を開始",
+      "canvas_model": "キャンバステンプレート",
+      "canvas_model_hint": "テンプレートは開始時の腕の幅だけを決めます。保存後、モデルは実際のピクセルから自動判定されます。"
     },
     "origin": "出典区分",
     "origin_original": "オリジナル",
@@ -1147,9 +1150,12 @@
       "search_submissions_retry": "検索送信再試行",
       "texture_flags_clear": "審査フラグ解除",
       "ai_jobs_cancel": "AI タスク取消",
+      "ai_jobs_quota_reset": "Workers AI の停止状態をリセット",
       "ai_jobs_retry": "AI タスク再試行",
       "ai_jobs_backfill": "既存テクスチャの補完",
-      "texture_import": "テクスチャの一括インポート"
+      "texture_import": "テクスチャの一括インポート",
+      "texture_sanitize": "テクスチャのメタデータを整理",
+      "texture_model_redetect": "スキンモデルを再判定"
     },
     "anonymous": "匿名",
     "role_normal": "ノーマル",
@@ -1359,6 +1365,8 @@
     "task_clear_flag": "フラグ解除",
     "task_cancel": "キャンセル",
     "task_backfill": "既存テクスチャを補完",
+    "ai_daily_paused": "Workers AI の本日の上限に達しました。関連タスクは {time} まで一時停止します。AI 設定の変更または停止状態のリセットで再試行できます。",
+    "ai_quota_reset": "停止状態をリセット",
     "task_backfill_empty": "補完が必要なタスクはありません",
     "task_backfill_confirm": "AI タスクがまだないすべてのテクスチャに翻訳と審査のタスクを作成しますか？既存のタスクはリセットされません。",
     "task_backfill_done": "作成されたタスク: {detail}",
@@ -1640,6 +1648,8 @@
         "signout": "サインアウト",
         "refresh": "リフレッシュトークン",
         "join": "サーバーに参加する",
+        "validate": "トークンを検証する",
+        "has_joined": "サーバーに参加した",
         "upload-skin": "スキンをアップロードする",
         "upload-cape": "アップロードマント"
       },
@@ -2145,5 +2155,17 @@
   "mojang_takeover": {
     "title": "プレイヤー所有者変更通知",
     "content": "プレイヤー {player} は公式Mojangユーザーに移行され、補償ポイントが付与されました。"
+  },
+  "sanitize": {
+    "title": "テクスチャのメタデータ整理",
+    "start": "整理を開始",
+    "total": "テクスチャ総数",
+    "pending": "整理待ち",
+    "processed": "今回の処理数",
+    "changed": "ファイルを更新",
+    "running": "整理しています…",
+    "remaining": "あと {count} 件のテクスチャが整理待ちです",
+    "complete": "すべてのテクスチャを整理しました",
+    "hint": "整理が完了すると、プレイヤーがダウンロードするテクスチャファイルに元画像の作者名やソフトウェア情報などの付加情報が含まれなくなります。"
   }
 }

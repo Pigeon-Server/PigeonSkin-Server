@@ -1,10 +1,12 @@
 
 
 import { type Bindings } from './../core/env.ts';
+import { withRequestCache } from '../core/request-cache.ts';
 import { getSettingBool } from './../core/settings-reader.ts';
 import { ensureOfficialCatalog } from '../services/official-catalog.ts';
 import { discoverCapes, discoverDefaultSkins, downloadDefaultSkin, type DefaultSkinPlan, type ResourceCandidate } from '../services/official-sources.ts';
 import { applyOfficialUpdates, type SyncState } from '../services/official-updates.ts';
+import { backgroundAllowed, isD1QuotaError, noteD1Failure, quotaResetAt } from '../core/usage-budget.ts';
 
 type Phase = 'catalog' | 'skins' | 'skin_downloads' | 'capes' | 'cape_downloads' | 'complete';
 interface ResourceJob {
@@ -27,7 +29,9 @@ export class OfficialResourceUpdater {
   private readonly env: Bindings;
   constructor(state: DurableObjectState, env: Bindings) { this.state = state; this.env = env; }
 
-  async fetch(request: Request): Promise<Response> {
+  fetch(request: Request): Promise<Response> { return withRequestCache(() => this.handleRequest(request)); }
+
+  private async handleRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method !== 'POST' || url.pathname !== '/start') return new Response(null, { status: 404 });
     return this.state.blockConcurrencyWhile(async () => {
@@ -50,7 +54,11 @@ export class OfficialResourceUpdater {
     });
   }
 
-  async alarm(): Promise<void> {
+  alarm(): Promise<void> { return withRequestCache(() => this.handleAlarm()); }
+
+  private async handleAlarm(): Promise<void> {
+    if (this.executing) return;
+    if (!await backgroundAllowed(this.env)) { await this.state.storage.setAlarm(quotaResetAt()); return; }
     this.executing = true;
     try {
       const saved = await this.state.storage.get<ResourceJob>('job');
@@ -70,6 +78,11 @@ export class OfficialResourceUpdater {
           });
         }
       } catch (failure) {
+        if (isD1QuotaError(failure)) {
+          await noteD1Failure(this.env, failure);
+          await this.state.storage.setAlarm(quotaResetAt());
+          return;
+        }
         saved.retries++;
         saved.failed = saved.retries >= 5;
         await this.state.storage.transaction(async storage => {

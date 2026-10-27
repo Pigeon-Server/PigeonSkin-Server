@@ -9,14 +9,17 @@
 //
 // 与 Workers 的差异（有意为之的简化）：
 //   • Workers 的 DO 有 input/output gates + 标签一致性，这里改为同一
-//     实例的 fetch/alarm 排队互斥（Promise 链），语义上等价于 input gate
-//     ——derivatives.ts 的 `storage.get('__gate__')` gate 点正是靠这个
-//     排队实现"同 hash 只生成一次"。
+//     实例的 fetch/alarm 排队互斥（Promise 链）。
 //   • storage 用 JSON 序列化存进 SQLite，值是结构化克隆的近似
 //     （ResourceJob 这类纯 JSON 对象足够）；Workers 的 get<T> 泛型在
 //     这里退化为 untyped + 调用方断言，与业务代码用法一致。
 
 import { type DatabaseSyncLike as DatabaseSync, type StatementSync } from './sqlite-shim.ts';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const activeObjects = new AsyncLocalStorage<DurableObjectStateShim>();
+const storageOwner = new AsyncLocalStorage<{ db: DatabaseSync; storage: DurableObjectStorageShim; active: boolean }>();
+const storageLocks = new WeakMap<DatabaseSync, Promise<void>>();
 
 // ── 存储 ─────────────────────────────────────────────────────────────────────
 
@@ -29,8 +32,11 @@ interface StoredAlarm {
 
 export interface DurableObjectStorageTransaction {
   get<T = unknown>(key: string): Promise<T | undefined>;
+  get<T = unknown>(keys: string[]): Promise<Map<string, T>>;
   put(key: string, value: unknown): Promise<void>;
+  put(entries: Record<string, unknown>): Promise<void>;
   delete(key: string): Promise<boolean>;
+  delete(keys: string[]): Promise<number>;
   deleteAll(): Promise<void>;
 }
 
@@ -55,32 +61,79 @@ export class DurableObjectStorageShim {
     this.#name = name;
   }
 
-  async get<T = unknown>(key: string): Promise<T | undefined> {
+  async #locked<T>(fn: () => Promise<T>): Promise<T> {
+    const owner = storageOwner.getStore();
+    if (owner?.active && owner.db === this.#db) {
+      if (owner.storage !== this) throw new Error('Cannot access another Durable Object storage inside a transaction');
+      return fn();
+    }
+    const previous = storageLocks.get(this.#db) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>(resolve => { release = resolve; });
+    storageLocks.set(this.#db, current);
+    await previous;
+    const context = { db: this.#db, storage: this, active: true };
+    try { return await storageOwner.run(context, fn); }
+    finally {
+      context.active = false;
+      release();
+      if (storageLocks.get(this.#db) === current) storageLocks.delete(this.#db);
+    }
+  }
+
+  async get<T = unknown>(key: string): Promise<T | undefined>;
+  async get<T = unknown>(keys: string[]): Promise<Map<string, T>>;
+  async get<T = unknown>(key: string | string[]): Promise<T | undefined | Map<string, T>> {
+    return this.#locked(async () => {
+    if (Array.isArray(key)) {
+      const result = new Map<string, T>();
+      for (const item of key) { const value = await this.get<T>(item); if (value !== undefined) result.set(item, value); }
+      return result;
+    }
     const row = this.#select.get(...([this.#name, key] as never[])) as DoStorageRow | undefined;
     if (!row || row.value === null) return undefined;
     return JSON.parse(row.value) as T;
+    });
   }
 
-  async put(key: string, value: unknown): Promise<void> {
+  async put(key: string, value: unknown): Promise<void>;
+  async put(entries: Record<string, unknown>): Promise<void>;
+  async put(key: string | Record<string, unknown>, value?: unknown): Promise<void> {
+    return this.#locked(async () => {
+    if (typeof key !== 'string') { for (const [name, item] of Object.entries(key)) await this.put(name, item); return; }
     this.#upsert.run(...([this.#name, key, JSON.stringify(value)] as never[]));
+    });
   }
 
-  async delete(key: string): Promise<boolean> {
+  async delete(key: string): Promise<boolean>;
+  async delete(keys: string[]): Promise<number>;
+  async delete(key: string | string[]): Promise<boolean | number> {
+    return this.#locked(async () => {
+    if (Array.isArray(key)) { let count = 0; for (const item of key) if (await this.delete(item)) count++; return count; }
     const info = this.#delete.run(...([this.#name, key] as never[]));
     return Number(info.changes) > 0;
+    });
+  }
+
+  async list<T = unknown>(options: { prefix?: string; limit?: number; reverse?: boolean } = {}): Promise<Map<string, T>> {
+    return this.#locked(async () => {
+    const prefix = (options.prefix ?? '').replace(/[\\%_]/g, '\\$&') + '%';
+    const limit = Math.max(1, Math.min(1000, options.limit ?? 1000));
+    const rows = this.#statement(`SELECT key,value FROM do_storage WHERE do_name=? AND key LIKE ? ESCAPE '\\' ORDER BY key ${options.reverse ? 'DESC' : 'ASC'} LIMIT ?`).all(...([this.#name, prefix, limit] as never[])) as DoStorageRow[];
+    return new Map(rows.filter(row => row.value !== null).map(row => [row.key, JSON.parse(row.value!) as T]));
+    });
   }
 
   async deleteAll(): Promise<void> {
-    this.#deleteAllFor.run(...([this.#name] as never[]));
+    return this.#locked(async () => { this.#deleteAllFor.run(...([this.#name] as never[])); });
   }
 
   /**
    * 事务：fn 里拿到的 storage 句柄在事务内读写可见；fn 抛错时整个
    * 事务回滚（official-resources.ts 靠这个保证 job 与 alarm 原子更新）。
-   * SQLite 事务与 async fn 的组合是近似的——BEGIN/COMMIT 之间的 await
-   * 期间别的语句仍可能插队，但 Node 侧 DO 实例本身串行（见下），够用。
    */
   async transaction<T>(fn: (storage: DurableObjectStorageTransaction) => Promise<T>): Promise<T> {
+    return this.#locked(async () => {
     this.#db.exec('BEGIN');
     try {
       const value = await fn(this);
@@ -90,6 +143,7 @@ export class DurableObjectStorageShim {
       try { this.#db.exec('ROLLBACK'); } catch { /* 事务已由 SQLITE 内部终结 */ }
       throw error;
     }
+    });
   }
 
   async getAlarm(): Promise<number | null> {
@@ -176,6 +230,7 @@ export class DurableObjectStateShim {
   }
 
   blockConcurrencyWhile<T>(fn: () => Promise<T>): Promise<T> {
+    if (activeObjects.getStore() === this) return fn();
     return this.#enqueue('block', fn);
   }
 
@@ -194,7 +249,7 @@ export class DurableObjectStateShim {
   }
 
   #enqueue<T>(_tag: string, fn: () => Promise<T>): Promise<T> {
-    const run = this.#tail.then(fn, fn);
+    const run = this.#tail.then(() => activeObjects.run(this, fn), () => activeObjects.run(this, fn));
     // 队列继续走：前一个失败不阻塞后续请求（错误只抛给当次调用方）
     this.#tail = run.then(() => undefined, () => undefined);
     return run;

@@ -63,6 +63,7 @@ export function rewriteSql(sql: string, target: TargetDialect): RewriteResult {
   }
 
   if (target === 'postgres') {
+    out = out.replace(/\bON\s+CONFLICT\s*\(([^)]+)\)/gi, (_match, columns: string) => `ON CONFLICT (${columns.replace(/(?:"[^"]+"|\b\w+)\./g, '')})`);
     out = out.replace(IS_PARAM, (_m, col: string) => `${col} IS NOT DISTINCT FROM ?`);
     // INSERT OR IGNORE → ON CONFLICT DO NOTHING
     // 注意 ON CONFLICT 子句必须落在 VALUES/SELECT 之后、语句末尾：

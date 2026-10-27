@@ -49,6 +49,8 @@ function splitSqlScript(script: string): string[] {
 
 /** 把迁移脚本应用到 miniflare 的 D1。幂等（表存在即跳过）。 */
 export async function runMigrations(): Promise<void> {
+  const { invalidateSettingsCache } = await import('../src/core/settings-reader.ts');
+  invalidateSettingsCache();
   // isolatedStorage 每用例重置存储但复用 env.DB 对象；官方目录的完成态缓存按
   // DB 键缓存，不重置会让后续用例跳过初始化直接断言空表
   const { resetOfficialCatalogCache } = await import('../src/services/official-catalog.ts');
@@ -118,7 +120,7 @@ export async function readAudit(): Promise<AuditRow[]> {
 const TEST_KEY = globalThis as unknown as { __yggPem?: string; __yggPub?: CryptoKey };
 
 export async function setTestYggKey(): Promise<void> {
-  if (TEST_KEY.__yggPem) return;
+  if (TEST_KEY.__yggPem && (await env.DB.prepare("SELECT value FROM settings WHERE key='ygg_private_key' AND locale=''").first<{ value: string }>())?.value === TEST_KEY.__yggPem) return;
   const kp = (await crypto.subtle.generateKey(
     { name: 'RSASSA-PKCS1-v1_5', modulusLength: 4096, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-1' },
     true, ['sign', 'verify'],

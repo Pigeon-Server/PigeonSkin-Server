@@ -2,7 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] },
+    "paths": {
+      "@/*": ["src/*"],
+      "vite": ["./node_modules/vite/dist/node/index.d.ts"],
+      "vite/*": ["./node_modules/vite/*"]
+    },
     "lib": [
       "ES2023",
       "DOM",

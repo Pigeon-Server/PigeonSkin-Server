@@ -6,7 +6,7 @@ import { type Pagination } from './../core/framework.ts';
 import { and, desc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
-import { closet, textures, textureTranslations, texturesDescription, users, chunkBind } from '@pigeon-skin/db';
+import { closet, textures, textureTranslations, texturesDescription, textureCounts, users, chunkBind } from '@pigeon-skin/db';
 import type { TextureKind, TextureVisibility } from '@pigeon-skin/shared';
 
 import { fragmentToSql, type SqlFragment } from '../search/compile.ts';
@@ -88,12 +88,7 @@ export interface ListTexturesParams {
   isAdmin: boolean;
 }
 
-/**
- * 译表 join 条件。locale 为空时不需要 join，但 drizzle 的 leftJoin 不接受
- * undefined on 条件 —— 用恒假匹配让 join 退化为无行匹配，结果等同不 join。
- */
-function translationJoin(locale: string | undefined) {
-  if (!locale) return sql`1 = 0`;
+function translationJoin(locale: string) {
   return and(eq(translationTable.tid, textures.id), eq(translationTable.locale, locale));
 }
 
@@ -108,32 +103,49 @@ export async function listTextures(db: Db, params: ListTexturesParams, page: Pag
     searchFilter(params.search),
   );
 
-  // 计数查询必须与实际查询用同一套 join：搜索表达式可能引用 users.nickname
-  const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(textures)
-    .leftJoin(users, eq(users.id, textures.uploaderId)).where(where);
+  const needsUsers = /\busers\b/.test(params.search?.sql ?? '');
+  const countQuery = db.select({ n: sql<number>`count(*)` }).from(textures).$dynamic();
+  if (needsUsers) countQuery.leftJoin(users, eq(users.id, textures.uploaderId));
+  const total = params.search ? (await countQuery.where(where))[0]?.n ?? 0 : await countTextureGroups(db, params);
+
+  const ordering = [params.sort === 'likes' ? desc(textures.likes) : desc(textures.createdAt), desc(textures.id)];
+  const idQuery = db.select({ id: textures.id }).from(textures).$dynamic();
+  if (needsUsers) idQuery.leftJoin(users, eq(users.id, textures.uploaderId));
+  const selected = await idQuery.where(where).orderBy(...ordering).limit(page.perPage).offset(page.offset);
+  if (!selected.length) return { items: [], total };
 
   const columns = locale ? listColumns(translatedName()) : LIST_COLUMNS;
-  const items = await db
+  const itemQuery = db
     .select(columns)
     .from(textures)
-    .leftJoin(users, eq(users.id, textures.uploaderId))
-    .leftJoin(translationTable, translationJoin(locale))
-    .where(where)
-    .orderBy(
-      params.sort === 'likes'
-        ? desc(textures.likes)
-        : desc(textures.createdAt),
-      desc(textures.id),
-    )
-    .limit(page.perPage)
-    .offset(page.offset);
+    .leftJoin(users, eq(users.id, textures.uploaderId)).$dynamic();
+  if (locale) itemQuery.leftJoin(translationTable, translationJoin(locale));
+  const byId = new Map((await itemQuery.where(inArray(textures.id, selected.map(row => row.id))))
+    .filter(row => row.visibility === 'public' || params.isAdmin || params.viewer?.id === row.uploaderId)
+    .map(row => [row.id, row]));
+  const items = selected.flatMap(row => byId.has(row.id) ? [byId.get(row.id)!] : []);
 
-  return { items, total: countRow?.n ?? 0 };
+  return { items, total };
+}
+
+export async function countTextureGroups(db: Db, params: Pick<ListTexturesParams, 'viewer' | 'isAdmin' | 'uploader' | 'mine' | 'kind' | 'model' | 'official'>): Promise<number> {
+  if (params.mine !== undefined && params.uploader !== undefined && params.mine !== params.uploader) return 0;
+  const owner = params.mine ?? params.uploader;
+  const scopes = owner !== undefined
+    ? [`u:${owner}:public`, ...(params.isAdmin || params.viewer?.id === owner ? [`u:${owner}:private`] : [])]
+    : params.isAdmin ? ['p:public', 'p:private'] : ['p:public', ...(params.viewer ? [`u:${params.viewer.id}:private`] : [])];
+  const [row] = await db.select({ n: sql<number>`COALESCE(SUM(${textureCounts.value}),0)`.mapWith(Number) }).from(textureCounts).where(and(
+    inArray(textureCounts.scope, scopes),
+    params.kind ? eq(textureCounts.kind, params.kind) : undefined,
+    params.model ? eq(textureCounts.model, params.model) : undefined,
+    params.official ? eq(textureCounts.official, 1) : undefined,
+  ));
+  return row?.n ?? 0;
 }
 
 export async function findTextureById(db: Db, id: number, locale?: string) {
   const columns = locale ? listColumns(translatedName()) : LIST_COLUMNS;
-  const [row] = await db
+  const query = db
     .select({
       ...columns,
       updatedAt: textures.updatedAt,
@@ -141,10 +153,9 @@ export async function findTextureById(db: Db, id: number, locale?: string) {
       scoreAward: textures.scoreAward,
     })
     .from(textures)
-    .leftJoin(users, eq(users.id, textures.uploaderId))
-    .leftJoin(translationTable, translationJoin(locale))
-    .where(eq(textures.id, id))
-    .limit(1);
+    .leftJoin(users, eq(users.id, textures.uploaderId)).$dynamic();
+  if (locale) query.leftJoin(translationTable, translationJoin(locale));
+  const [row] = await query.where(eq(textures.id, id)).limit(1);
   return row ?? null;
 }
 
@@ -155,7 +166,9 @@ export async function findVisibleDuplicate(
   viewerId: number,
   uploadVisibility: TextureVisibility,
   kind?: TextureKind,
-  model?: string | null,
+  // 模型不再参与定域:它由像素唯一决定,同 hash 必同 model。
+  // 保留参数只为调用侧签名兼容(存量行 model 可能为 NULL,按值比较会漏配)。
+  _model?: string | null,
 ) {
   const duplicateScope = uploadVisibility === 'private'
     ? or(eq(textures.visibility, 'public'), eq(textures.uploaderId, viewerId))
@@ -167,7 +180,6 @@ export async function findVisibleDuplicate(
       and(
         eq(textures.hash, hash),
         ...(kind ? [eq(textures.kind, kind)] : []),
-        ...(kind === 'skin' ? [sql`${textures.model} IS ${model ?? 'default'}`] : []),
         // 公共作品不能重复发布；私有作品只阻止所有者再次保存为私有。
         duplicateScope,
       ),
@@ -231,7 +243,7 @@ export async function countReferencesToHash(db: Db, hash: string): Promise<numbe
 export async function countPublicReferencesToHash(db: Db, hash: string): Promise<number> {
   const [row] = await db.select({ n: sql<number>`count(*)` }).from(textures).where(and(
     eq(textures.hash, hash),
-    sql`${textures.visibility} = 'public' OR EXISTS (SELECT 1 FROM players p JOIN users u ON u.id = p.user_id WHERE u.role != 'banned' AND (p.skin_texture_id = ${textures.id} OR p.cape_texture_id = ${textures.id}))`,
+    sql`(${textures.visibility} = 'public' OR EXISTS (SELECT 1 FROM players p JOIN users u ON u.id = p.user_id WHERE u.role != 'banned' AND (p.skin_texture_id = ${textures.id} OR p.cape_texture_id = ${textures.id})))`,
   ));
   return row?.n ?? 0;
 }
@@ -264,7 +276,7 @@ export async function countPublicReferencesToHashes(db: Db, hashes: readonly str
       .from(textures)
       .where(and(
         inArray(textures.hash, part),
-        sql`${textures.visibility} = 'public' OR EXISTS (SELECT 1 FROM players p JOIN users u ON u.id = p.user_id WHERE u.role != 'banned' AND (p.skin_texture_id = ${textures.id} OR p.cape_texture_id = ${textures.id}))`,
+        sql`(${textures.visibility} = 'public' OR EXISTS (SELECT 1 FROM players p JOIN users u ON u.id = p.user_id WHERE u.role != 'banned' AND (p.skin_texture_id = ${textures.id} OR p.cape_texture_id = ${textures.id})))`,
       ))
       .groupBy(textures.hash);
     for (const row of rows) counts.set(row.hash, row.n);

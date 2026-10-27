@@ -37,7 +37,22 @@ export {
 } from './renderer.ts';
 
 export {
+  sanitizeTexture,
+  padLegacyCape,
+  withTextChunk,
+  type SanitizeOptions,
+  type SanitizeResult,
+} from './sanitize.ts';
+
+export {
+  detectSkinModel,
+} from './model.ts';
+
+export {
   validateTexture,
+  HARD_TEXTURE_MAX_BYTES,
+  HARD_TEXTURE_MAX_WIDTH,
+  HARD_TEXTURE_MAX_AREA,
   textureObjectKey,
   avatarObjectKey,
   avatarObjectPrefix,

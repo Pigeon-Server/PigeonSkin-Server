@@ -7,10 +7,24 @@
 // 迁移 SQL 通过虚拟模块注入：workerd 里没有可用的 node:fs，
 // 而 vitest.config 在 Node 侧加载，可以在这里读文件再喂给测试代码。
 import path from 'node:path';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import ts from 'typescript';
 import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
 
 const MIGRATIONS_DIR = path.resolve(__dirname, '../../packages/db/migrations');
+const ROOT = path.resolve(__dirname, '../..');
+const testConfig = ts.parseConfigFileTextToJson('wrangler.jsonc', readFileSync(path.join(ROOT, 'wrangler.jsonc'), 'utf8')).config;
+delete testConfig.ai;
+delete testConfig.env;
+testConfig.observability = { enabled: false };
+testConfig.main = path.resolve(ROOT, testConfig.main);
+testConfig.assets.directory = path.resolve(ROOT, testConfig.assets.directory);
+for (const database of testConfig.d1_databases) database.migrations_dir = path.resolve(ROOT, database.migrations_dir);
+const testDirectory = mkdtempSync(path.join(tmpdir(), 'pigeon-worker-tests-'));
+const testConfigPath = path.join(testDirectory, 'wrangler.json');
+writeFileSync(testConfigPath, JSON.stringify(testConfig));
+process.once('exit', () => rmSync(testDirectory, { recursive: true, force: true }));
 
 function loadMigrations(): string {
   const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
@@ -48,6 +62,7 @@ export default defineWorkersConfig({
     hookTimeout: 60_000,
     poolOptions: {
       workers: {
+        singleWorker: true,
         // 测试只用本地模拟器（miniflare bindings 覆盖 + 本地 D1），
         // 显式关掉 remote bindings：wrangler.jsonc 的 AI 绑定无本地模拟器，
         // 默认行为会为它启动 remote proxy session（要求 wrangler 登录），
@@ -57,9 +72,9 @@ export default defineWorkersConfig({
         // 用的（ENVIRONMENT=production + https 的 APP_URL），测试池按顶层读，
         // 而这里把 APP_URL 覆盖成本地 http —— 两者不一致时 resolveConfiguration
         // 会判定为非本地开发并要求 https，所有走配置解析的请求直接 503。
-        miniflare: { bindings: { ENVIRONMENT: 'development', APP_URL: 'http://localhost:8787', SESSION_SECRET: 'test-session-secret', OFFICIAL_CATALOG_ENABLED: 'false', RATE_LIMIT_ENABLED: 'false' } },
+        miniflare: { bindings: { ENVIRONMENT: 'development', APP_URL: 'http://localhost:8787', SESSION_SECRET: 'test-session-secret', MFA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64url'), OFFICIAL_CATALOG_ENABLED: 'false', RATE_LIMIT_ENABLED: 'false' } },
         // 配置源已迁到仓库根目录（目录结构重组）
-        wrangler: { configPath: path.resolve(__dirname, '../../wrangler.jsonc') },
+        wrangler: { configPath: testConfigPath },
       },
     },
   },

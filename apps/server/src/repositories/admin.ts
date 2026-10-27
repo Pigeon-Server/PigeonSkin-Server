@@ -1,6 +1,6 @@
 // 后台仓储 —— 只负责查询。
-import { and, eq, inArray, or, sql } from 'drizzle-orm';
-import { scalarMax, aiJobs, chunkBind, players, reports, textures, users, closet, noCaseEq } from '@pigeon-skin/db';
+import { and, eq, gt, gte, lt, inArray, or, sql } from 'drizzle-orm';
+import { scalarMax, aiJobs, chunkBind, players, textures, users, closet, noCaseEq, siteStats, dailyStats, textureCounts, dialect } from '@pigeon-skin/db';
 import type { Db } from './textures.ts';
 import type { SQL } from 'drizzle-orm';
 import { fragmentToSql, type SqlFragment } from '../search/compile.ts';
@@ -35,54 +35,24 @@ export interface AdminStats {
   uploads: Array<{ day: string; n: number }>;
 }
 
-/**
- * 近 31 天每日计数。
- *
- * 用 Drizzle 的列引用构造，而不是把表名拼进 SQL 字符串 —— 表名一旦以字符串
- * 形式进入查询，后续任何"把参数传得更宽一点"的改动都会变成注入面。
- * 这里 daySource 是编译期受限的联合类型，但让代码结构本身排除该风险
- * 比让每个读者去验证那个三元表达式更可靠。
- *
- * 注意按表达式排序而不是按别名：SQLite 的 ORDER BY 虽然接受别名，
- * 但 Drizzle 的 orderBy 解析不到 SELECT 里的别名（会报 no such column: day）。
- */
 async function daily(
   db: Db,
   daySource: 'users' | 'textures',
 ): Promise<Array<{ day: string; n: number }>> {
   const since = Date.now() - 31 * 86_400_000;
-
-  if (daySource === 'users') {
-    const day = sql<string>`date(${users.createdAt} / 1000, 'unixepoch')`;
-    return db
-      .select({ day, n: sql<number>`count(*)` })
-      .from(users)
-      .where(sql`${users.createdAt} >= ${since}`)
-      .groupBy(day)
-      .orderBy(day);
-  }
-
-  const day = sql<string>`date(${textures.createdAt} / 1000, 'unixepoch')`;
-  return db
-    .select({ day, n: sql<number>`count(*)` })
-    .from(textures)
-    .where(sql`${textures.createdAt} >= ${since}`)
-    .groupBy(day)
-    .orderBy(day);
+  const boundary = Math.floor(since / 86_400_000) * 86_400_000;
+  const metric = daySource === 'users' ? 'registrations' : 'uploads';
+  const rows = await db.select({ day: dailyStats.day, n: dailyStats.value }).from(dailyStats)
+    .where(and(eq(dailyStats.metric, metric), gt(dailyStats.day, boundary), gt(dailyStats.value, 0))).orderBy(dailyStats.day);
+  const table = daySource === 'users' ? users : textures;
+  const [partial] = await db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(table)
+    .where(and(gte(table.createdAt, since), lt(table.createdAt, boundary + 86_400_000)));
+  return [...(partial?.n ? [{ day: boundary, n: partial.n }] : []), ...rows]
+    .map(row => ({ day: new Date(row.day).toISOString().slice(0, 10), n: row.n }));
 }
 
 export async function collectStats(db: Db): Promise<AdminStats> {
-  // 分别计数而不是拼成一条大 SELECT：Drizzle 对 "select 常量 from (子查询)"
-  // 这类构造支持有限，而这几条各自命中索引或全表计数，成本可以忽略。
-  const [userRows, playerRows, textureRows, pendingRows, storageRows] = await Promise.all([
-    db.select({ n: sql<number>`count(*)` }).from(users),
-    db.select({ n: sql<number>`count(*)` }).from(players),
-    db.select({ n: sql<number>`count(*)` }).from(textures),
-    db.select({ n: sql<number>`count(*)` }).from(reports).where(sql`${reports.status} = 'pending'`),
-    // size_bytes 是字节，除以 1024 得到 KB。旧库这一列直接存 KB，
-    // 新 schema 改存字节以便精确计算计费。
-    db.select({ n: sql<number>`COALESCE(SUM(${textures.sizeBytes}), 0) / 1024` }).from(textures),
-  ]);
+  const values = Object.fromEntries((await db.select().from(siteStats)).map(row => [row.metric, Number(row.value)]));
 
   const [registrations, uploads] = await Promise.all([
     daily(db, 'users'),
@@ -90,11 +60,11 @@ export async function collectStats(db: Db): Promise<AdminStats> {
   ]);
 
   return {
-    users: userRows[0]?.n ?? 0,
-    players: playerRows[0]?.n ?? 0,
-    textures: textureRows[0]?.n ?? 0,
-    pendingReports: pendingRows[0]?.n ?? 0,
-    storageKb: storageRows[0]?.n ?? 0,
+    users: values.users ?? 0,
+    players: values.players ?? 0,
+    textures: values.textures ?? 0,
+    pendingReports: values.pending_reports ?? 0,
+    storageKb: dialect() === 'mysql' ? (values.texture_bytes ?? 0) / 1024 : Math.floor((values.texture_bytes ?? 0) / 1024),
     registrations,
     uploads,
   };
@@ -122,7 +92,9 @@ export async function listAdminUsers(
 ) {
   const where = searchFilter(filter.search);
 
-  const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(users).where(where);
+  const [countRow] = filter.search
+    ? await db.select({ n: sql<number>`count(*)` }).from(users).where(where)
+    : await db.select({ n: siteStats.value }).from(siteStats).where(eq(siteStats.metric, 'users'));
   const items = await db.select(USER_COLUMNS).from(users).where(where)
     .orderBy(users.id).limit(page.perPage).offset(page.offset);
 
@@ -214,9 +186,14 @@ export async function listAdminTextures(
       : filter.official ? sql`${textures.officialKey} IS NOT NULL` : sql`${textures.officialKey} IS NULL`,
   );
 
-  // 计数与实际查询共用同一套 join：表达式可能引用 users.nickname
-  const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(textures)
-    .leftJoin(users, eq(users.id, textures.uploaderId)).where(where);
+  const countQuery = db.select({ n: sql<number>`count(*)` }).from(textures).$dynamic();
+  if (/\busers\b/.test(filter.search?.sql ?? '')) countQuery.leftJoin(users, eq(users.id, textures.uploaderId));
+  const [countRow] = filter.search ? await countQuery.where(where)
+    : await db.select({ n: sql<number>`COALESCE(SUM(${textureCounts.value}),0)`.mapWith(Number) }).from(textureCounts).where(and(
+      inArray(textureCounts.scope, filter.visibility ? [`p:${filter.visibility}`] : ['p:public', 'p:private']),
+      filter.kind ? eq(textureCounts.kind, filter.kind) : undefined,
+      filter.official === undefined ? undefined : eq(textureCounts.official, filter.official ? 1 : 0),
+    ));
   const items = await db
     .select({
       id: textures.id,
@@ -348,9 +325,10 @@ export async function listAdminPlayers(
 ) {
   const where = searchFilter(filter.search);
 
-  // 计数与实际查询共用同一套 join：表达式可能引用 users.nickname
-  const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(players)
-    .leftJoin(users, eq(users.id, players.userId)).where(where);
+  const countQuery = db.select({ n: sql<number>`count(*)` }).from(players).$dynamic();
+  if (/\busers\b/.test(filter.search?.sql ?? '')) countQuery.leftJoin(users, eq(users.id, players.userId));
+  const [countRow] = filter.search ? await countQuery.where(where)
+    : await db.select({ n: siteStats.value }).from(siteStats).where(eq(siteStats.metric, 'players'));
   const items = await db
     .select({
       id: players.id,

@@ -665,6 +665,7 @@
     "description_too_long": "Description is too long",
     "model_classic": "Steve · Classic",
     "model_slim": "Alex · Slim",
+    "model_auto_hint": "The model (Classic / Slim) is detected from the skin's pixels and cannot be changed here. To switch models, edit the arm pixels and overwrite the texture.",
     "collection_count": "{count} collections",
     "download": "Download texture",
     "raw": "Raw texture",
@@ -690,7 +691,9 @@
     "create": {
       "title": "Create texture",
       "description": "Choose a skin or cape to create in the editor. Add its library details and save when you are done.",
-      "start": "Start creating"
+      "start": "Start creating",
+      "canvas_model": "Canvas template",
+      "canvas_model_hint": "The template only sets the starting arm width; the model is detected from the actual pixels once saved."
     },
     "origin": "Source type",
     "origin_original": "Original",
@@ -1147,9 +1150,12 @@
       "search_submissions_retry": "Retry search submissions",
       "texture_flags_clear": "Clear moderation flag",
       "ai_jobs_cancel": "Cancel AI job",
+      "ai_jobs_quota_reset": "Reset Workers AI pause",
       "ai_jobs_retry": "Retry AI job",
       "ai_jobs_backfill": "Backfill existing textures",
-      "texture_import": "Bulk-import textures"
+      "texture_import": "Bulk-import textures",
+      "texture_sanitize": "Clean up texture metadata",
+      "texture_model_redetect": "Re-detect skin models"
     },
     "anonymous": "Anonymous",
     "role_normal": "Normal",
@@ -1359,6 +1365,8 @@
     "task_clear_flag": "Clear flag",
     "task_cancel": "Cancel",
     "task_backfill": "Backfill existing textures",
+    "ai_daily_paused": "Workers AI daily allocation exhausted. Related tasks are paused until {time}. Change AI settings or reset the pause to retry sooner.",
+    "ai_quota_reset": "Reset pause",
     "task_backfill_empty": "No tasks needed backfilling",
     "task_backfill_confirm": "Create translation and moderation tasks for all textures that do not have one yet? Existing tasks will not be reset.",
     "task_backfill_done": "Tasks created: {detail}",
@@ -1640,6 +1648,8 @@
         "signout": "Sign out",
         "refresh": "Refresh token",
         "join": "Join server",
+        "validate": "Validate token",
+        "has_joined": "Joined server",
         "upload-skin": "Upload skin",
         "upload-cape": "Upload cape"
       },
@@ -1938,7 +1948,7 @@
     "compatibility": "Compatible with CustomSkinLoader and authlib-injector",
     "expression": "SKINS · CAPES · PLAYERS",
     "f_upload_title": "Skins and capes, made yours",
-    "f_upload_body": "Upload, collect and share skins and capes, with classic, slim and high-resolution textures.",
+    "f_upload_body": "Upload, collect and share classic, slim and high-resolution skins and capes.",
     "f_player_title": "One account, many characters",
     "f_player_body": "Manage skins and capes for each player and switch outfits from your wardrobe.",
     "f_api_title": "Connect to your world",
@@ -2145,5 +2155,17 @@
   "mojang_takeover": {
     "title": "Player Owner Changed",
     "content": "Your player {player} has been claimed by a verified Mojang user, and compensation score has been credited to your account."
+  },
+  "sanitize": {
+    "title": "Texture metadata cleanup",
+    "start": "Start cleanup",
+    "total": "Total textures",
+    "pending": "Pending cleanup",
+    "processed": "Processed in this run",
+    "changed": "Files rewritten",
+    "running": "Cleaning up…",
+    "remaining": "{count} textures still pending cleanup",
+    "complete": "All textures have been cleaned up",
+    "hint": "After cleanup, downloaded texture files no longer carry embedded metadata such as author or software tags from the original image."
   }
 }

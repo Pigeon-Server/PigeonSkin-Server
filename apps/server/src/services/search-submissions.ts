@@ -1,6 +1,7 @@
 import { type Bindings } from './../core/env.ts';
 import { importPKCS8, SignJWT } from 'jose';
 import { chunkBind, jsonArrayPairRows, leastOf, randomId32, supportsReturning } from '@pigeon-skin/db';
+import { readSettingsSnapshot } from '../core/settings-snapshot.ts';
 
 type Env = { DB: Bindings['DB']; APP_URL?: string; SEARCH_SUBMISSIONS?: Pick<NonNullable<Bindings['SEARCH_SUBMISSIONS']>, 'sendBatch'> };
 export const searchEngines = ['google', 'bing', 'baidu'] as const;
@@ -9,8 +10,7 @@ export type SearchQueueMessage = { engine: Engine };
 type Job = { engine: Engine; texture_id: number; revision: string; attempts: number };
 
 export async function searchConfiguration(env: Env) {
-  const { results } = await env.DB.prepare("SELECT key, value FROM settings WHERE locale = '' AND (key LIKE 'search_%' OR key = 'site_url')").all<{ key: string; value: string }>();
-  const values = Object.fromEntries(results.map(row => [row.key, row.value]));
+  const values = Object.fromEntries(Object.entries(await readSettingsSnapshot(env)).filter(([key]) => key.startsWith('search_') || key === 'site_url'));
   let root = '';
   try {
     const url = new URL(values.site_url || env.APP_URL || '');

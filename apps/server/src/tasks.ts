@@ -6,10 +6,13 @@
 // 触发会补上。
 
 import { type Bindings } from './core/env.ts';
+import { backgroundAllowed, noteD1Failure, isD1QuotaError, quotaResetAt, syncD1Usage } from './core/usage-budget.ts';
 import { runCleanup } from './services/cleanup.ts';
 import { bumpSitemap } from './services/sitemap-cache.ts';
 import { ConfigurationError, resolveConfiguration } from './services/configuration.ts';
 import { syncOfficialResources } from './services/official-updates.ts';
+import { getSettingBool } from './core/settings-reader.ts';
+import { startTextureSanitize, textureSanitizeStatus } from './services/texture-sanitize.ts';
 import { writeTaskRun } from './services/task-runs.ts';
 import { dispatchSearchSubmissions, processSearchSubmissions, searchEngines, type SearchQueueMessage } from './services/search-submissions.ts';
 import { processBroadcastEmail, type EmailQueueMessage } from './services/email.ts';
@@ -23,6 +26,8 @@ async function recordTaskRun(env: Bindings, name: string, run: () => Promise<unk
     const result = await run();
     detail = typeof result === 'string' ? result : JSON.stringify(result ?? null)?.slice(0, 500) ?? '';
   } catch (e) {
+    await noteD1Failure(env, e);
+    if (isD1QuotaError(e)) return;
     ok = false;
     detail = String(e).slice(0, 500);
   }
@@ -31,6 +36,8 @@ async function recordTaskRun(env: Bindings, name: string, run: () => Promise<unk
 
 /** Cron Triggers / 定时器每小时的全部工作 */
 export async function runScheduledTasks(event: unknown, env: Bindings, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<void> {
+  await syncD1Usage(env);
+  if (!await backgroundAllowed(env)) return;
   void event;
   let configured: Bindings = env;
   let configurationProblem = '';
@@ -47,36 +54,61 @@ export async function runScheduledTasks(event: unknown, env: Bindings, ctx: { wa
   } else {
     ctx.waitUntil(dispatchSearchSubmissions(configured));
   }
-  ctx.waitUntil(recordTaskRun(configured, 'official_resources', () => syncOfficialResources(configured)));
+  if (configured.OFFICIAL_CATALOG_ENABLED !== 'false' && await getSettingBool(configured, 'official_resources_auto_update')) ctx.waitUntil(recordTaskRun(configured, 'official_resources', () => syncOfficialResources(configured)));
+  // 存量材质元数据清理：只处理 sanitized=0 的行，全部清理完就是一次空查（零成本）。
+  // DO 侧自带游标与 alarm 链，这里每小时唤醒一次即可自动续跑。
+  // 绑定的 DO 不可用（例如本地 Node 未装配该 namespace）时跳过，不影响其它任务。
+  ctx.waitUntil(recordTaskRun(configured, 'texture_sanitize', async () => {
+    if (!configured.TEXTURE_SANITIZER) return { pending: 0, skipped: true };
+    const status = await textureSanitizeStatus(configured);
+    if (!status.pending) return { pending: 0 };
+    await startTextureSanitize(configured);
+    return { pending: status.pending };
+  }));
   ctx.waitUntil(recordTaskRun(configured, 'cleanup', async () => {
     const result = await runCleanup(configured);
     console.log('cleanup', JSON.stringify(result));
     // sitemap 兜底重建：写入路径的 bump 若有遗漏，每日强制版本+1
-    await bumpSitemap();
+    await bumpSitemap(env);
     return result;
   }));
 }
 
 /** 队列消息批次的统一消费逻辑（搜索提交 + 广播邮件） */
 export async function processQueueBatch(batch: MessageBatch<SearchQueueMessage | EmailQueueMessage>, env: Bindings): Promise<void> {
+  if (!await backgroundAllowed(env)) {
+    for (const message of batch.messages) message.retry({ delaySeconds: Math.max(60, Math.min(43200, Math.ceil((quotaResetAt() - Date.now()) / 1000))) });
+    return;
+  }
   try { env = await resolveConfiguration(env); }
-  catch {
+  catch (error) {
+    await noteD1Failure(env, error);
     for (const message of batch.messages) message.retry({ delaySeconds: 300 });
     return;
   }
   for (const message of batch.messages) {
     if (!message.body) { message.ack(); continue; }
+    if (env.WORKLOADS) {
+      try {
+        const target = env.WORKLOADS.get(env.WORKLOADS.idFromName(crypto.randomUUID()));
+        const response = await target.fetch('https://workload/queue', { method: 'POST', body: JSON.stringify(message.body) });
+        const result = await response.json<{ retryAfter?: number }>();
+        if (response.ok && !result.retryAfter) message.ack();
+        else message.retry({ delaySeconds: result.retryAfter ?? 300 });
+      } catch { message.retry({ delaySeconds: 300 }); }
+      continue;
+    }
     if ('broadcastId' in message.body) {
       try {
         await processBroadcastEmail(env, message.body);
         message.ack();
-      } catch { message.retry({ delaySeconds: 300 }); }
+      } catch (error) { await noteD1Failure(env, error); message.retry({ delaySeconds: 300 }); }
       continue;
     }
     if (!searchEngines.includes(message.body.engine)) { message.ack(); continue; }
     try {
       await processSearchSubmissions(env, message.body.engine);
       message.ack();
-    } catch { message.retry({ delaySeconds: 300 }); }
+    } catch (error) { await noteD1Failure(env, error); message.retry({ delaySeconds: 300 }); }
   }
 }

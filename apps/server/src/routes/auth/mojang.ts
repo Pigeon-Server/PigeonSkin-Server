@@ -231,7 +231,7 @@ export function registerMojangRoutes(app: Hono<AppEnv>): void {
       .onConflictDoNothing();
     const ownedPlayer = await db.select({ id: players.id, name: players.name }).from(players)
       .where(and(eq(players.userId, user.id), embedFrag(noCaseEq('{COL}', '?'), sql`${players.name}`, profile.name))).limit(1).then(rows => rows[0]);
-    if (ownedPlayer) await db.insert(uuidMap).values({ playerId: ownedPlayer.id, name: ownedPlayer.name, uuid: profile.uuid }).onConflictDoNothing({ target: uuidMap.playerId });
+    if (ownedPlayer) await (await import('../../services/ygg-profiles.ts')).bindOfficialUuid(c.env.DB, { playerId: ownedPlayer.id, name: ownedPlayer.name, uuid: profile.uuid });
 
     // 验证奖励分
     const award = await getSettingInt(c.env, 'mojang_verification_score_award');
@@ -282,7 +282,7 @@ export function registerMojangRoutes(app: Hono<AppEnv>): void {
       if (existing === undefined || existing.name !== current) {
         const ownedPlayer = await db.select({ id: players.id, name: players.name }).from(players)
           .where(and(eq(players.userId, user.id), embedFrag(noCaseEq('{COL}', '?'), sql`${players.name}`, current))).limit(1).then(rows => rows[0]);
-        if (ownedPlayer) await db.insert(uuidMap).values({ playerId: ownedPlayer.id, name: ownedPlayer.name, uuid: v.uuid }).onConflictDoNothing({ target: uuidMap.playerId });
+        if (ownedPlayer) await (await import('../../services/ygg-profiles.ts')).bindOfficialUuid(c.env.DB, { playerId: ownedPlayer.id, name: ownedPlayer.name, uuid: v.uuid });
       }
     }
     // 诚实响应：MC token 未持久化时走 uuid 表回退，名字是旧值 ——

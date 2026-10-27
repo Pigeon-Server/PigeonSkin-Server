@@ -70,6 +70,28 @@ describe('DurableObjectStorageShim', () => {
     // 回滚：job 停留在事务前的值
     expect(await state.storage.get<{ phase: string; retries: number }>('job')).toEqual({ phase: 'catalog', retries: 1 });
   });
+
+  it('不同实例的并发事务和普通写入不落入彼此的事务', async () => {
+    const a = new DurableObjectStateShim(db, 'first');
+    const b = new DurableObjectStateShim(db, 'second');
+    const entered = deferred();
+    const release = deferred();
+    const first = a._runExclusive(() => a.storage.transaction(async storage => {
+      await storage.put('value', 'rollback');
+      entered.resolve();
+      await release.promise;
+      throw new Error('rollback');
+    }));
+    await entered.promise;
+    const second = b._runExclusive(() => b.storage.transaction(async storage => { await storage.put('value', 'committed'); }));
+    const ordinary = b.storage.put('other', 'saved');
+    release.resolve();
+    await expect(first).rejects.toThrow('rollback');
+    await Promise.all([second, ordinary]);
+    expect(await a.storage.get('value')).toBeUndefined();
+    expect(await b.storage.get('value')).toBe('committed');
+    expect(await b.storage.get('other')).toBe('saved');
+  });
 });
 
 describe('实例串行化（input gate 等价）', () => {
@@ -137,6 +159,18 @@ describe('按名单例路由', () => {
 });
 
 describe('blockConcurrencyWhile', () => {
+  it('fetch 内的嵌套阻塞可以完成，同时保持同实例请求串行', async () => {
+    class Nested {
+      private readonly state: DurableObjectStateShim;
+      constructor(state: DurableObjectStateShim) { this.state = state; }
+      fetch() { return this.state.blockConcurrencyWhile(async () => { await this.state.storage.put('finished', true); return new Response('done'); }); }
+    }
+    const namespace = new DurableObjectNamespaceShim(db, Nested as never, {});
+    const target = namespace.get(namespace.idFromName('nested'));
+    const responses = await Promise.all([target.fetch(new Request('https://do/local')), target.fetch(new Request('https://do/local'))]);
+    expect(await Promise.all(responses.map(response => response.text()))).toEqual(['done', 'done']);
+  }, 1000);
+
   it('fn 期间排队的任务被阻塞，fn 结束后按序执行', async () => {
     let release!: () => void;
     const gate = new Promise<void>(r => { release = r; });

@@ -3,11 +3,12 @@
 
 import { type Bindings } from './../../src/core/env.ts';
 import { invalidateSettingsCache } from './../../src/core/settings-reader.ts';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SqliteD1 } from '../../src/node/d1/sqlite.ts';
 import { runMigrationsForNode } from '../../src/node/migrate.ts';
 
 import { enqueueAiJob, processDueJobs, retryAiJob, cancelAiJob, backfillAiJobs } from '../../src/services/ai-jobs.ts';
+import { pauseWorkersAiToday, readWorkersAiQuota, resetWorkersAiQuota } from '../../src/services/ai-quota.ts';
 
 const AI = {
   run: async () => {
@@ -66,11 +67,13 @@ describe('ai jobs queue', () => {
     expect(rows.results!.length).toBe(0);
   });
 
-  it('processDueJobs 执行成功任务置 done', async () => {
+  it('功能关闭时派发保留待办，不扫描任务表', async () => {
     await enqueueAiJob(bindings(d1), 'translate_texture', 1);
+    const queries = vi.spyOn(d1, 'prepare');
     await processDueJobs(bindings(d1));
+    expect(queries.mock.calls.some(([sql]) => sql.includes('ai_jobs'))).toBe(false);
     const row = await d1.prepare('SELECT status FROM ai_jobs').first<{ status: string }>();
-    expect(row!.status).toBe('done');
+    expect(row!.status).toBe('pending');
   });
 
   it('材质不存在的任务直接 failed（永久失败不重试）', async () => {
@@ -135,7 +138,68 @@ describe('ai jobs provider outage', () => {
       .first<{ ok: number; detail: string }>();
   }
 
-  it('渠道配额耗尽：不计失败次数、整队推后，渠道恢复后自动跑完', async () => {
+  it('AI 配置变更解除暂停，普通设置或原值保存保持暂停', async () => {
+    const env = bindings(d1);
+    await pauseWorkersAiToday(env, await readWorkersAiQuota(env));
+    await d1.prepare("INSERT INTO settings(key,locale,value,updated_at) VALUES ('site_name','','Other',0)").run();
+    expect((await readWorkersAiQuota(env)).paused).toBe(true);
+    await d1.prepare("UPDATE settings SET value='true' WHERE key='texture_ai_translation'").run();
+    expect((await readWorkersAiQuota(env)).paused).toBe(true);
+    await d1.prepare("INSERT INTO settings(key,locale,value,updated_at) VALUES ('ai_reasoning','','disabled',0)").run();
+    expect((await readWorkersAiQuota(env)).paused).toBe(false);
+  });
+
+  it('重置后到达的旧请求失败不能重新熔断', async () => {
+    const env = bindings(d1);
+    const before = await readWorkersAiQuota(env);
+    await resetWorkersAiQuota(env);
+    await pauseWorkersAiToday(env, before);
+    expect((await readWorkersAiQuota(env)).paused).toBe(false);
+  });
+
+  it('Clef REST 的4006触发当日熔断，后续派发不查任务表', async () => {
+    await d1.prepare("INSERT INTO settings(key,locale,value,updated_at) VALUES('texture_ai_moderation','','true',0)").run();
+    invalidateSettingsCache();
+    const env = { ...bindings(d1), AI: undefined, AI_MODERATION_DRIVER: 'systemone', CLOUDFLARE_ACCOUNT_ID: 'local', CLOUDFLARE_API_TOKEN: 'local' } as unknown as Bindings;
+    const [id] = await seedTextures(1);
+    await enqueueAiJob(env, 'moderate_texture_name', id!);
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ errors: [{ code: 4006, message: 'Daily allocation exhausted' }] }), { status: 429 }));
+    try {
+      await processDueJobs(env);
+      expect((await readWorkersAiQuota(env)).paused).toBe(true);
+      const prepare = vi.spyOn(d1, 'prepare');
+      await processDueJobs(env);
+      expect(prepare.mock.calls.some(([query]) => /\bai_jobs\b/.test(query))).toBe(false);
+      prepare.mockRestore();
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally { fetch.mockRestore(); }
+  });
+
+  it('UTC 次日自动恢复，重启执行器仍保留当日暂停', async () => {
+    const env = bindings(d1);
+    await pauseWorkersAiToday(env, await readWorkersAiQuota(env));
+    const state = await readWorkersAiQuota(bindings(d1));
+    expect(state.paused).toBe(true);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(state.pausedUntil);
+    try { expect((await readWorkersAiQuota(bindings(d1))).paused).toBe(false); }
+    finally { now.mockRestore(); }
+  });
+
+  it('Workers AI 熔断期间其他提供商仍可领取任务', async () => {
+    const env = { ...bindings(d1), AI_MODERATION_DRIVER: 'openai', OPENAI_API_KEY: 'local-test' } as Bindings;
+    await pauseWorkersAiToday(env, await readWorkersAiQuota(env));
+    const [id] = await seedTextures(1);
+    await enqueueAiJob(env, 'translate_texture', id!);
+    const prepared = vi.spyOn(d1, 'prepare');
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"translations":{"en":{"name":"Name","description":"Desc"}}}' } }] }), { headers: { 'content-type': 'application/json' } }));
+    try {
+      await processDueJobs(env);
+      expect(prepared.mock.calls.some(([query]) => /\bai_jobs\b/.test(query))).toBe(true);
+      expect((await jobRows(id!))?.status).toBe('done');
+    } finally { fetch.mockRestore(); prepared.mockRestore(); }
+  });
+
+  it('Workers AI 当日配额耗尽后不扫描任务表，手动重置后恢复', async () => {
     const [a, b] = await seedTextures(2);
     await enqueueAiJob(bindings(d1), 'translate_texture', a!);
     await enqueueAiJob(bindings(d1), 'translate_texture', b!);
@@ -149,18 +213,24 @@ describe('ai jobs provider outage', () => {
     const rows = await d1.prepare('SELECT status, attempts, next_run_at, last_error FROM ai_jobs').all<{ status: string; attempts: number; next_run_at: number; last_error: string }>();
     expect(rows.results!.every((r) => r.status === 'pending')).toBe(true);
     expect(rows.results!.every((r) => r.attempts === 0)).toBe(true);
-    expect(rows.results!.every((r) => r.next_run_at >= before + 30 * 60_000)).toBe(true);
+    expect(rows.results!.every((r) => r.next_run_at >= before && r.next_run_at <= Date.now())).toBe(true);
+    const quota = await readWorkersAiQuota(bindings(d1));
+    expect(quota.paused).toBe(true);
+    expect(quota.pausedUntil).toBe((Math.floor(before / 86_400_000) + 1) * 86_400_000);
     expect(rows.results![0]!.last_error).toContain('AI 渠道不可用（quota）');
     // 渠道停摆在后台「定时任务」页可见，而不是只写日志
     expect(await aiJobRunRecord()).toMatchObject({ ok: 0 });
     expect((await aiJobRunRecord())!.detail).toContain('quota');
 
     // 队列已整体推后：再触发一次不会继续撞同一个坏渠道
-    await processDueJobs(bindings(d1, down));
+    const prepared = vi.spyOn(d1, 'prepare');
+    for (let tick = 0; tick < 20; tick++) await processDueJobs(bindings(d1, down));
+    expect(prepared.mock.calls.filter(([query]) => /\bai_jobs\b/.test(query))).toHaveLength(0);
+    prepared.mockRestore();
     expect(calls).toBe(2);
 
     // 渠道恢复（配额重置 / 换驱动 / 补凭据）：到期后自动跑完，不需要管理员重跑
-    await d1.prepare('UPDATE ai_jobs SET next_run_at = 0').run();
+    await resetWorkersAiQuota(bindings(d1));
     await processDueJobs(bindings(d1, TRANSLATING_AI));
     const done = await d1.prepare('SELECT status FROM ai_jobs').all<{ status: string }>();
     expect(done.results!.every((r) => r.status === 'done')).toBe(true);
@@ -202,7 +272,8 @@ describe('ai jobs provider outage', () => {
 
     await processDueJobs(bindings(d1, downWith(quotaError)));
 
-    expect((await jobRows(due!))!.next_run_at).toBeGreaterThan(Date.now());
+    expect((await readWorkersAiQuota(bindings(d1))).paused).toBe(true);
+    expect((await jobRows(due!))!.next_run_at).toBeLessThanOrEqual(Date.now());
     expect(await jobRows(future!)).toMatchObject({ status: 'pending', next_run_at: scheduledAt });
     expect(await jobRows(done!)).toMatchObject({ status: 'done', next_run_at: 0 });
   });

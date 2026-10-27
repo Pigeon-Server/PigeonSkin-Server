@@ -156,24 +156,41 @@ async function profileOf(name: string, etag?: string): Promise<{ status: number;
 beforeAll(async () => { await runMigrations(); });
 
 describe('材质改动后的衍生图失效', () => {
-  it('改模型后删除预览产物，并按新模型重建', async () => {
+  it('覆盖保存换掉 slim 布局后删除旧预览产物，并让新模型生效', async () => {
     const u = await registerUser();
     const cookie = await login(u.email);
-    const { id, hash } = await uploadTexture(cookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'default' });
+    const { id, hash } = await uploadTexture(cookie, makePng({ width: 64, height: 64, slim: true }), { kind: 'skin' });
 
-    const before = await pngBytes(await SELF.fetch(`https://x/preview/${hash}?kind=skin&model=default`));
+    const before = await pngBytes(await SELF.fetch(`https://x/preview/${hash}?kind=skin&model=slim`));
     expect(await env.BUCKET.head(previewObjectKey(hash))).not.toBeNull();
 
-    await patchTexture(cookie, id, { model: 'slim' });
+    // 覆盖成经典布局的新图：哈希随之变，模型被重新判定为 default
+    const nextHash = await replaceContent(cookie, id, makePng({ width: 64, height: 64, seed: 3 }));
 
-    // 产物必须被删掉：留着就永远是旧模型那一张
+    // 旧哈希不再被引用：预览产物必须清掉
     expect(await env.BUCKET.head(previewObjectKey(hash))).toBeNull();
-
-    const after = await SELF.fetch(`https://x/preview/${hash}?kind=skin&model=slim`);
+    const after = await SELF.fetch(`https://x/preview/${nextHash}?kind=skin&model=default`);
     const afterBytes = await pngBytes(after);
     expect(after.headers.get('cache-control')).toBe(DERIVATIVE_CACHE_CONTROL);
     expect(Buffer.from(afterBytes).equals(Buffer.from(before))).toBe(false);
-    expect(await env.BUCKET.head(previewObjectKey(hash))).not.toBeNull();
+    expect(await env.BUCKET.head(previewObjectKey(nextHash))).not.toBeNull();
+    const detail = await authedFetch(cookie, `https://x/api/v1/textures/${id}`);
+    expect(await detail.json<{ model: string }>()).toMatchObject({ model: 'default' });
+  });
+
+  it('覆盖保存同一张图时也能纠正存量错标的模型（同 hash 早退分支自愈）', async () => {
+    const u = await registerUser();
+    const cookie = await login(u.email);
+    const slimBytes = makePng({ width: 64, height: 64, slim: true });
+    const { id, hash } = await uploadTexture(cookie, slimBytes, { kind: 'skin' });
+    // 模拟存量错标：把已经入库的 slim 行改成 default
+    await env.DB.prepare('UPDATE textures SET model = ? WHERE id = ?').bind('default', id).run();
+
+    // 用户覆盖保存同一张图（净化后 hash 不变，走早退分支）
+    const sameHash = await replaceContent(cookie, id, slimBytes);
+    expect(sameHash).toBe(hash);
+    const detail = await authedFetch(cookie, `https://x/api/v1/textures/${id}`);
+    expect(await detail.json<{ model: string }>()).toMatchObject({ model: 'slim' });
   });
 
   it('改类型（皮肤→披风）后删除预览与头像产物', async () => {
@@ -197,10 +214,11 @@ describe('材质改动后的衍生图失效', () => {
     await pngBytes(capePreview);
   });
 
-  it('预览 ETag 体现 kind/model，改模型后重验证拿到新图', async () => {
+  it('预览 ETag 体现 kind/model，类型切换后旧签名重验证拿到新图', async () => {
     const u = await registerUser();
     const cookie = await login(u.email);
-    const { id, hash } = await uploadTexture(cookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'default' });
+    // 64×32 同时是合法皮肤与合法披风，可以在两条类型之间切换
+    const { id, hash } = await uploadTexture(cookie, makePng({ width: 64, height: 32 }), { kind: 'skin' });
 
     const first = await SELF.fetch(`https://x/preview/${hash}?kind=skin&model=default`);
     const firstEtag = first.headers.get('etag')!;
@@ -208,7 +226,8 @@ describe('材质改动后的衍生图失效', () => {
     const revalidated = await SELF.fetch(`https://x/preview/${hash}?kind=skin&model=default`, { headers: { 'if-none-match': firstEtag } });
     expect(revalidated.status).toBe(304);
 
-    await patchTexture(cookie, id, { model: 'slim' });
+    // 改成披风：渲染身份从 skin:default 变为 cape:default
+    await patchTexture(cookie, id, { kind: 'cape' });
 
     const afterPatch = await SELF.fetch(`https://x/preview/${hash}?kind=skin&model=default`, { headers: { 'if-none-match': firstEtag } });
     expect(afterPatch.status).toBe(200);
@@ -335,7 +354,7 @@ describe('按可变身份寻址的协议出口', () => {
   it('/cape/{player}.png 同样是重验证，换披风后带旧 ETag 能拿到新披风', async () => {
     const u = await registerUser();
     const cookie = await login(u.email);
-    const first = await uploadTexture(cookie, makePng({ width: 128, height: 64 }), { kind: 'cape' });
+    const first = await uploadTexture(cookie, makePng({ width: 64, height: 32, seed: 1 }), { kind: 'cape' });
     await equipCape(cookie, first.id);
 
     const before = await SELF.fetch(`https://x/cape/${u.playerName}.png`);
@@ -364,22 +383,23 @@ describe('按可变身份寻址的协议出口', () => {
     await expectCacheCleared(afterReplace);
 
     // 删除
-    const deleted = await uploadTexture(cookie, makePng({ width: 128, height: 128 }), { kind: 'skin', model: 'default' });
+    const deleted = await uploadTexture(cookie, makePng({ width: 64, height: 32, seed: 1 }), { kind: 'skin', model: 'default' });
     await equipSkin(cookie, deleted.id);
     const afterDelete = await plantCacheEntries(u.playerName);
     expect((await authedFetch(cookie, `https://x/api/v1/textures/${deleted.id}`, { method: 'DELETE' })).status).toBe(204);
     await expectCacheCleared(afterDelete);
   });
 
-  it('改类型/模型后，穿戴该材质的角色协议出口缓存也会被清', async () => {
+  it('改类型后，穿戴该材质的角色协议出口缓存也会被清', async () => {
     const u = await registerUser();
     const cookie = await login(u.email);
-    const { id } = await uploadTexture(cookie, makePng({ width: 64, height: 64 }), { kind: 'skin', model: 'default' });
+    // 64×32 可在皮肤与披风之间切换，用来验证类型变更的失效路径
+    const { id } = await uploadTexture(cookie, makePng({ width: 64, height: 32 }), { kind: 'skin' });
     await equipSkin(cookie, id);
     const planted = await plantCacheEntries(u.playerName);
 
-    // 类型/模型变了会连带改角色资料的 skins 键，批内推进指纹、这里清边缘缓存
-    await patchTexture(cookie, id, { model: 'slim' });
+    // 类型变了会连带改角色资料的 skins 键，批内推进指纹、这里清边缘缓存
+    await patchTexture(cookie, id, { kind: 'cape' });
 
     await expectCacheCleared(planted);
   });

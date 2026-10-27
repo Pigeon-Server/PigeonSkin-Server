@@ -116,7 +116,7 @@ export async function createPlayer(
   if (!insertedId) throw fail.conflict('player.name_taken');
   const actual = await env.DB.prepare('SELECT score_paid FROM players WHERE id=?').bind(insertedId).first<{ score_paid: number }>();
   const scoreSpent = Number(actual?.score_paid || 0);
-  await bumpSitemap();
+  await bumpSitemap(env);
   return { id: insertedId, scoreSpent };
 }
 
@@ -141,7 +141,7 @@ export async function renamePlayer(
     const access = await import('./texture-access.ts');
     await Promise.all([access.purgePlayerProfiles(env, player.name), access.purgePlayerProfiles(env, name)]);
   }
-  await bumpSitemap();
+  await bumpSitemap(env);
 }
 
 // ── 删除 ─────────────────────────────────────────────────────────────────────
@@ -154,6 +154,10 @@ export async function deletePlayer(
 ): Promise<void> {
   const player = await getOwnedPlayer(env, actor, id);
 
+  // uuid 行随外键级联消失，删除前先取出、删除成功后再归档：
+  // 同名重建可复用旧 UUID（启动器 profileID 稳定，对齐上游按名字常驻的语义）
+  const profiles = await import('./ygg-profiles.ts');
+  const archived = await profiles.playerUuidEntry(env.DB, player.id);
   const results = await env.DB.batch([
     env.DB.prepare('DELETE FROM players WHERE id=? AND user_id=? AND updated_at=? AND score_paid=? RETURNING id')
       .bind(player.id, player.userId, player.updatedAt, player.scorePaid),
@@ -161,9 +165,10 @@ export async function deletePlayer(
       .bind(refund.enabled ? player.scorePaid : 0, player.userId),
   ]);
   if (!results[0]?.meta.changes) throw fail.conflict('common.invalid_request');
+  if (archived) await profiles.insertUuidArchive(env.DB, [archived]);
   await (await import('./texture-access.ts')).purgePlayerProfiles(env, player.name);
   if (env.BUCKET) await (await import('./texture-access.ts')).purgeUnsharedPrivateHashes({ ...env, BUCKET: env.BUCKET }, [player.skinTextureId, player.capeTextureId]);
-  await bumpSitemap();
+  await bumpSitemap(env);
 }
 
 // ── 指派纹理 ─────────────────────────────────────────────────────────────────

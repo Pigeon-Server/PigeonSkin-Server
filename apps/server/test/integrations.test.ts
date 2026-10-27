@@ -205,17 +205,39 @@ describe('built-in feature UI contracts', () => {
     expect((await request('/api/v1/admin/yggdrasil/logs', user.cookie)).status).toBe(403);
     const logged = await (
       await request('/api/v1/admin/yggdrasil/logs?action=authenticate', admin.cookie)
-    ).json<{ items: Array<{ action: string; body: string }> }>();
+    ).json<{ items: Array<{ action: string; body: string; userId: number | null; playerId: number | null }> }>();
+    // 照上游语义：成功才记录；单角色自动选定，日志带上角色 ID
     expect(logged.items).toContainEqual(
-      expect.objectContaining({ action: 'authenticate', body: 'lo***@example.com', userId: user.id }),
+      expect.objectContaining({ action: 'authenticate', body: 'lo***@example.com', userId: user.id, playerId: expect.any(Number) }),
     );
     expect(
       (
         await request('/api/v1/admin/settings', admin.cookie, 'PATCH', {
-          settings: [{ key: 'ygg_rate_limit', value: 0 }],
+          settings: [{ key: 'ygg_rate_limit', value: '0' }],
         })
       ).status,
     ).toBe(200);
+    // 密码错误的尝试不写「登录」日志（上游只在认证成功后记录）
+    const before = (await (
+      await request('/api/v1/admin/yggdrasil/logs?action=authenticate', admin.cookie)
+    ).json<{ items: unknown[] }>().then(r => r.items)).length;
+    expect(
+      (await request('/api/yggdrasil/authserver/authenticate', '', 'POST', { ...input, password: 'wrong-password-x' })).status,
+    ).toBe(403);
+    const after = await (
+      await request('/api/v1/admin/yggdrasil/logs?action=authenticate', admin.cookie)
+    ).json<{ items: unknown[] }>();
+    expect(after.items).toHaveLength(before);
+    // 登出成功才记录且登录标识脱敏
+    expect(
+      (await request('/api/yggdrasil/authserver/signout', '', 'POST', input)).status,
+    ).toBe(204);
+    const signedOut = await (
+      await request('/api/v1/admin/yggdrasil/logs?action=signout', admin.cookie)
+    ).json<{ items: Array<{ action: string; body: string; userId: number | null }> }>();
+    expect(signedOut.items).toContainEqual(
+      expect.objectContaining({ action: 'signout', body: 'lo***@example.com', userId: user.id }),
+    );
     expect(
       (await request('/api/yggdrasil/authserver/authenticate', '', 'POST', input)).status,
     ).toBe(200);

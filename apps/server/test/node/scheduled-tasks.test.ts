@@ -93,7 +93,7 @@ describe('runScheduledTasks 配置非法', () => {
     expect(configuration!.detail).toContain('APP_URL 必须是 https');
     // 只依赖 DB/R2/DO 的任务不因为一个坏地址停摆
     expect(runs.find((run) => run.name === 'cleanup')).toMatchObject({ ok: 1 });
-    expect(runs.find((run) => run.name === 'official_resources')).toMatchObject({ ok: 1 });
+    expect(runs.find((run) => run.name === 'official_resources')).toBeUndefined();
     // 搜索提交要拼站点地址：真的没被调用，不拿错误地址去污染搜索引擎索引
     expect(dispatchSpy).not.toHaveBeenCalled();
     expect(warn.mock.calls.some((call) => String(call[0]).includes('部署配置非法'))).toBe(true);
@@ -107,7 +107,7 @@ describe('runScheduledTasks 配置非法', () => {
     await settle();
 
     const runs = await taskRuns();
-    expect(runs.map((run) => run.name).sort()).toEqual(['cleanup', 'official_resources']);
+    expect(runs.map((run) => run.name).sort()).toEqual(['cleanup', 'texture_sanitize']);
     expect(runs.every((run) => run.ok === 1)).toBe(true);
     expect(dispatchSpy).toHaveBeenCalledTimes(1);
   });
@@ -124,8 +124,7 @@ describe('task_runs 写入健壮性', () => {
 
     const runs = await taskRuns();
     expect(runs.find((run) => run.name === 'cleanup')).toMatchObject({ ok: 1 });
-    expect(runs.find((run) => run.name === 'official_resources')).toMatchObject({ ok: 1 });
-    // 两个任务各写一次 + 被重试的那一次
+    expect(runs.find((run) => run.name === 'official_resources')).toBeUndefined();
     expect(counter.inserts).toBe(3);
     // 运行记录没丢也没有报错（sitemap bump 在 Node 测试环境无 caches 全局，与本次改动无关）
     expect(error.mock.calls.filter((call) => String(call[0]).includes('task_runs'))).toEqual([]);
@@ -139,7 +138,6 @@ describe('task_runs 写入健壮性', () => {
     await runScheduledTasks(undefined, env({ DB: db }), ctx);
     await settle();
 
-    // 两个任务各写一次，失败的那个不重试 → 只有一行记录
     expect(counter.inserts).toBe(2);
     expect((await taskRuns()).length).toBe(1);
     expect(error.mock.calls.some((call) => String(call[0]).includes('task_runs 记录失败'))).toBe(true);

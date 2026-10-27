@@ -55,6 +55,30 @@ async function pigeonFetch(path: string, key: string | null, init: RequestInit =
   });
 }
 
+/** 64×64 RGBA 皮肤;slim=true 时把右臂 unused 区挖成透明(模型判定特征)。
+ *  workerd 里没有 node:zlib,手写 stored-block zlib 流 + Adler-32 尾。 */
+function makeSkinPng(slim: boolean): Uint8Array<ArrayBuffer> {
+  const width = 64, height = 64;
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (b: Uint8Array) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 0xff]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type: string, data: Uint8Array) => { const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, data.length); const body = new Uint8Array(4 + data.length); body.set(new TextEncoder().encode(type)); body.set(data, 4); const crcB = new Uint8Array(4); new DataView(crcB.buffer).setUint32(0, crc(body)); return new Uint8Array([...len, ...body, ...crcB]); };
+  const ihdr = new Uint8Array(13); new DataView(ihdr.buffer).setUint32(0, width); new DataView(ihdr.buffer).setUint32(4, height); ihdr[8] = 8; ihdr[9] = 6;
+  const raw = new Uint8Array(height * (1 + width * 4));
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) raw[y * (1 + width * 4) + 1 + x * 4 + 3] = 255;
+  if (slim) {
+    for (const area of [{ x: 50, y: 16, w: 2, h: 4 }, { x: 54, y: 20, w: 2, h: 12 }]) {
+      for (let y = area.y; y < area.y + area.h; y++) for (let x = area.x; x < area.x + area.w; x++) raw[y * (1 + width * 4) + 1 + x * 4 + 3] = 0;
+    }
+  }
+  const store: number[] = [0x78, 0x01];
+  for (let i = 0; i < raw.length; i += 65535) { const slice = raw.subarray(i, i + 65535); store.push(i + 65535 < raw.length ? 0 : 1, slice.length & 255, slice.length >> 8, (~slice.length) & 255, ((~slice.length) >> 8) & 255, ...slice); }
+  let s1 = 1, s2 = 0;
+  for (const b of raw) { s1 = (s1 + b) % 65521; s2 = (s2 + s1) % 65521; }
+  const adler = ((s2 << 16) | s1) >>> 0;
+  store.push((adler >>> 24) & 255, (adler >>> 16) & 255, (adler >>> 8) & 255, adler & 255);
+  return new Uint8Array([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', new Uint8Array(store)), chunk('IEND', new Uint8Array(0))].flatMap(c => [...c]));
+}
+
 beforeAll(async () => {
   await runMigrations();
   await markVerified('admin@example.test');
@@ -154,6 +178,49 @@ describe('pigeon admin api — 纹理治理', () => {
 
     const deleted = await pigeonFetch(`/api/v1/pigeon/admin/textures/${textureId}`, key, { method: 'DELETE' });
     expect(deleted.status).toBe(204);
+  });
+
+  it('redetect-skin-model 按像素纠正存量错标，并跳过缺失对象', async () => {
+    const key = await mintKey(['admin.textures.write']);
+    const { sanitizeTexture, sha256Hex } = await import('@pigeon-skin/minecraft');
+    // 两张像素可辨的皮肤:slim 布局(错标 default) 与经典布局(本就正确)
+    const slimPng = makeSkinPng(true);
+    const classicPng = makeSkinPng(false);
+    const now = Date.now();
+    const ids: number[] = [];
+    for (const [bytes, model] of [[slimPng, 'default'], [classicPng, 'default']] as const) {
+      const sanitized = await sanitizeTexture(bytes, { kind: 'skin' });
+      if (!sanitized.ok) throw new Error(sanitized.reason);
+      const hash = await sha256Hex(sanitized.bytes);
+      await env.BUCKET.put(`textures/${hash}.png`, sanitized.bytes);
+      const insert = await env.DB.prepare(
+        `INSERT INTO textures (hash, kind, model, name, origin, size_bytes, visibility, width, height, likes, created_at, updated_at)
+         VALUES (?, 'skin', ?, 'redetect-test', 'original', ?, 'public', 64, 64, 0, ?, ?)`,
+      ).bind(hash, model, sanitized.bytes.length, now, now).run();
+      ids.push((insert.meta as unknown as { last_row_id: number }).last_row_id as number);
+    }
+    // 第三行:对象缺失,应计入 skipped 而不是 500
+    const missing = await env.DB.prepare(
+      `INSERT INTO textures (hash, kind, model, name, origin, size_bytes, visibility, width, height, likes, created_at, updated_at)
+       VALUES (?, 'skin', 'default', 'redetect-missing', 'original', 100, 'public', 64, 64, 0, ?, ?)`,
+    ).bind('b'.repeat(64), now, now).run();
+    const missingId = (missing.meta as unknown as { last_row_id: number }).last_row_id as number;
+
+    const response = await pigeonFetch('/api/v1/pigeon/admin/textures/redetect-skin-model', key, {
+      method: 'POST', body: JSON.stringify({ lastId: 0, limit: 200 }),
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json<{ processed: number; changed: number; skipped: number; nextCursor: number | null }>();
+    expect(body.processed).toBeGreaterThanOrEqual(3);
+    expect(body.changed).toBe(1);
+    expect(body.skipped).toBe(1);
+
+    const slimModel = await env.DB.prepare('SELECT model FROM textures WHERE id = ?').bind(ids[0]!).first<{ model: string }>();
+    expect(slimModel?.model).toBe('slim');
+    const classicModel = await env.DB.prepare('SELECT model FROM textures WHERE id = ?').bind(ids[1]!).first<{ model: string }>();
+    expect(classicModel?.model).toBe('default');
+    const untouched = await env.DB.prepare('SELECT model FROM textures WHERE id = ?').bind(missingId).first<{ model: string }>();
+    expect(untouched?.model).toBe('default');
   });
 });
 

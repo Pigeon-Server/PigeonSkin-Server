@@ -3,7 +3,7 @@ import { invalidateSettingsCache } from '../../core/settings-reader.ts';
 import { type AppEnv } from '../../core/user.ts';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { hashPassword } from '@pigeon-skin/auth';
+import { computePasswordHash } from '../../services/compute.ts';
 import { dayOfMs } from '@pigeon-skin/db';
 
 import { audit } from '../../services/audit.ts';
@@ -176,7 +176,7 @@ siteManagementRoutes.post('/admin/update', async (c) => {
 });
 
 siteManagementRoutes.get('/setup', async (c) => {
-  const row = await c.env.DB.prepare('SELECT count(*) AS n FROM users').first<{ n: number }>();
+  const row = await c.env.DB.prepare('SELECT 1 AS n FROM users LIMIT 1').first<{ n: number }>();
   return c.json({ locked: !!row?.n, available: !!c.env.SETUP_TOKEN });
 });
 
@@ -195,7 +195,7 @@ siteManagementRoutes.post('/setup', async (c) => {
   for (let i = 0; i < expected.length; i++) mismatch |= provided[i]! ^ expected[i]!;
   if (mismatch !== 0) throw fail.forbidden();
   const nonce = crypto.randomUUID();
-  const password = await hashPassword(body.password);
+  const password = await computePasswordHash(c.env, body.password);
   const now = Date.now();
   const result = await c.env.DB.batch([
     c.env.DB.prepare(

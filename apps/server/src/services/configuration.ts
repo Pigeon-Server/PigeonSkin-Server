@@ -3,6 +3,7 @@
 import { currentCacheGeneration } from './../core/cache-generation.ts';
 import { type Bindings } from './../core/env.ts';
 import { AppError } from './../core/framework.ts';
+import { readSettingsSnapshot } from '../core/settings-snapshot.ts';
 export const CONFIGURATION = {
   site_url: { binding: 'APP_URL', fallback: '' },
   mail_from: { binding: 'MAIL_FROM', fallback: 'noreply@example.com' },
@@ -68,32 +69,22 @@ export type ConfigurationSourceEnv = Pick<Bindings, 'DB'> & {
 // 与 lib 的 settingsCache 同一策略。代数经 cache-generation.ts 共享：
 // lib 的 invalidateSettingsCache 同步递增它，配置缓存无需动态导入即可同步失效。
 const configurationCache = new WeakMap<object, { stored: Record<string, string>; generation: number; expiresAt: number }>();
-const configurationInflight = new WeakMap<object, Promise<Record<string, string>>>();
 
 export async function configurationValues(env: ConfigurationSourceEnv) {
   const db = env.DB as unknown as object;
   const now = Date.now();
   const cached = configurationCache.get(db);
   if (cached && cached.generation === currentCacheGeneration() && cached.expiresAt > now) return finalizeConfiguration(env, cached.stored);
-  const inflight = configurationInflight.get(db);
-  if (inflight) return finalizeConfiguration(env, await inflight);
 
   const load = (async () => {
     // 快照代数而非写库时再取：查询飞行期间若发生失效，旧快照带着旧代数
     // 入缓存，下个请求会立即判过期重新查库，不会把旧配置当成新值缓存 60 秒。
     const generation = currentCacheGeneration();
-    const keys = Object.keys(CONFIGURATION);
-    const result = await env.DB.prepare(`SELECT key, value FROM settings WHERE locale = '' AND key IN (${keys.map(() => '?').join(',')})`).bind(...keys).all<{ key: string; value: string }>();
-    const stored = Object.fromEntries(result.results.map(row => [row.key, row.value]));
+    const stored = await readSettingsSnapshot(env);
     configurationCache.set(db, { stored, generation, expiresAt: Date.now() + 60_000 });
     return stored;
   })();
-  configurationInflight.set(db, load);
-  try {
-    return finalizeConfiguration(env, await load);
-  } finally {
-    configurationInflight.delete(db);
-  }
+  return finalizeConfiguration(env, await load);
 }
 
 function finalizeConfiguration(env: ConfigurationSourceEnv, stored: Record<string, string>) {

@@ -15,6 +15,7 @@
 
 /** 已消费令牌的保留时长（毫秒）。 */
 import { type Bindings } from './../core/env.ts';
+import { deleteBatchSql } from '@pigeon-skin/db';
 export const CONSUMED_TOKEN_RETENTION_MS = 24 * 60 * 60 * 1000;
 /** auth_attempts 的保留时长（毫秒）。失败计数窗口 15 分钟，7 天足够排查。 */
 export const ATTEMPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -34,42 +35,33 @@ export async function runCleanup(env: Bindings): Promise<CleanupResult> {
   const attemptCutoff = now - ATTEMPT_RETENTION_MS;
   const yggLogCutoff = now - 30 * 24 * 60 * 60 * 1000;
 
-  const results = await env.DB.batch([
-    // 绝对过期、空闲过期、已撤销 —— 任一条件成立即无查询价值
-    env.DB.prepare(
-      `DELETE FROM sessions
-       WHERE absolute_expires_at < ? OR expires_at < ? OR revoked_at IS NOT NULL`,
-    ).bind(now, now),
-    env.DB.prepare(
-      `DELETE FROM verification_tokens WHERE expires_at < ? OR consumed_at < ?`,
-    ).bind(now, consumedCutoff),
-    env.DB.prepare(
-      `DELETE FROM password_reset_tokens WHERE expires_at < ? OR consumed_at < ?`,
-    ).bind(now, consumedCutoff),
-    env.DB.prepare(`DELETE FROM auth_attempts WHERE created_at < ?`)
-      .bind(attemptCutoff),
-    env.DB.prepare(`DELETE FROM ygg_tokens WHERE refresh_deadline < ?`)
-      .bind(now),
-    env.DB.prepare(`DELETE FROM ygg_log WHERE created_at < ?`)
-      .bind(yggLogCutoff),
-    env.DB.prepare('DELETE FROM ygg_sessions WHERE expires_at < ?').bind(now),
-    env.DB.prepare('DELETE FROM connect_interactions WHERE expires_at < ?').bind(now),
-    env.DB.prepare('DELETE FROM connect_codes WHERE expires_at < ?').bind(now),
-    env.DB.prepare('DELETE FROM connect_devices WHERE expires_at < ?').bind(now),
-    env.DB.prepare('DELETE FROM connect_grants WHERE expires_at < ?').bind(now),
-    env.DB.prepare('DELETE FROM oauth_login_states WHERE expires_at < ?').bind(now),
-    env.DB.prepare('DELETE FROM connect_responses WHERE expires_at < ?').bind(now),
-    env.DB.prepare('DELETE FROM connect_refresh WHERE expires_at < ?').bind(now),
-    env.DB.prepare('DELETE FROM security_challenges WHERE expires_at < ?').bind(now),
-    env.DB.prepare('DELETE FROM security_reauth WHERE expires_at < ?').bind(now),
-  ]);
-
-  return {
-    sessions: results[0]?.meta.changes ?? 0,
-    verificationTokens: results[1]?.meta.changes ?? 0,
-    passwordResetTokens: results[2]?.meta.changes ?? 0,
-    authAttempts: results[3]?.meta.changes ?? 0,
-    yggTokens: results[4]?.meta.changes ?? 0,
-    yggLog: results[5]?.meta.changes ?? 0,
-  };
+  const totals: CleanupResult = { sessions: 0, verificationTokens: 0, passwordResetTokens: 0, authAttempts: 0, yggTokens: 0, yggLog: 0 };
+  const work: Array<{ table: string; key?: string | string[]; column: string; predicate?: string; value?: number; result?: keyof CleanupResult }> = [
+    { table: 'sessions', column: 'absolute_expires_at', value: now, result: 'sessions' },
+    { table: 'sessions', column: 'expires_at', value: now, result: 'sessions' },
+    { table: 'sessions', column: 'revoked_at', predicate: 'revoked_at IS NOT NULL', result: 'sessions' },
+    { table: 'verification_tokens', column: 'expires_at', value: now, result: 'verificationTokens' },
+    { table: 'verification_tokens', column: 'consumed_at', value: consumedCutoff, result: 'verificationTokens' },
+    { table: 'password_reset_tokens', column: 'expires_at', value: now, result: 'passwordResetTokens' },
+    { table: 'password_reset_tokens', column: 'consumed_at', value: consumedCutoff, result: 'passwordResetTokens' },
+    { table: 'auth_attempts', column: 'created_at', value: attemptCutoff, result: 'authAttempts' },
+    { table: 'ygg_tokens', column: 'refresh_deadline', value: now, result: 'yggTokens' },
+    { table: 'ygg_log', column: 'created_at', value: yggLogCutoff, result: 'yggLog' },
+    { table: 'ygg_sessions', key: ['server_hash', 'player_id'], column: 'expires_at', value: now },
+    ...['connect_interactions', 'connect_codes', 'connect_devices', 'connect_grants', 'oauth_login_states', 'connect_responses', 'connect_refresh', 'security_challenges'].map(table => ({ table, column: 'expires_at', value: now })),
+    { table: 'security_reauth', key: 'session_id', column: 'expires_at', value: now },
+  ];
+  let batches = 0;
+  const start = Math.floor(now / 3_600_000) % work.length;
+  const pending = [...work.slice(start), ...work.slice(0, start)];
+  while (pending.length && batches < 10) {
+      const item = pending.shift()!;
+      const statement = env.DB.prepare(deleteBatchSql(item.table, item.key ?? 'id', item.predicate ?? `${item.column}<?`, item.column));
+      const result = await (item.value === undefined ? statement : statement.bind(item.value)).run();
+      const changes = result.meta.changes ?? 0;
+      if (item.result) totals[item.result] += changes;
+      if (changes) batches++;
+      if (changes === 200) pending.push(item);
+  }
+  return totals;
 }
