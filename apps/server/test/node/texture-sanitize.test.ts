@@ -37,7 +37,25 @@ async function createSchema(db: { exec(q: string): Promise<unknown> }) {
       updated_at INTEGER NOT NULL,
       sanitized INTEGER NOT NULL DEFAULT 0
     );
+    -- 净化改 hash 时要推进穿戴者指纹（playersWearingTexture 会查这两列）
+    CREATE TABLE players (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      skin_texture_id INTEGER,
+      cape_texture_id INTEGER,
+      updated_at INTEGER NOT NULL DEFAULT 0
+    );
   `);
+}
+
+/** 把某条材质装到某角色身上，返回角色名 */
+async function equip(playerName: string, textureId: number): Promise<void> {
+  await d1.prepare('INSERT INTO players (name, skin_texture_id, updated_at) VALUES (?, ?, 0)').bind(playerName, textureId).run();
+}
+
+async function playerUpdatedAt(playerName: string): Promise<number> {
+  return (await d1.prepare('SELECT updated_at FROM players WHERE name = ?').bind(playerName).first<{ updated_at: number }>())!.updated_at;
 }
 
 async function seed(hash: string, name: string, sanitized = 0): Promise<number> {
@@ -83,9 +101,13 @@ describe('存量材质净化', () => {
     const oldHash = await sha256Hex(dirty);
     await bucket.put(`textures/${oldHash}.png`, dirty);
     const id = await seed(oldHash, 'dirty-skin');
+    // 角色穿着这张材质：改 hash 后必须推进它的 updated_at，否则协议出口
+    // 的 ETag 不变，客户端会一直 304 并请求已删除的旧 hash。
+    await equip('Wearer', id);
 
     const job = await drain();
     expect(job.changed).toBe(1);
+    expect(await playerUpdatedAt('Wearer')).toBeGreaterThan(0);
 
     const row = await textureRow(id);
     expect(row.sanitized).toBe(1);
@@ -98,8 +120,7 @@ describe('存量材质净化', () => {
     expect(await bucket.get(`textures/${oldHash}.png`)).toBeNull();
   });
 
-  it('keeps an already-clean texture byte-identical and only marks it', async () => {
-    const clean = await encodePng(2, 2, new Uint8Array(2 * 2 * 4).fill(90)) as Uint8Array<ArrayBuffer>;
+  it('keeps an already-clean texture byte-identical and only marks it', async () => {    const clean = await encodePng(2, 2, new Uint8Array(2 * 2 * 4).fill(90)) as Uint8Array<ArrayBuffer>;
     const hash = await sha256Hex(clean);
     await bucket.put(`textures/${hash}.png`, clean);
     const id = await seed(hash, 'clean-skin');

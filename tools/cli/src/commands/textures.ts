@@ -234,8 +234,8 @@ async function texturesImport(env: TargetEnv, flags: ReadonlyMap<string, string 
     r2PutBytes(env, textureObjectKey(item.hash), item.bytes);
     uploaded++;
     statements.push(
-      `INSERT OR IGNORE INTO textures (hash, kind, model, name, uploader_id, origin, size_bytes, visibility, width, height, likes, created_at, updated_at) `
-      + `VALUES (${sqlText(item.hash)}, ${sqlText(item.kind)}, ${item.model === null ? 'NULL' : sqlText(item.model)}, ${sqlText(item.name)}, ${sqlIntOrNull(uploaderId)}, ${sqlText(item.origin)}, ${item.bytes.length}, ${sqlText(item.visibility)}, ${item.width}, ${item.height}, 0, ${ts}, ${ts})`,
+      `INSERT OR IGNORE INTO textures (hash, kind, model, name, uploader_id, origin, size_bytes, visibility, width, height, likes, created_at, updated_at, sanitized) `
+      + `VALUES (${sqlText(item.hash)}, ${sqlText(item.kind)}, ${item.model === null ? 'NULL' : sqlText(item.model)}, ${sqlText(item.name)}, ${sqlIntOrNull(uploaderId)}, ${sqlText(item.origin)}, ${item.bytes.length}, ${sqlText(item.visibility)}, ${item.width}, ${item.height}, 0, ${ts}, ${ts}, 1)`,
     );
     if (statements.length >= 50) { d1ExecuteFile(env, statements); statements.length = 0; }
   }

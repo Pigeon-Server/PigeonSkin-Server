@@ -115,17 +115,27 @@ export async function listTextures(db: Db, params: ListTexturesParams, page: Pag
   if (!selected.length) return { items: [], total };
 
   const columns = locale ? listColumns(translatedName()) : LIST_COLUMNS;
-  const itemQuery = db
-    .select(columns)
-    .from(textures)
-    .leftJoin(users, eq(users.id, textures.uploaderId)).$dynamic();
-  if (locale) itemQuery.leftJoin(translationTable, translationJoin(locale));
-  const byId = new Map((await itemQuery.where(inArray(textures.id, selected.map(row => row.id))))
-    .filter(row => row.visibility === 'public' || params.isAdmin || params.viewer?.id === row.uploaderId)
-    .map(row => [row.id, row]));
+  // 详情按 id 回填。D1 单条语句最多 100 个绑定参数（每页最多 100 行 + locale），
+  // 整页塞进一条 IN 会超限，必须分片。
+  type ListItem = Awaited<ReturnType<typeof fetchItems>>[number];
+  const byId = new Map<number, ListItem>();
+  for (const ids of chunkBind(selected.map(row => row.id))) {
+    for (const row of await fetchItems(ids)) {
+      if (row.visibility === 'public' || params.isAdmin || params.viewer?.id === row.uploaderId) byId.set(row.id, row);
+    }
+  }
   const items = selected.flatMap(row => byId.has(row.id) ? [byId.get(row.id)!] : []);
 
   return { items, total };
+
+  async function fetchItems(ids: number[]) {
+    const itemQuery = db
+      .select(columns)
+      .from(textures)
+      .leftJoin(users, eq(users.id, textures.uploaderId)).$dynamic();
+    if (locale) itemQuery.leftJoin(translationTable, translationJoin(locale));
+    return itemQuery.where(inArray(textures.id, ids));
+  }
 }
 
 export async function countTextureGroups(db: Db, params: Pick<ListTexturesParams, 'viewer' | 'isAdmin' | 'uploader' | 'mine' | 'kind' | 'model' | 'official'>): Promise<number> {

@@ -68,7 +68,8 @@ export async function applyOfficialUpdates(env: Bindings, candidates: ResourceCa
   }
   for (let start = 0; start < additions.length; start += 10) {
     const chunk = additions.slice(start, start + 10);
-    statements.push(env.DB.prepare('INSERT INTO textures (official_key,catalog_revision,hash,kind,model,name,size_bytes,width,height,visibility,created_at,updated_at,origin) VALUES ' + chunk.map(() => "(?,?,?,?,?,?,?,?,?,'public',0,?,'repost')").join(','))
+    // sanitized=1：官方更新拿到的字节来自官方 CDN，不再进存量净化队列
+    statements.push(env.DB.prepare('INSERT INTO textures (official_key,catalog_revision,hash,kind,model,name,size_bytes,width,height,visibility,created_at,updated_at,origin,sanitized) VALUES ' + chunk.map(() => "(?,?,?,?,?,?,?,?,?,'public',0,?,'repost',1)").join(','))
       .bind(...chunk.flatMap(asset => [asset.candidate.key, revision, asset.candidate.hash, asset.candidate.kind, asset.candidate.model, asset.candidate.name, asset.sizeBytes, asset.width, asset.height, now])));
   }
   if (changedIds.length) {

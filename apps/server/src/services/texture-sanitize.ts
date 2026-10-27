@@ -67,6 +67,11 @@ export async function sanitizeBatch(env: Bindings, job: SanitizeJobState): Promi
         await markSanitized(env, row.id, result.width, result.height, result.bytes.length);
         continue;
       }
+      // hash 变了的行,协议出口（/{name}.json、/skin/{name}.png）内容随之变、
+      // URL 不变。必须在改写前推进穿戴者的 players.updated_at:ETag 取自它,
+      // 不推进则客户端带旧 ETag 重验证永远 304,继续请求马上要被删掉的旧 hash。
+      const access = await import('./texture-access.ts');
+      const wearing = await access.playersWearingTexture(env, row.id, Date.now());
       await env.BUCKET.put(`textures/${newHash}.png`, result.bytes, {
         httpMetadata: { contentType: 'image/png', cacheControl: 'public, max-age=31536000, immutable' },
       });
@@ -79,9 +84,9 @@ export async function sanitizeBatch(env: Bindings, job: SanitizeJobState): Promi
         .where(eq(textures.hash, row.hash)).limit(1);
       if (!stillReferenced.length) await env.BUCKET.delete(`textures/${row.hash}.png`);
       // 派生图按 hash 寻址，hash 变了旧产物必须失效（否则预览一直用旧图）
-      const access = await import('./texture-access.ts');
       await access.purgeTextureDerivatives(env, row.hash);
       await access.purgeTextureDerivatives(env, newHash);
+      for (const name of wearing) await access.purgePlayerProfiles(env, name);
     } catch (error) {
       if (isD1QuotaError(error)) throw error;
       job.failed++;

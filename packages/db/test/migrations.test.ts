@@ -166,7 +166,7 @@ describe('迁移应用', () => {
   it('全部迁移都能干净地应用到空库', () => {
     expect(appliedMigrations).toEqual([
       '0000_init.sql', '0001_textures_fts.sql', '0002_plugins.sql', '0003_site_management.sql', '0004_ygg_throttle.sql', '0005_ygg_log_owners.sql', '0006_ygg_connect.sql', '0007_oauth.sql', '0008_pigeon.sql', '0009_account_initialization.sql', '0010_product_name.sql', '0011_search_submissions.sql', '0012_legacy_account_conflicts.sql', '0013_email_uniqueness.sql', '0014_official_catalog.sql', '0015_official_resource_sync.sql', '0016_official_resource_jobs.sql', '0017_account_security.sql', '0018_texture_lineage.sql', '0019_tickets.sql', '0020_ticket_categories.sql', '0021_score_settlement.sql', '0022_texture_origin.sql', '0023_manual_content.sql', '0024_ai_jobs_and_texture_translations.sql', '0025_report_re_report.sql', '0026_reports_drop_unique.sql', '0027_reports_pending_unique.sql', '0028_notification_translations.sql', '0029_uuid_archive_sync.sql', '0030_uuid_archive_unique.sql', '0031_texture_sanitized.sql',
-    ].concat(['0032_query_indexes.sql', '0033_settings_snapshots.sql', '0034_incremental_statistics.sql', '0035_discovery_cache.sql', '0036_notification_counts.sql', '0037_sanitization_statistics.sql', '0038_ai_daily_quota.sql', '0039_remaining_hotspots.sql', '0040_sitemap_publication.sql']));
+    ].concat(['0032_query_indexes.sql', '0033_settings_snapshots.sql', '0034_incremental_statistics.sql', '0035_discovery_cache.sql', '0036_notification_counts.sql', '0037_sanitization_statistics.sql', '0038_ai_daily_quota.sql', '0039_remaining_hotspots.sql', '0040_sitemap_publication.sql', '0041_settings_text_and_cache_triggers.sql']));
   });
 
   it('举报允许处理后重报：宽唯一索引已删除，pending 去重由部分唯一索引承担', () => {

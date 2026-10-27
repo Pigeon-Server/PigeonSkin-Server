@@ -8,7 +8,7 @@ import { LOCALES } from '@pigeon-skin/shared/locale';
 import { AI_JOB_DEFINITIONS, aiJobProvider, parseJsonOutput, runAiJob, toVerdict, parseVerdict, aiProviderFailureAfter, aiProviderFailureSeq, type AiProviderFailure } from './ai-gateway.ts';
 import { readWorkersAiQuota } from './ai-quota.ts';
 import { listTaskRuns, writeTaskRun } from './task-runs.ts';
-import { backgroundAllowed } from '../core/usage-budget.ts';
+import { backgroundAllowed, isD1QuotaError, noteD1Failure, quotaResetAt } from '../core/usage-budget.ts';
 
 const TEXTURE_TRANSLATE_DEF = AI_JOB_DEFINITIONS.texture_translate;
 const TEXTURE_MODERATE_DEF = AI_JOB_DEFINITIONS.texture_moderate;
@@ -207,6 +207,17 @@ async function runClaimedJob(
       .set({ status: 'done', attempts, lastError: '', updatedAt: Date.now() })
       .where(eq(aiJobs.id, job.id));
   } catch (e) {
+    // D1 日额度耗尽是账户级故障，不是这个任务的问题：保持 pending、不计次数、
+    // 推到额度重置时刻。不这样处理的话，cron 每分钟重试一次，约 5 分钟就会把
+    // 任务耗到 MAX_ATTEMPTS 永久判失败，额度次日恢复也不会自动继续。
+    if (isD1QuotaError(e)) {
+      await noteD1Failure(env, e);
+      const resetAt = quotaResetAt();
+      await db.update(aiJobs)
+        .set({ status: 'pending', lastError: 'D1 daily quota exceeded', nextRunAt: resetAt, updatedAt: Date.now() })
+        .where(eq(aiJobs.id, job.id));
+      return { kind: 'unavailable', message: 'D1 daily quota exceeded', retryAfterMs: Math.max(0, resetAt - Date.now()), pauseQueue: true, dailyQuota: true } satisfies AiProviderFailure;
+    }
     const message = e instanceof AiJobError ? e.message : String(e).slice(0, 500);
     const outage = e instanceof AiJobError ? e.outage : null;
     // 超时也可能只是这一个任务的问题（超大输入、慢模型）：连续第二次仍按任务失败

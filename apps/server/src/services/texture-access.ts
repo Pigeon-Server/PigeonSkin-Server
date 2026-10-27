@@ -29,8 +29,17 @@ export async function canViewTextureId(env: Pick<Bindings, 'DB'>, id: number, vi
 
 export async function purgeTextureDerivatives(env: TextureAccessEnv, hash: string): Promise<void> {
   const base = (env.APP_URL || 'https://texture-cache.invalid').replace(/\/$/, '');
-  for (const path of [`/textures/${hash}`, `/csl/textures/${hash}`]) {
-    await caches.default.delete(new Request(`${base}${path}`)).catch(() => false);
+  // 分发路径把站点标识（站点名 + 站点地址）的 tag 放进了缓存键
+  // （/textures/{hash}?m=<tag>），只删无参路径等于完全没删掉。
+  // 这里按当前标识算出 tag 一并删除；历史 tag 无法枚举，靠 ETag 变更兜底。
+  const tag = await currentMarkerTag(env);
+  const paths = [`/textures/${hash}`, `/csl/textures/${hash}`];
+  for (const path of paths) {
+    for (const suffix of tag ? ['', `?m=${tag}`, '?m=none'] : ['', '?m=none']) {
+      // Cache API 在 Node 自托管由 shim 提供；纯单测环境可能没有，跳过而不是整段落失败
+      if (typeof caches === 'undefined') continue;
+      await caches.default.delete(new Request(`${base}${path}${suffix}`)).catch(() => false);
+    }
   }
   if (!env.BUCKET) return;
   await env.BUCKET.delete(previewObjectKey(hash));
@@ -40,6 +49,24 @@ export async function purgeTextureDerivatives(env: TextureAccessEnv, hash: strin
     if (page.objects.length) await env.BUCKET.delete(page.objects.map(object => object.key));
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
+}
+
+/** 与协议出口同一套站点标识 tag（fnv1a32 of 站点名 + 站点地址）。读不到设置时返回 null。 */
+async function currentMarkerTag(env: TextureAccessEnv): Promise<string | null> {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM settings WHERE key='site_name' AND locale='' LIMIT 1").first<{ value: string }>();
+    const siteName = row?.value ?? '';
+    const appUrl = env.APP_URL ?? '';
+    if (!siteName || !appUrl) return null;
+    let h = 0x811c9dc5;
+    for (const char of `${siteName}\u0000${appUrl}`) {
+      h ^= char.charCodeAt(0);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16).padStart(8, '0');
+  } catch {
+    return null;
+  }
 }
 
 // ── 预览渲染身份 ─────────────────────────────────────────────────────────────
@@ -75,6 +102,8 @@ export async function purgePlayerProfiles(env: TextureAccessEnv, name: string): 
     `/skin/${encoded}.png`, `/cape/${encoded}.png`,
   ];
   for (const path of paths) {
+    // Node 自托管由 cache shim 提供；纯单测环境可能没有，跳过而不是让调用方失败
+    if (typeof caches === 'undefined') continue;
     await caches.default.delete(new Request(`${base}${path}`)).catch(() => false);
   }
 }
@@ -107,6 +136,7 @@ export async function playersWearingTexture(
  */
 export async function purgeUserAvatar(env: TextureAccessEnv, userId: number): Promise<void> {
   const base = (env.APP_URL || 'https://texture-cache.invalid').replace(/\/$/, '');
+  if (typeof caches === 'undefined') return;
   for (const mode of ['2d', '3d']) for (const size of [64, 100]) {
     await caches.default.delete(new Request(`${base}/avatar/user/${userId}?mode=${mode}&size=${size}`)).catch(() => false);
   }

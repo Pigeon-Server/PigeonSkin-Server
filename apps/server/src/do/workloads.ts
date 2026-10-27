@@ -27,6 +27,10 @@ export class Workloads {
   private async handleRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method !== 'POST') return new Response(null, { status: 405 });
+    // /queue 与 /ai-jobs 会发起外部 HTTP（SMTP、搜索引擎、LLM），单次可达数十秒。
+    // 它们绝不能进 blockConcurrencyWhile：该回调有 30 秒上限，超时/抛异常会把
+    // DO 终止并重置，认领结果丢失、任务变僵尸。任务表的认领本身是条件 UPDATE，
+    // 并发安全由 D1 保证，不需要 DO 串行。
     if (url.pathname === '/queue') {
       const body = await request.json();
       let retryAfter: number | undefined;

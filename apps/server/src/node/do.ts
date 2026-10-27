@@ -158,9 +158,28 @@ export class DurableObjectStorageShim {
    */
   async setAlarm(timestamp: number): Promise<void> {
     await this.put(ALARM_KEY, timestamp);
+    this.#armTimer(timestamp);
+  }
+
+  /** 按时间戳安排 timer；过期的立即触发（恢复持久化 alarm 时用） */
+  #armTimer(timestamp: number): void {
     if (this.#alarm) clearTimeout(this.#alarm.timer);
     this.#alarm = { timestamp, timer: setTimeout(() => { void this.#fireAlarm(timestamp); }, Math.max(0, timestamp - Date.now())) };
     registerAlarmTimer(this.#alarm.timer);
+  }
+
+  /**
+   * 实例化时恢复持久化的 alarm。
+   *
+   * Workers 在重启后会按存储里的时间戳继续投递；shim 若只把时间戳留在
+   * do_storage 而不重建 timer，重启后 getAlarm() 返回一个过去的非 null 值，
+   * 业务侧的「getAlarm()==null 才补挂」判断会永远不成立 —— 净化、官方同步、
+   * sitemap 重建三条链就此永久停摆。这里按存储时间戳重新挂上（已过期的立即触发）。
+   */
+  _restoreAlarm(): void {
+    void this.get<number>(ALARM_KEY).then(timestamp => {
+      if (typeof timestamp === 'number' && this.#alarmCallback) this.#armTimer(timestamp);
+    });
   }
 
   async deleteAlarm(): Promise<void> {
@@ -175,7 +194,14 @@ export class DurableObjectStorageShim {
     const callback = this.#alarmCallback;
     if (!callback) return;
     await this.delete(ALARM_KEY);
-    await callback();
+    try {
+      await callback();
+    } catch (error) {
+      // Workers 对 alarm 异常会指数退避重试；shim 不能让它冒成 unhandledRejection
+      // （Node 24 默认终止进程）。记录后按 30 秒重排，保留重试语义。
+      console.error('DO alarm 执行失败:', error instanceof Error ? error.message : String(error));
+      await this.setAlarm(Date.now() + 30_000).catch(() => {});
+    }
   }
 
   /** 由所属 state 注入：触发时走与 fetch 相同的互斥队列 */
@@ -321,6 +347,8 @@ export class DurableObjectNamespaceShim {
     const state = new DurableObjectStateShim(this.#db, id.name);
     const instance = new this.#ctor(state, this.#env);
     state._attach(instance);
+    // 恢复重启前持久化的 alarm（Workers 重启后同样会继续投递）
+    state.storage._restoreAlarm();
 
     const stub: DurableObjectStub = {
       // Workers 的 stub.fetch 是 fetch 兼容签名（input 可为 Request|string|URL，

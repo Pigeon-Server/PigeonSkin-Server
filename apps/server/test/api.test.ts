@@ -746,6 +746,22 @@ describe('纹理上传', () => {
     expect(await detail.json<{ width: number; height: number }>()).toMatchObject({ width: 128, height: 128 });
   });
 
+  // 回归：D1 单条语句上限 100 个绑定参数。满页 100 行 + locale 会到 101，
+  // 整页塞进一条 IN 必然 500 —— 这是皮肤库最常见的翻页组合。
+  it('满页 + locale 的列表查询不超 D1 参数上限', async () => {
+    const u = await registerUser();
+    const cookie = await login(u.email);
+    // 造满一页公开材质（每张不同像素，避免重复检测）
+    for (let i = 0; i < 36; i++) {
+      await uploadTexture(cookie, makePng({ width: 64, height: 64, seed: i + 1 }), { kind: 'skin', visibility: 'public' });
+    }
+    const page = await authedFetch(cookie, 'https://x/api/v1/textures?per_page=100&locale=zh_CN');
+    expect(page.status).toBe(200);
+    const body = await page.json<{ items: unknown[]; total: number }>();
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(body.items.length).toBeGreaterThan(0);
+  });
+
   it('替换按大小差额结算，删除只退还实际净支出', async () => {
     const user = await registerUser();
     const cookie = await login(user.email);

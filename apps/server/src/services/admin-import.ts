@@ -78,8 +78,8 @@ export async function adminImportTexture(env: Pick<Bindings, 'DB' | 'BUCKET'>, i
   // 重复行 —— 幂等是 best-effort，由调用方（CLI 批内按 hash 去重、运维单实例
   // 操作）保证不并发抢写。
   const result = await env.DB.prepare(
-    `INSERT INTO textures (hash, kind, model, name, uploader_id, origin, size_bytes, visibility, width, height, likes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `INSERT INTO textures (hash, kind, model, name, uploader_id, origin, size_bytes, visibility, width, height, likes, created_at, updated_at, sanitized)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1)
      RETURNING id`,
   ).bind(hash, input.kind, model, input.name, input.uploaderId, input.origin, byteLength, input.visibility, info.width, info.height, now, now).first<{ id: number }>();
 

@@ -25,7 +25,8 @@ async function initialize(env: Pick<Bindings, 'DB' | 'BUCKET'>) {
   const statements = [];
   for (let start = 0; start < officialTextures.length; start += 10) {
     const batch = officialTextures.slice(start, start + 10);
-    statements.push(env.DB.prepare('INSERT OR IGNORE INTO textures (official_key,catalog_revision,hash,kind,model,name,size_bytes,width,height,visibility,likes,created_at,updated_at,uploader_id,origin) VALUES ' + batch.map(() => "(?,?,?,?,?,?,?,?,?,'public',0,0,0,NULL,'repost')").join(','))
+    // sanitized=1：官方目录的字节来自官方 CDN，不再进存量净化队列
+    statements.push(env.DB.prepare('INSERT OR IGNORE INTO textures (official_key,catalog_revision,hash,kind,model,name,size_bytes,width,height,visibility,likes,created_at,updated_at,uploader_id,origin,sanitized) VALUES ' + batch.map(() => "(?,?,?,?,?,?,?,?,?,'public',0,0,0,NULL,'repost',1)").join(','))
       .bind(...batch.flatMap(asset => [asset.key, revision, asset.hash, asset.kind, asset.model, asset.name, asset.sizeBytes, asset.width, asset.height])));
   }
   // revision 只增不降：官方更新任务可能已把 revision 累计到高于本目录常量，

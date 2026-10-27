@@ -16,10 +16,23 @@ const attempts = new WeakMap<object, number>();
 const day = () => new Date().toISOString().slice(0, 10);
 export const quotaResetAt = () => Date.parse(day()) + 86_400_000;
 
+/**
+ * 判断是否为 D1 日额度耗尽。
+ *
+ * 优先看结构化错误码 7500（平台实际返回的形态），再退回文案匹配 ——
+ * 只靠正则会漏掉 `{code:7500, message:...}` 这类不含固定措辞的返回，
+ * 而「配额错误不推进游标/不计业务失败」的整套设计都依赖这个判断。
+ */
 export function isD1QuotaError(error: unknown): boolean {
   let current = error;
   for (let depth = 0; depth < 8 && current; depth++) {
-    if (/exceeded D1.*(?:daily|row read|row write)|D1.*daily.*(?:limit|quota).*exceed/i.test(String(current))) return true;
+    if (typeof current === 'object' && current !== null) {
+      const code = (current as { code?: unknown }).code;
+      if (code === 7500 || code === '7500') return true;
+    }
+    const text = String(current);
+    if (/exceeded D1.*(?:daily|row read|row write)|D1.*daily.*(?:limit|quota).*exceed|exceeded maximum allowed rows read|daily row (?:read|write) limit/i.test(text)) return true;
+    if (/\b7500\b/.test(text) && /D1|rows? read|rows? written|quota|limit/i.test(text)) return true;
     current = typeof current === 'object' && current !== null && 'cause' in current ? current.cause : null;
   }
   return false;
