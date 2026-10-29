@@ -40,19 +40,38 @@ function unauthorized(message: string): Unauthorized {
   return new Unauthorized(message);
 }
 
+/** 认证限流：同一 IP / 同一账号在 gap 毫秒滑动窗口内至多两笔尝试，
+ *  且第二笔必须落在第一笔的宽限期（gap 的一半，至多 1.5s）内——
+ *  HMCL 等启动器一次登录会并行发出两个相同请求，宽限保证正常登录
+ *  不被自己的并发请求拦下。各维独立判定与留痕：被拦的维度不落行
+ *  （不延长窗口），放行的才计数。 */
 async function throttle(c: Ctx, username: string) {
   const gap = await getSettingInt(c.env, 'ygg_rate_limit');
   if (!gap) return;
   const identifier = await hashToken(username.toLowerCase());
   const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('cf-connecting-ip') || 'unknown';
   const now = Date.now();
+  const grace = Math.min(1500, Math.floor(gap / 2));
   const result = await c.env.DB.batch([
-    c.env.DB.prepare("INSERT INTO auth_attempts (ip, identifier, kind, succeeded, created_at) SELECT ?, 'ip', 'ygg-ip', 0, ? WHERE NOT EXISTS (SELECT 1 FROM auth_attempts WHERE ip = ? AND kind = 'ygg-ip' AND created_at > ?) RETURNING id")
-      .bind(ip, now, ip, now - gap),
-    c.env.DB.prepare("INSERT INTO auth_attempts (ip, identifier, kind, succeeded, created_at) SELECT ?, ?, 'ygg', 1, ? WHERE changes()>0 AND NOT EXISTS (SELECT 1 FROM auth_attempts WHERE identifier = ? AND kind = 'ygg' AND created_at > ?) RETURNING id")
-      .bind(ip, identifier, now, identifier, now - gap),
+    // 维内拒绝 = 窗口内有行龄 ≥ 宽限的行（上一笔已出宽限），或窗口内已放行两笔
+    c.env.DB.prepare(`SELECT EXISTS(SELECT 1 FROM auth_attempts WHERE ip = ? AND kind = 'ygg-ip' AND created_at > ? AND created_at <= ?)
+        OR (SELECT count(*) FROM auth_attempts WHERE ip = ? AND kind = 'ygg-ip' AND created_at > ?) >= 2
+        OR EXISTS(SELECT 1 FROM auth_attempts WHERE identifier = ? AND kind = 'ygg' AND created_at > ? AND created_at <= ?)
+        OR (SELECT count(*) FROM auth_attempts WHERE identifier = ? AND kind = 'ygg' AND created_at > ?) >= 2 AS blocked`)
+      .bind(ip, now - gap, now - grace, ip, now - gap, identifier, now - gap, now - grace, identifier, now - gap),
+    // 判定与落行同条件：被拦的维不写行，窗口不被任何失败请求顺延
+    c.env.DB.prepare(`INSERT INTO auth_attempts (ip, identifier, kind, succeeded, created_at) SELECT ?, 'ip', 'ygg-ip', 0, ?
+        WHERE NOT EXISTS(SELECT 1 FROM auth_attempts WHERE ip = ? AND kind = 'ygg-ip' AND created_at > ? AND created_at <= ?)
+          AND (SELECT count(*) FROM auth_attempts WHERE ip = ? AND kind = 'ygg-ip' AND created_at > ?) < 2`)
+      .bind(ip, now, ip, now - gap, now - grace, ip, now - gap),
+    c.env.DB.prepare(`INSERT INTO auth_attempts (ip, identifier, kind, succeeded, created_at) SELECT ?, ?, 'ygg', 1, ?
+        WHERE NOT EXISTS(SELECT 1 FROM auth_attempts WHERE identifier = ? AND kind = 'ygg' AND created_at > ? AND created_at <= ?)
+          AND (SELECT count(*) FROM auth_attempts WHERE identifier = ? AND kind = 'ygg' AND created_at > ?) < 2`)
+      .bind(ip, identifier, now, identifier, now - gap, now - grace, identifier, now - gap),
   ]);
-  if (!result[0]?.meta.changes || !result[1]?.meta.changes) throw forbidden('Too many requests. Please try again later.');
+  if ((result[0]?.results?.[0] as { blocked?: number } | undefined)?.blocked) {
+    throw forbidden('Too many requests. Please try again later.');
+  }
 }
 
 // ── 材质 profile 序列化（字节级契约）─────────────────────────────────────────
@@ -250,10 +269,12 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
     throw err;
   });
 
-  r.use('/authserver/*', async (c, next) => {
+  // 传统认证开关只拦「凭据认证」入口（authenticate/signout 需要密码）；
+  // refresh/validate/invalidate 是令牌生命周期操作，拦掉会把已登录的
+  // 启动器一并打断——无法续期、无法吊销，表现为整站启动器集体失效。
+  const requireAuthServerEnabled = async (c: Ctx) => {
     if (await getSettingBool(c.env, 'ygg_disable_authserver')) throw forbidden('Traditional authentication is disabled.');
-    await next();
-  });
+  };
 
   // 元信息（authlib-injector 的 API 入口；feature.non_email_login 照原插件）
   const metadata = async (c: Ctx) => {
@@ -291,6 +312,7 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
   // ── authserver ─────────────────────────────────────────────────────────────
 
   r.post('/authserver/authenticate', async (c) => {
+    await requireAuthServerEnabled(c);
     const body = await readJsonBody(c);
     const username = str(body, 'username');
     const password = str(body, 'password');
@@ -400,6 +422,7 @@ export function registerYggdrasilRoutes(app: Hono<AppEnv>): void {
   });
 
   r.post('/authserver/signout', async (c) => {
+    await requireAuthServerEnabled(c);
     const body = await readJsonBody(c);
     const username = str(body, 'username');
     const password = str(body, 'password');

@@ -2,11 +2,23 @@ import { getSetting } from './../core/settings-reader.ts';
 import { type AppEnv } from './../core/user.ts';
 import { hashToken } from '@pigeon-skin/auth';
 import { noCaseEq } from '@pigeon-skin/db';
+import { createHash } from 'node:crypto';
 
 import type { Context } from 'hono';
 
 export interface GameProfile { id: string; name: string; playerId: number; version: number }
 export function publicProfile(p: GameProfile) { return { id: p.id, name: p.name }; }
+
+/** 旧站（离线服）语义的角色 UUID：OfflinePlayer:{name} 的 MD5，版本位 3、IETF 变体位。
+ *  迁移数据恢复依赖该派生（启动器 profileID 与游戏存档按它索引），算法不得漂移。
+ *  走 node:crypto 而非 crypto.subtle.digest：MD5 是 Workers 的非标准 WebCrypto 扩展，
+ *  本地 workerd 测试运行时与 Node 自托管的 webcrypto 都不认，createHash 三处一致。 */
+export function offlineUuidV3(name: string): string {
+  const bytes = Array.from(createHash('md5').update(`OfflinePlayer:${name}`, 'utf8').digest());
+  bytes[6] = (bytes[6]! & 15) | 48;
+  bytes[8] = (bytes[8]! & 63) | 128;
+  return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 /** 读取角色当前已分配的 UUID 行；没有则分配并落库。
  *
@@ -23,10 +35,7 @@ export async function uuidForPlayer(c: Context<AppEnv>, playerId: number): Promi
   const archived = await c.env.DB.prepare(`SELECT uuid FROM uuid_archive WHERE ${noCaseEq('name', '?')} LIMIT 1`).bind(player.name).first<{ uuid: string }>();
   let uuid = archived?.uuid ?? crypto.randomUUID().replace(/-/g, '');
   if (!archived && await getSetting(c.env, 'ygg_uuid_algorithm') === 'v3') {
-    const bytes = new Uint8Array(await crypto.subtle.digest('MD5', new TextEncoder().encode(`OfflinePlayer:${player.name}`)));
-    bytes[6] = (bytes[6]! & 15) | 48;
-    bytes[8] = (bytes[8]! & 63) | 128;
-    uuid = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    uuid = offlineUuidV3(player.name);
   }
   await insertUuidMapping(c.env.DB, { playerId, name: player.name, uuid });
   // 复用即消费：归档只保留「当前无活角色」的名字映射，避免死映射抢占在用 UUID

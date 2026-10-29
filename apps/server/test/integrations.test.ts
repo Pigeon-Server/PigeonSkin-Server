@@ -8,6 +8,7 @@ import {
 } from 'cloudflare:test';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
+import { hashToken } from '@pigeon-skin/auth';
 
 import { runMigrations, makeAdmin } from './setup.ts';
 import { makePng } from '../../../packages/minecraft/test/png-builder.ts';
@@ -199,6 +200,14 @@ describe('built-in feature UI contracts', () => {
     expect(
       (await request('/api/yggdrasil/authserver/authenticate', '', 'POST', input)).status,
     ).toBe(200);
+    // HMCL 一次登录会并行发两个相同请求：宽限内的并发重复放行（都触达凭据校验）
+    expect(
+      (await request('/api/yggdrasil/authserver/authenticate', '', 'POST', input)).status,
+    ).toBe(200);
+    // 窗口内但超出宽限的重试仍被拦：预置一条窗口中段的尝试记录驱动判定
+    await env.DB.prepare(
+      "INSERT INTO auth_attempts (ip, identifier, kind, succeeded, created_at) VALUES ('', ?, 'ygg', 1, ?)",
+    ).bind(await hashToken('log_user@example.com'), Date.now() - 5000).run();
     expect(
       (await request('/api/yggdrasil/authserver/authenticate', '', 'POST', input)).status,
     ).toBe(403);
