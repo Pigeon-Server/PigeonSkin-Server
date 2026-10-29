@@ -20,10 +20,13 @@ const assets = {
   },
 } as unknown as Fetcher;
 
-async function request(path: string) {
+const CRAWLER_UA = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
+const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+
+async function request(path: string, headers: Record<string, string> = { 'user-agent': CRAWLER_UA }) {
   invalidateSettingsCache();
   const context = createExecutionContext();
-  const response = await createApp().fetch(new Request(`https://skin.example${path}`), { ...env, ASSETS: assets } as Bindings, context);
+  const response = await createApp().fetch(new Request(`https://skin.example${path}`, { headers }), { ...env, ASSETS: assets } as Bindings, context);
   await waitOnExecutionContext(context);
   return response;
 }
@@ -49,7 +52,7 @@ describe('公开 HTML 与搜索元数据', () => {
     const sitemap = await (await request('/sitemap.xml')).text();
     expect(sitemap).toContain(`/manual/${slug}?lang=ja_JP`);
   });
-  it('首页无需 JavaScript 即可读取正文与公开材质链接', async () => {
+  it('爬虫快照包含正文与公开材质链接', async () => {
     const id = await texture('public', '公开皮肤');
     const response = await request('/');
     const html = await response.text();
@@ -60,17 +63,46 @@ describe('公开 HTML 与搜索元数据', () => {
     expect(html).toContain('Minecraft 皮肤与披风');
     expect(html).toContain('/manual/quick-start');
   });
-  it('注入的 SEO 回退内容带 JS 隐藏标记，仅在脚本可用时生效', async () => {
-    const response = await request('/');
+  it('快照只投放给爬虫：普通浏览器拿到原始 SPA 入口，不注入快照与元数据', async () => {
+    await texture('public', '公开皮肤');
+    const response = await request('/', { 'user-agent': BROWSER_UA });
     const html = await response.text();
-    // 同步隐藏脚本与样式必须都存在，且脚本先于 #app 内容出现，避免首屏裸文本闪现
-    expect(html).toContain('<style>html[data-seo-fallback] #app{visibility:hidden}</style>');
-    expect(html).toContain('document.documentElement.setAttribute("data-seo-fallback"');
-    expect(html.indexOf('data-seo-fallback')).toBeLessThan(html.indexOf('<main>'));
-    // 隐藏选择器以 html 属性为前提，禁用 JS 时属性不存在、内容保持可读
-    expect(html).toContain('html[data-seo-fallback] #app');
-    // JS 加载失败时超时兜底恢复回退内容可见
-    expect(html).toContain('setTimeout(function(){document.documentElement.removeAttribute("data-seo-fallback")},8000)');
+    expect(response.status).toBe(200);
+    // 与资产层返回的 index.html 逐字一致：无快照正文、无 prerender 头、无隐藏脚本
+    expect(html).toBe(await (await assets.fetch(new Request('https://skin.example/index.html'))).text());
+    expect(html).not.toContain('公开皮肤');
+    expect(html).not.toContain('data-seo-fallback');
+    expect(html).not.toContain('rel="canonical"');
+  });
+  it('快照注入即可见，浏览器端隐藏脚本已移除', async () => {
+    const html = await (await request('/')).text();
+    expect(html).toContain('<main>');
+    expect(html).not.toContain('data-seo-fallback');
+  });
+  it('缓存的 HTML 按受众分键：爬虫与浏览器的版本互不串用', async () => {
+    await texture('public', '公开皮肤');
+    const crawler = await (await request('/')).text();
+    const browser = await (await request('/', { 'user-agent': BROWSER_UA })).text();
+    expect(crawler).toContain('<main>');
+    expect(browser).not.toContain('<main>');
+    expect(await (await request('/')).text()).toBe(crawler);
+    expect(await (await request('/', { 'user-agent': BROWSER_UA })).text()).toBe(browser);
+  });
+  it('爬虫快照标注不进共享缓存，浏览器响应可缓存且不含快照', async () => {
+    await texture('public', '公开皮肤');
+    const notShareable = (value: string | null) => !!value && /private|no-store|no-cache/.test(value);
+    expect(notShareable((await request('/')).headers.get('cache-control'))).toBe(true);
+    // 请求两次确保命中路径（头部在读取之后施加）也保持同一口径
+    expect(notShareable((await request('/')).headers.get('cache-control'))).toBe(true);
+    const browser = await request('/', { 'user-agent': BROWSER_UA });
+    expect(browser.headers.get('cache-control') ?? '').not.toContain('no-store');
+    expect(await browser.text()).not.toContain('公开皮肤');
+  });
+  it('协议端点与未知路径对普通浏览器同样返回 404，不回 SPA 入口', async () => {
+    for (const path of ['/textures/invalid-hash', '/avatar/' + 'b'.repeat(64) + '?size=999', '/whatever/junk', '/skinlib/not-a-number']) {
+      expect((await request(path, { 'user-agent': BROWSER_UA })).status, path).toBe(404);
+      expect((await request(path)).status, path).toBe(404);
+    }
   });
   it('公开详情具有独立标题和真实结构化数据，私有详情不泄露正文', async () => {
     const publicId = await texture('public', '创作 <测试>');

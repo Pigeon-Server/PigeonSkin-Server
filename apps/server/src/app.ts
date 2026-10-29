@@ -55,6 +55,7 @@ import { serveSitemap } from './services/sitemap-publication.ts';
 import { ensureDefaultCloset, ensureOfficialCatalog } from './services/official-catalog.ts';
 import { renderSearchPage } from './services/seo.ts';
 import { canonicalPagePath } from '@pigeon-skin/shared/seo';
+import { isSeoCrawler, isSpaPagePath } from './core/route-metadata.ts';
 import { isCaptchaEnabled } from './services/captcha.ts';
 
 export function createApp() {
@@ -227,9 +228,11 @@ export function createApp() {
   // SPA 深链回退：/skinlib、/player 等前端路由没有对应资产文件名。先按原
   // 路径问一次资产层 —— Node 自托管的静态文件全部经这里透传（Workers 上
   // 纯静态文件不进 Worker，见 wrangler.jsonc run_worker_first）；未命中再
-  // 显式取 index.html 做 SEO 预渲染。不能依赖资产层的 SPA 回退
-  // （not_found_handling = none）：否则 /assets/过期hash.js 这类缺失文件会
-  // 拿到被 _headers 标 immutable 的回退 HTML。纯 API 路径仍回 JSON 404。
+  // 显式取 index.html 做 SEO 预渲染（快照按 UA 只投放给爬虫，投放与缓存
+  // 分键的口径见 services/seo.ts 和 middleware/public-cache.ts）。不能依赖
+  // 资产层的 SPA 回退（not_found_handling = none）：否则 /assets/过期hash.js
+  // 这类缺失文件会拿到被 _headers 标 immutable 的回退 HTML。纯 API 路径仍回
+  // JSON 404；协议端点与未知路径按 isSpaPagePath 分类回 404。
   app.notFound(async (c) => {
     if (c.req.path.startsWith('/api/')) return c.json({ error: 'common.not_found' }, 404);
     if (!c.env.ASSETS) return c.json({ error: 'common.not_found' }, 404);
@@ -245,6 +248,12 @@ export function createApp() {
     if (html.status === 200 && html.headers.get('content-type')?.includes('text/html') && ['GET', 'HEAD'].includes(c.req.method)) {
       const path = c.req.path === '/index.html' ? '/' : canonicalPagePath(c.req.path);
       if (path !== c.req.path) return c.redirect(`${path}${new URL(c.req.url).search}`, 301);
+      // 协议端点与未知路径不回 SPA：客户端依赖 404 判定资源缺失。普通浏览器
+      // 回 404 + SPA 入口（路由兜底视图照常渲染，与旧快照 404 的体感一致）；
+      // 爬虫仍走快照渲染，保留 noindex 头与本地化的 404 正文。
+      if (!isSpaPagePath(path) && !isSeoCrawler(c.req.header('user-agent'))) {
+        return new Response(html.body, { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
       return renderSearchPage(html, c.env, c.req.raw);
     }
     return c.json({ error: 'common.not_found' }, 404);

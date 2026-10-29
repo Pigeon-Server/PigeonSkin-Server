@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../core/user.ts';
 import { readPublicCache } from '../core/public-cache.ts';
+import { isSeoCrawler } from '../core/route-metadata.ts';
 import { normalizeLocale } from '@pigeon-skin/shared/locales';
 import { clientIp } from '../core/ip.ts';
 
@@ -55,20 +56,34 @@ export function publicResponseCache(): MiddlewareHandler<AppEnv> {
     const fromHeader = c.req.header('accept-language')?.split(',')[0]?.split(';')[0]?.trim();
     const locale = normalizeLocale(fromQuery || fromCookie || fromHeader);
     const localeKey = path.startsWith('/api/') ? JSON.stringify([url.searchParams.get('locale'), url.searchParams.get('lang')]) : locale;
+    // 爬虫拿到的是 SEO 快照（seo.ts 按 UA 分流），与用户响应是不同正文：
+    // 键必须分开，否则先到的一方写入的版本会被另一方读走 —— 用户会在缓存
+    // 窗口内收到爬虫快照，爬虫会拿到没有正文的 SPA 入口。判定必须与
+    // renderSearchPage 同一函数同一请求头，保证键与响应版本永远一致。
+    const audience = path.startsWith('/api/') || !isSeoCrawler(c.req.header('user-agent')) ? '' : ':crawler';
+    // 键修订号：SEO 快照曾对全部请求生效，KV 里的历史条目正是"用户键里存着
+    // 快照正文"。仅靠分受众不会让这些条目失效（它们本来就在空后缀键里），
+    // 必须换前缀把存量整体孤立出去。规则变化时递增。
+    const keyRevision = 'r2';
     // HTML 页面额外带构建标识：部署换了 bundle 就换键，旧页面自然失效
     const key = path.startsWith('/api/')
       ? `response:${path}:${localeKey}`
-      : `response:${path}:${localeKey}:${await currentBuildTag(c.env)}`;
+      : `response:${keyRevision}:${path}:${localeKey}:${await currentBuildTag(c.env)}${audience}`;
     try {
       const result = await readPublicCache(c.env, key, scopes, async () => {
         await next();
         if (![200, 302].includes(c.res.status) || c.res.headers.has('set-cookie')) throw c.res;
-        const headers = new Headers(c.res.headers);
-        headers.set('cache-control', 'public, max-age=60');
-        headers.set('vary', 'Accept-Language, Cookie');
-        return { status: c.res.status, headers: [...headers], body: await c.res.clone().text() };
+        return { status: c.res.status, headers: [...c.res.headers], body: await c.res.clone().text() };
       }, 300_000, false);
-      return new Response(result.body, { status: result.status, headers: result.headers });
+      // 缓存头在读取之后统一施加，命中缓存与回源得到同一份结果：命中路径
+      // 拿到的是条目里烘死的旧头，不能只改回源分支。
+      const headers = new Headers(result.headers);
+      // 爬虫快照不进任何共享缓存：响应体随 UA 变化，而 Vary 不含 User-Agent
+      // （含了会毁掉用户侧的命中率），中间代理一旦缓存就可能把快照转给用户。
+      // 边缘 KV 已按受众分键，代理侧补 no-store。
+      headers.set('cache-control', result.status === 302 ? 'public, max-age=60' : audience ? 'private, no-store' : 'public, max-age=60');
+      headers.set('vary', 'Accept-Language, Cookie');
+      return new Response(result.body, { status: result.status, headers });
     } catch (error) { if (error instanceof Response) return error; throw error; }
   };
 }

@@ -56,13 +56,7 @@ for (const [name, component] of Object.entries({
   app.component(name, component);
 startGlobalInjection();
 void prepareLocale(normalizeLocale(i18nPlugin.global.locale.value)).catch(() => {}).then(() => {
-  // 解除 Worker 注入的 SEO 回退隐藏（见 services/seo.ts 的 seoFallbackGuard）；
-  // mount 失败也要解除，否则页面在 8 秒兜底前一直空白
-  try {
-    app.mount('#app');
-  } finally {
-    document.documentElement.removeAttribute('data-seo-fallback');
-  }
+  app.mount('#app');
 });
 watch(() => router.currentRoute.value.query.lang, async value => {
   if (typeof value !== 'string') return;

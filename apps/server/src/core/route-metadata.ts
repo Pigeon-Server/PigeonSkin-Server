@@ -89,6 +89,44 @@ export function isBlockedCrawler(userAgent: string | null | undefined): boolean 
   return BLOCKED_CRAWLER_AGENTS.some((agent) => ua.includes(agent.toLowerCase()));
 }
 
+// ── SEO 快照投放 ─────────────────────────────────────────────────────────────
+// SPA 深链的 SEO 快照（services/seo.ts）只投放给搜索引擎与分享预览抓取方：
+// 不执行 JS 的引擎只有快照能提供正文，而快照正文一旦进普通用户的响应，
+// JS 加载失败时就会把爬虫文案直接暴露给用户。
+// 清单只放"绝不可能是真人浏览器"的标识；bot/crawler/spider/slurp 兜底正则
+// 覆盖其余已知与未知爬虫（百度/搜狗/360/字节等中文引擎的 UA 都带 spider）。
+// 品牌词不能作为判定依据：搜狗、夸克等浏览器的 UA 与同名爬虫无法按品牌
+// 区分（如 SogouMobileBrowser），微信/QQ/WhatsApp 的内置浏览器 UA 与其
+// 链接预览抓取方相同，一律按普通浏览器对待，预览卡片回退到 index.html。
+export const SEO_CRAWLER_AGENTS = [
+  'Google-InspectionTool',
+  'BingPreview',
+  'Yandex',
+  'facebookexternalhit',
+  'SkypeUriPreview',
+] as const;
+
+const SEO_CRAWLER_FALLBACK = /bot|crawler|spider|slurp/i;
+
+/** 缺失 UA 不视为爬虫：未知客户端按普通浏览器对待。 */
+export function isSeoCrawler(userAgent: string | null | undefined): boolean {
+  if (!userAgent) return false;
+  return SEO_CRAWLER_AGENTS.some((agent) => userAgent.toLowerCase().includes(agent.toLowerCase())) || SEO_CRAWLER_FALLBACK.test(userAgent);
+}
+
+// ── SPA 页面路径分类 ─────────────────────────────────────────────────────────
+// 未命中资产层时只有这些路径回退 SPA 入口（200）；其余（协议端点、未知路径）
+// 一律 404 —— 协议客户端（启动器、游戏）依赖 404 判定资源缺失，不能拿到
+// HTML。快照渲染（seo.ts）与 SPA 回退（app.ts notFound）必须用同一份分类，
+// 否则爬虫与用户会对同一路径给出不同的状态码。
+export function isSpaPagePath(path: string): boolean {
+  return path === '/'
+    || path === '/skinlib' || /^\/skinlib\/[1-9]\d*$/.test(path)
+    || path === '/manual' || path.startsWith('/manual/')
+    || /^\/(?:admin|user|player|closet|profile|reports|votes|connect|auth)(?:\/|$)/.test(path)
+    || ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/setup', '/connections', '/.well-known/change-password'].includes(path);
+}
+
 /** robots.txt 规则修订号：规则变化时递增，让 Cache API 里缓存的旧 robots.txt 立即失效。 */
 export const ROBOTS_RULES_REVISION = 3;
 
