@@ -601,6 +601,8 @@
   .app-checkbox[data-state='checked'], .app-checkbox[data-state='indeterminate'] { border-color: var(--brand); background: var(--brand); }
   .app-checkbox[data-disabled] { opacity: .5; cursor: not-allowed; }
   .app-checkbox-indicator { display: grid; place-items: center; animation: selection-pop 140ms ease both; }
+  /* 图标字体 CSS 未分层、默认 24px，覆盖字号须带 !important；行高 1 才能在 18px 框内居中 */
+  .app-checkbox .material-icons { font-size: 14px !important; line-height: 1; }
   .app-checkbox-option { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
   .app-checkbox-option[data-disabled] { cursor: not-allowed; opacity: .5; }
   .app-radio-option { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }

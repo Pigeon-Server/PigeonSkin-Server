@@ -31,7 +31,7 @@ function toggle(option: Option) {
         :tabindex="frozen(option) ? -1 : 0"
         @keydown.space.prevent="toggle(option)"
       >
-        <span v-if="model.includes(option.value)" class="app-checkbox-indicator"><AppIcon name="check" class="!text-sm" /></span>
+        <span v-if="model.includes(option.value)" class="app-checkbox-indicator"><AppIcon name="check" /></span>
       </button>
       <span class="cursor-pointer">{{ option.label }}</span>
     </div>
