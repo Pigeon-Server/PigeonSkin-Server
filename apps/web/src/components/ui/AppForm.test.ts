@@ -20,6 +20,21 @@ describe('Vuetify form wrappers', () => {
     expect(html).toContain('maxlength="80"');
   });
 
+  // 条件必填：Login 的密码框在通行密钥阶段传 :required="false"，此时不能再挂 required ——
+  // 否则该输入被 v-show 隐藏后浏览器无法聚焦，提交时报 "An invalid form control ... is not focusable"。
+  it('omits required when AppInput is given an explicit false', async () => {
+    const app = createSSRApp({ render: () => h(AppInput, { id: 'password', type: 'password', required: false }) });
+    const html = await renderToString(app);
+    expect(html).toContain('id="password"');
+    expect(html).not.toContain('required');
+  });
+
+  it('keeps required for the bare boolean attribute form', async () => {
+    const app = createSSRApp({ render: () => h(AppInput, { id: 'identifier', required: '' }) });
+    const html = await renderToString(app);
+    expect(html).toContain('required');
+  });
+
   it('renders select options and keeps the selected value in the trigger', async () => {
     const app = createSSRApp({ render: () => h(AppSelect, { modelValue: 'likes', options: [{ value: 'time', label: 'Newest' }, { value: 'likes', label: 'Most liked' }] }) });
     app.component('AppIcon', components.AppIcon);
