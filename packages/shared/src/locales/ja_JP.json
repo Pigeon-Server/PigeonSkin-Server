@@ -19,7 +19,6 @@
     "verify_account": "アカウントを確認してください: {account}",
     "next_account": "次に統合するアカウントを確認します。",
     "restart_login": "再度サインインしてください",
-    "passkey_login": "パスキーを使用してサインインする",
     "browser_unavailable": "ブラウザ キーには HTTPS と WebAuthn をサポートするブラウザが必要です。",
     "launcher_notice": "従来の Minecraft ランチャー パスワード サインインは、Web サイトの 2 要素認証では保護されません。ウェブサイトの認証を推奨します。",
     "reauth_notice": "セキュリティ設定を変更する前に、本人確認を行ってください。検証には 5 分間かかります。",
@@ -1522,6 +1521,7 @@
   "common": {
     "delete": "削除",
     "cancel": "キャンセル",
+    "continue": "続行",
     "prev": "前へ",
     "next": "次へ",
     "close": "閉じる",

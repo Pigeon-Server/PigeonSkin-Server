@@ -10,7 +10,8 @@ import { base64url } from 'jose';
 import { hashToken, mintTokenWithHash } from '@pigeon-skin/auth';
 import { computePasswordVerify } from './compute.ts';
 import { LIMITS } from '@pigeon-skin/shared';
-import { isUniqueViolation, noCaseEq } from '@pigeon-skin/db';
+import { createDb, isUniqueViolation, noCaseEq } from '@pigeon-skin/db';
+import * as authRepo from '../repositories/auth.ts';
 import type { SecondFactor, SecurityChallenge, SecurityStatus } from '@pigeon-skin/shared/security';
 import {
   generateAuthenticationOptions, generateRegistrationOptions,
@@ -268,9 +269,22 @@ export async function verifyChallenge(c: Ctx, method: SecondFactor, code: string
   }
   return finishLogin(c, row);
 }
-export async function beginPasskeyLogin(c: Ctx, remember: boolean, target: string) {
+export async function beginPasskeyLogin(c: Ctx, remember: boolean, target: string, identifier?: string) {
   const rp = relyingParty(c);
-  const options = await generateAuthenticationOptions({ rpID: rp.rpID, userVerification: 'required' });
+  // 提供 identifier 时按账号限定凭据：浏览器弹框直接指向该账号的通行密钥
+  //（Apple ID 式"输账号→继续"）。解析不到用户或账号没有通行密钥时给空列表，
+  // WebAuthn 规范下 credentials.get 会直接抛 NotFoundError，前端据此回落密码登录。
+  // 权威校验仍在 verify 侧（credential id 反查用户 + userHandle 比对），限定只是 UX。
+  let allowCredentials: Array<{ id: string; transports: AuthenticatorTransportFuture[] }> | undefined;
+  if (identifier) {
+    const database = createDb(c.env.DB);
+    const user = identifier.includes('@')
+      ? await authRepo.findUserByEmail(database, identifier)
+      : await authRepo.findUserByPlayerName(database, identifier);
+    const keys = user && user.mergedIntoUserId === null ? await repo.keys(c.env, user.id) : [];
+    allowCredentials = keys.map(key => ({ id: key.id, transports: JSON.parse(key.transports) as AuthenticatorTransportFuture[] }));
+  }
+  const options = await generateAuthenticationOptions({ rpID: rp.rpID, userVerification: 'required', ...(allowCredentials ? { allowCredentials } : {}) });
   await newChallenge(c, null, 'passkey-login', { remember, destination: destination(target), challenge: options.challenge });
   return options;
 }

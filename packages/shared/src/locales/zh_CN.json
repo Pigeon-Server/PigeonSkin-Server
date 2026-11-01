@@ -19,7 +19,6 @@
     "verify_account": "验证账户：{account}",
     "next_account": "请继续验证下一个待合并账户。",
     "restart_login": "重新登录",
-    "passkey_login": "使用通行密钥登录",
     "browser_unavailable": "浏览器密钥需要 HTTPS 连接和支持 WebAuthn 的浏览器。",
     "launcher_notice": "传统 Minecraft 启动器的密码登录不受网站双因素认证保护。建议通过网站授权登录。",
     "reauth_notice": "修改安全设置前，请验证身份。验证有效期为 5 分钟。",
@@ -1522,6 +1521,7 @@
   "common": {
     "delete": "删除",
     "cancel": "取消",
+    "continue": "继续",
     "prev": "上一页",
     "next": "下一页",
     "close": "关闭",

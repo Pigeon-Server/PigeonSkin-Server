@@ -4,7 +4,7 @@ import { startAuthentication } from '@simplewebauthn/browser';
 import type { SecurityChallenge, SecondFactor } from '@pigeon-skin/shared/security';
 import { securityApi } from '@/api';
 import { useI18n } from '@/stores/i18n';
-import { passkeysSupported, securityError } from '@/lib/security';
+import { passkeysSupported, securityError, runCeremony, cancelPasskeyCeremony } from '@/lib/security';
 
 defineProps<{ reauth?: boolean }>();
 const emit = defineEmits<{ complete: [redirect: string, grant?: import('@/api').AuthTokenBody]; restart: [] }>();
@@ -15,6 +15,7 @@ const code = ref('');
 const error = ref('');
 const notice = ref('');
 const busy = ref(false);
+const ceremony = ref(false);
 const expired = ref(false);
 const sentAt = ref(0);
 const now = ref(Date.now());
@@ -40,7 +41,13 @@ async function send() {
 async function submit() {
   busy.value = true; error.value = ''; notice.value = '';
   try {
-    const response = method.value === 'passkey' ? await startAuthentication({ optionsJSON: await securityApi.authenticationOptions() }) : undefined;
+    let response;
+    if (method.value === 'passkey') {
+      const options = await securityApi.authenticationOptions();
+      ceremony.value = true;
+      try { response = await runCeremony(() => startAuthentication({ optionsJSON: options })); }
+      finally { ceremony.value = false; }
+    }
     const result = await securityApi.verify(method.value, code.value, response);
     code.value = '';
     if (result.requiresTwoFactor) { await load(); notice.value = i18n.t('security.next_account'); }
@@ -68,6 +75,7 @@ async function submit() {
       </template>
       <p v-else-if="!supported" class="text-sm text-muted">{{ i18n.t('security.browser_unavailable') }}</p>
       <AppButton class="btn-primary w-full" type="submit" :loading="busy" :disabled="method === 'passkey' && !supported">{{ i18n.t('security.verify') }}</AppButton>
+      <AppButton v-if="ceremony" class="btn w-full" @click="cancelPasskeyCeremony()">{{ i18n.t('common.cancel') }}</AppButton>
     </template>
     <p v-if="notice" class="alert alert-success" role="status">{{ notice }}</p>
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>

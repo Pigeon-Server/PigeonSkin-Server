@@ -7,7 +7,7 @@ import { securityApi, oauthApi } from '@/api';
 import { useI18n } from '@/stores/i18n';
 import { useSessionStore } from '@/stores/session';
 import { confirmAction } from '@/stores/dialog';
-import { securityError, passkeysSupported } from '@/lib/security';
+import { securityError, passkeysSupported, runCeremony, cancelPasskeyCeremony } from '@/lib/security';
 import { accessToken } from '@/lib/token-store';
 import SecondFactorForm from './SecondFactorForm.vue';
 
@@ -26,6 +26,7 @@ const enrollment = ref<'email' | 'totp' | 'change-email' | ''>('');
 const code = ref(''), secret = ref(''), qr = ref('');
 const keyName = ref(''), email = ref('');
 const recoveryCodes = ref<string[]>([]);
+const ceremony = ref(false);
 const supported = passkeysSupported();
 const reauthDestination = `${location.pathname === '/account/security' ? '/account/security' : '/profile'}?security_reauth=1`;
 const methodCount = computed(() => data.value ? Number(data.value.email) + Number(data.value.totp) + data.value.passkeys.length : 0);
@@ -78,10 +79,14 @@ async function confirmEnrollment() {
 }
 async function registerKey() {
   await run(async () => {
-    const response = await startRegistration({ optionsJSON: await securityApi.registrationOptions() });
-    const result = await securityApi.registerPasskey(keyName.value.trim(), response);
-    recoveryCodes.value = result.recoveryCodes; keyName.value = ''; enrollment.value = '';
-    notice.value = i18n.t('general.op-success');
+    const options = await securityApi.registrationOptions();
+    ceremony.value = true;
+    try {
+      const response = await runCeremony(() => startRegistration({ optionsJSON: options }));
+      const result = await securityApi.registerPasskey(keyName.value.trim(), response);
+      recoveryCodes.value = result.recoveryCodes; keyName.value = ''; enrollment.value = '';
+      notice.value = i18n.t('general.op-success');
+    } finally { ceremony.value = false; }
   });
 }
 async function disable() {
@@ -150,6 +155,7 @@ function downloadCodes() {
           <AppForm v-if="data.passkeysAvailable && supported" class="flex flex-wrap gap-2" @submit.prevent="registerKey">
             <label for="passkey-name" class="sr-only">{{ i18n.t('security.key_name') }}</label>
             <AppInput id="passkey-name" v-model="keyName" class="min-w-0 flex-1" maxlength="100" required :placeholder="i18n.t('security.key_name')" :disabled="busy || !data.reauthenticated" />
+            <AppButton v-if="ceremony" class="btn" @click="cancelPasskeyCeremony()">{{ i18n.t('common.cancel') }}</AppButton>
             <AppButton type="submit" class="btn" :disabled="busy || !data.reauthenticated">{{ i18n.t('security.add_key') }}</AppButton>
           </AppForm>
           <p v-else class="text-xs text-muted">{{ i18n.t('security.browser_unavailable') }}</p>

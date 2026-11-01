@@ -19,7 +19,6 @@
     "verify_account": "Verificar cuenta: {account}",
     "next_account": "Verifique la siguiente cuenta para fusionar.",
     "restart_login": "Iniciar sesión nuevamente",
-    "passkey_login": "Iniciar sesión con una clave de acceso",
     "browser_unavailable": "Las claves del navegador requieren HTTPS y un navegador que admita WebAuthn.",
     "launcher_notice": "El inicio de sesión tradicional con contraseña del iniciador Minecraft no está protegido por la autenticación de dos factores del sitio web. Se recomienda la autorización del sitio web.",
     "reauth_notice": "Verifique su identidad antes de cambiar la configuración de seguridad. La verificación dura 5 minutos.",
@@ -1522,6 +1521,7 @@
   "common": {
     "delete": "Eliminar",
     "cancel": "Cancelar",
+    "continue": "Continuar",
     "prev": "Anterior",
     "next": "Siguiente",
     "close": "Cerrar",

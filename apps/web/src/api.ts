@@ -24,7 +24,7 @@ export const securityApi = {
   sendEmail: () => request<{ ok: boolean }>('/api/v1/auth/2fa/email', { method: 'POST', json: {} }),
   authenticationOptions: () => request<PublicKeyCredentialRequestOptionsJSON>('/api/v1/auth/2fa/passkey/options', { method: 'POST', json: {} }),
   verify: (method: SecondFactor, code = '', response?: AuthenticationResponseJSON) => request<{ requiresTwoFactor?: boolean; redirect?: string } & Partial<AuthTokenBody>>('/api/v1/auth/2fa/verify', { method: 'POST', json: { method, code, response } }),
-  loginOptions: (remember: boolean, destination: string) => request<PublicKeyCredentialRequestOptionsJSON>('/api/v1/auth/passkeys/options', { method: 'POST', json: { remember, destination } }),
+  loginOptions: (remember: boolean, destination: string, identifier?: string) => request<PublicKeyCredentialRequestOptionsJSON>('/api/v1/auth/passkeys/options', { method: 'POST', json: { remember, destination, ...(identifier ? { identifier } : {}) } }),
   passkeyLogin: (response: AuthenticationResponseJSON) => request<{ id: number; redirect: string } & AuthTokenBody>('/api/v1/auth/passkeys/verify', { method: 'POST', json: response }),
   begin: (method: 'email' | 'totp') => request<{ secret?: string; uri?: string }>(`/api/v1/me/security/${method}/begin`, { method: 'POST', json: {} }),
   confirm: (method: 'email' | 'totp' | 'change-email', code: string) => request<{ recoveryCodes: string[] }>(`/api/v1/me/security/${method}/confirm`, { method: 'POST', json: { code } }),
@@ -66,6 +66,8 @@ export interface ApiErrorBody {
   fields?: Record<string, string>;
   accounts?: Array<{ id: number; nickname: string }>;
   requiresPasswords?: number[];
+  /** 登录失败升级：达到阈值后下一次尝试需要带验证码 */
+  captchaRequired?: boolean;
 }
 
 export type VoteStatus = 'draft' | 'scheduled' | 'active' | 'ended' | 'closed' | 'cancelled' | 'archived';
@@ -119,6 +121,8 @@ export class ApiError extends Error {
   readonly fields: Record<string, string>;
   readonly accounts: Array<{ id: number; nickname: string }>;
   readonly requiresPasswords: number[];
+  /** 登录失败升级信号：为 true 时前端必须展示并要求人机验证 */
+  readonly captchaRequired: boolean;
 
   constructor(status: number, body: ApiErrorBody) {
     // message 只用于开发期排查；面向用户展示的应当是 code 翻译过来的文案
@@ -129,6 +133,7 @@ export class ApiError extends Error {
     this.fields = body.fields ?? {};
     this.accounts = body.accounts ?? [];
     this.requiresPasswords = body.requiresPasswords ?? [];
+    this.captchaRequired = body.captchaRequired === true;
   }
 
   /** 是否为字段级校验错误（表单用来逐字段标红） */

@@ -19,7 +19,6 @@
     "verify_account": "驗證帳戶：{account}",
     "next_account": "請繼續驗證下一個待合併帳戶。",
     "restart_login": "重新登入",
-    "passkey_login": "使用通行密鑰登入",
     "browser_unavailable": "瀏覽器金鑰需要 HTTPS 連線和支援 WebAuthn 的瀏覽器。",
     "launcher_notice": "傳統 Minecraft 啟動器的密碼登入不受網站雙重認證保護。建議透過網站授權登入。",
     "reauth_notice": "修改安全設定前，請先驗證身分。驗證有效期限為 5 分鐘。",
@@ -1522,6 +1521,7 @@
   "common": {
     "delete": "刪除",
     "cancel": "取消",
+    "continue": "繼續",
     "prev": "上一頁",
     "next": "下一頁",
     "close": "關閉",

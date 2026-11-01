@@ -22,8 +22,12 @@ securityAuthRoutes.post('/2fa/verify', async c => {
   return c.json(await security.verifyChallenge(c, body.method, body.code ?? '', body.response as unknown as AuthenticationResponseJSON | undefined));
 });
 securityAuthRoutes.post('/passkeys/options', async c => {
-  const body = await readJson(c, z.object({ remember: z.boolean().default(false), destination: z.string().max(2000).default('/user') }));
-  return c.json(await security.beginPasskeyLogin(c, body.remember ?? false, body.destination ?? '/user'));
+  const body = await readJson(c, z.object({
+    remember: z.boolean().default(false),
+    destination: z.string().max(2000).default('/user'),
+    identifier: z.string().trim().max(200).optional(),
+  }));
+  return c.json(await security.beginPasskeyLogin(c, body.remember ?? false, body.destination ?? '/user', body.identifier));
 });
 securityAuthRoutes.post('/passkeys/verify', async c => {
   const body = await readJson(c, responseSchema);

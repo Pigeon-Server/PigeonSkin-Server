@@ -291,6 +291,23 @@ describe('WebAuthn on workerd', () => {
     expect(verifiedBody).toMatchObject({ id: uid, redirect: '/user' });
     expect((await call('/api/v1/auth/session', undefined, verifiedBody.accessToken)).status).toBe(200);
   });
+  it('performs passwordless login when options are restricted by identifier', async () => {
+    await reauth(); const authenticator = await virtualAuthenticator(); await registerKey(authenticator);
+    const begin = await call('/api/v1/auth/passkeys/options', { remember: true, destination: '/user', identifier: email }, ''); expect(begin.status).toBe(200);
+    const options = await begin.json<PublicKeyCredentialRequestOptionsJSON>();
+    expect(options.allowCredentials?.map(c => c.id)).toEqual([authenticator.id]);
+    const verified = await call('/api/v1/auth/passkeys/verify', await authenticator.authenticate(options), cookies(begin)); expect(verified.status).toBe(200);
+    expect((await verified.json<{ id: number } >()).id).toBe(uid);
+  });
+  it('restricts options to the account but rejects a banned account at verify', async () => {
+    await reauth(); const authenticator = await virtualAuthenticator(); await registerKey(authenticator);
+    const begin = await call('/api/v1/auth/passkeys/options', { destination: '/user', identifier: email }, ''); expect(begin.status).toBe(200);
+    const options = await begin.json<PublicKeyCredentialRequestOptionsJSON>();
+    expect(options.allowCredentials?.map(c => c.id)).toEqual([authenticator.id]);
+    await env.DB.prepare("UPDATE users SET role = 'banned' WHERE id = ?").bind(uid).run();
+    const banned = await call('/api/v1/auth/passkeys/verify', await authenticator.authenticate(options), cookies(begin));
+    expect(banned.status).toBe(403);
+  });
   it('rejects registration without user verification, wrong origins, and HTTP', async () => {
     await reauth(); const authenticator = await virtualAuthenticator();
     const begin = await call('/api/v1/me/security/passkeys/options', {}), options = await begin.json<PublicKeyCredentialCreationOptionsJSON>();

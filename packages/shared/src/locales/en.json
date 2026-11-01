@@ -19,7 +19,6 @@
     "verify_account": "Verify account: {account}",
     "next_account": "Verify the next account to merge.",
     "restart_login": "Sign in again",
-    "passkey_login": "Sign in with a passkey",
     "browser_unavailable": "Browser keys require HTTPS and a browser that supports WebAuthn.",
     "launcher_notice": "Traditional Minecraft launcher password sign-in is not protected by website two-factor authentication. Website authorization is recommended.",
     "reauth_notice": "Verify your identity before changing security settings. Verification lasts 5 minutes.",
@@ -1522,6 +1521,7 @@
   "common": {
     "delete": "Delete",
     "cancel": "Cancel",
+    "continue": "Continue",
     "prev": "Previous",
     "next": "Next",
     "close": "Close",
