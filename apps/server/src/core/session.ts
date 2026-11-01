@@ -14,8 +14,8 @@ import { type Bindings } from './env.ts';
 import { deleteCookie } from 'hono/cookie';
 import { mintTokenWithHash, mintWebAccessToken, verifyWebAccessToken } from '@pigeon-skin/auth';
 import { LIMITS, type Role } from '@pigeon-skin/shared';
-import { createDb, users, sessions } from '@pigeon-skin/db';
-import { and, eq, isNull, gt } from 'drizzle-orm';
+import { createDb, users, sessions, scalarMax, leastOf } from '@pigeon-skin/db';
+import { and, eq, isNull, gt, sql } from 'drizzle-orm';
 
 import type { AppContext, AuthedUser } from './user.ts';
 import { needsAccountInitialization } from './user.ts';
@@ -108,13 +108,25 @@ export async function loadAuthedUser(
   };
 }
 
-/** 滑动续期：最多每 15 分钟写一次 —— 没到节流点就跳过写入。 */
+/**
+ * 滑动续期：最多每 15 分钟写一次 —— 没到节流点就跳过写入。
+ *
+ * 空闲过期取 max(现值, now+2h) 再用绝对上限封顶：续期只延长不缩短
+ * （"记住我"会话创建时 idle=90d，不能因一次续期被打回 2h），且空闲
+ * 永不越过 absolute_expires_at（30d / 90d 硬顶）。非记住会话现值本就是
+ * now+2h，行为不变。WHERE 顺带排除已撤销 / 已过绝对上限的行。
+ */
 export async function renewSession(env: Bindings, sessionId: string, lastSeenAt: number): Promise<void> {
   const now = Date.now();
   if (now - lastSeenAt <= LIMITS.sessionRenewIntervalSeconds * 1000) return;
+  const floor = now + LIMITS.sessionIdleSeconds * 1000;
   await createDb(env.DB).update(sessions)
-    .set({ lastSeenAt: now, expiresAt: now + LIMITS.sessionIdleSeconds * 1000 })
-    .where(eq(sessions.id, sessionId));
+    .set({ lastSeenAt: now, expiresAt: sql.raw(leastOf('absolute_expires_at', scalarMax('expires_at', String(floor)))) })
+    .where(and(
+      eq(sessions.id, sessionId),
+      isNull(sessions.revokedAt),
+      gt(sessions.absoluteExpiresAt, now),
+    ));
 }
 
 /** 签发 web access token。密钥缺失是部署错误，直接失败而不是降级。 */

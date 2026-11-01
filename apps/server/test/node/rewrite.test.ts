@@ -4,7 +4,7 @@
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { rewriteSql } from '../../src/node/d1/rewrite.ts';
-import { setDialect, scalarMax } from '@pigeon-skin/db';
+import { setDialect, scalarMax, leastOf } from '@pigeon-skin/db';
 
 describe('rewriteSql（mysql 目标）', () => {
   it('key 保留字：SELECT/ORDER BY/GROUP BY/INSERT/UPDATE 全位置加反引号，字符串字面量不动', () => {
@@ -95,17 +95,20 @@ describe('rewriteSql（sqlite 目标透传）', () => {
   });
 });
 
-describe('scalarMax（方言分支）', () => {
+describe('scalarMax / leastOf（方言分支）', () => {
   let original: 'sqlite' | 'postgres' | 'mysql';
   beforeEach(() => { original = undefined as never; });
   afterEach(() => setDialect(original ?? 'sqlite'));
 
-  it('sqlite 用标量 max，PG/MySQL 用 GREATEST', () => {
+  it('sqlite 用标量 max/min，PG/MySQL 用 GREATEST/LEAST', () => {
     setDialect('sqlite');
     expect(scalarMax('0', 'likes - 1')).toBe('max(0, likes - 1)');
+    expect(leastOf('absolute_expires_at', 'max(expires_at, 1)')).toBe('min(absolute_expires_at, max(expires_at, 1))');
     setDialect('postgres');
     expect(scalarMax('0', 'likes - 1')).toBe('GREATEST(0, likes - 1)');
+    expect(leastOf('absolute_expires_at', 'GREATEST(expires_at, 1)')).toBe('LEAST(absolute_expires_at, GREATEST(expires_at, 1))');
     setDialect('mysql');
     expect(scalarMax('0', 'likes - 1')).toBe('GREATEST(0, likes - 1)');
+    expect(leastOf('absolute_expires_at', 'GREATEST(expires_at, 1)')).toBe('LEAST(absolute_expires_at, GREATEST(expires_at, 1))');
   });
 });
