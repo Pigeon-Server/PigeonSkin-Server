@@ -71,7 +71,7 @@ async function submit() {
         <p v-if="method === 'email'" class="text-sm text-muted">{{ info.email }}</p>
         <AppButton v-if="method === 'email'" class="btn-sm" :disabled="busy || now - sentAt < 60000" @click="send">{{ i18n.t('security.send_code') }}</AppButton>
         <label for="second-factor-code" class="block text-sm font-medium">{{ i18n.t(method === 'recovery' ? 'security.recovery' : 'security.code') }}</label>
-        <AppInput id="second-factor-code" v-model="code" :inputmode="method === 'recovery' ? 'text' : 'numeric'" autocomplete="one-time-code" :maxlength="method === 'recovery' ? 128 : 6" required :disabled="busy" />
+        <AppInput id="second-factor-code" name="code" v-model="code" :inputmode="method === 'recovery' ? 'text' : 'numeric'" autocomplete="one-time-code" :maxlength="method === 'recovery' ? 128 : 6" required :disabled="busy" />
       </template>
       <p v-else-if="!supported" class="text-sm text-muted">{{ i18n.t('security.browser_unavailable') }}</p>
       <AppButton class="btn-primary w-full" type="submit" :loading="busy" :disabled="method === 'passkey' && !supported">{{ i18n.t('security.verify') }}</AppButton>

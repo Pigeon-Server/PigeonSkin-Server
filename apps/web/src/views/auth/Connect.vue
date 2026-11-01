@@ -55,7 +55,7 @@ onMounted(() => { if (!device.value || code.value) void load(); });
       <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>
       <AppForm v-if="device && !data" class="space-y-3" @submit.prevent="load">
         <label for="device-code" class="block">{{ i18n.t('connect.device_code') }}</label>
-        <AppInput id="device-code" v-model="code" class="uppercase" maxlength="20" autocomplete="off" required />
+        <AppInput id="device-code" name="device-code" v-model="code" class="uppercase" maxlength="20" autocomplete="off" required />
         <AppButton type="submit" class="btn-primary" :disabled="loading">{{ i18n.t('connect.continue') }}</AppButton>
       </AppForm>
       <AppSkeleton v-if="loading && !data" variant="detail" :count="2" />

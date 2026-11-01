@@ -141,6 +141,7 @@ async function submit() {
         </label>
         <AppInput
           id="identifier"
+          name="identifier"
           v-model="identifier"
           required
           autocomplete="webauthn"
@@ -152,6 +153,7 @@ async function submit() {
         </label>
         <AppInput
           id="password"
+          name="password"
           v-model="password"
           type="password"
           :required="!passkeyPhase"
@@ -171,7 +173,7 @@ async function submit() {
         <AppRadioGroup v-model="retainedId" name="retained-account" :options="conflicts.map(account => ({ value: account.id, label: `${account.nickname || i18n.t('general.unknown')} · ID ${account.id}` }))" class="grid gap-2" />
         <div v-for="userId in requiresPasswords" :key="userId">
           <label class="mb-1 block text-sm" :for="`conflict-password-${userId}`">{{ i18n.t('auth.conflict_password', { id: userId }) }}</label>
-          <AppInput :id="`conflict-password-${userId}`" v-model="conflictPasswords[userId]" type="password" autocomplete="current-password" required />
+          <AppInput :id="`conflict-password-${userId}`" :name="`conflict-password-${userId}`" v-model="conflictPasswords[userId]" type="password" autocomplete="current-password" required />
         </div>
         <div class="flex items-start gap-2 text-sm"><AppCheckbox v-model="mergeConfirmed" :label="i18n.t('auth.conflict_confirm')" /><span>{{ i18n.t('auth.conflict_confirm') }}</span></div>
       </fieldset>

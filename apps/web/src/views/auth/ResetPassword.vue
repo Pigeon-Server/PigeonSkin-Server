@@ -40,11 +40,11 @@ async function submit() {
     <AppForm v-else class="mt-6 space-y-4" @submit.prevent="submit">
       <div>
         <label class="mb-1 block text-sm font-medium" for="rp1">{{ i18n.t('auth.reset_new') }}</label>
-        <AppInput id="rp1" v-model="password" type="password" required minlength="8" maxlength="32" autocomplete="new-password" />
+        <AppInput id="rp1" name="password" v-model="password" type="password" required minlength="8" maxlength="32" autocomplete="new-password" />
       </div>
       <div>
         <label class="mb-1 block text-sm font-medium" for="rp2">{{ i18n.t('auth.repeat-pwd') }}</label>
-        <AppInput id="rp2" v-model="passwordConfirm" type="password" required autocomplete="new-password" />
+        <AppInput id="rp2" name="password-confirm" v-model="passwordConfirm" type="password" required autocomplete="new-password" />
       </div>
       <p v-if="error" class="alert alert-danger">{{ error }}</p>
       <AppButton type="submit" class="btn btn-primary w-full" :disabled="busy">

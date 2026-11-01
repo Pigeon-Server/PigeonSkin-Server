@@ -39,7 +39,7 @@ async function submit() {
     <AppForm v-else class="mt-6 space-y-4" @submit.prevent="submit">
       <div>
         <label class="mb-1 block text-sm font-medium" for="fp-email">{{ i18n.t('auth.email') }}</label>
-        <AppInput id="fp-email" v-model="email" type="email" required autocomplete="email" />
+        <AppInput id="fp-email" name="email" v-model="email" type="email" required autocomplete="email" />
       </div>
       <VerificationChallenge ref="challenge" v-model="captchaToken" v-model:randstr="captchaRandstr" />
       <p v-if="error" class="alert alert-danger" role="alert">{{ error }}</p>

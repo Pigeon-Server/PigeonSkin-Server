@@ -65,12 +65,12 @@ onMounted(load);
     <AppSkeleton v-if="loading || redirecting" variant="form" :count="4" />
     <p v-if="error" class="alert alert-danger" role="alert">{{ error }}<AppButton v-if="retryable" class="btn-sm ml-2" @click="load">{{ i18n.t('common.retry') }}</AppButton></p>
     <AppForm v-if="!loading && !redirecting && status?.needsInitialization" class="space-y-4" @submit.prevent="submit">
-      <label class="block text-sm font-medium" for="init-nickname">{{ i18n.t('auth.nickname') }}<AppInput id="init-nickname" v-model="nickname" class="mt-1" required maxlength="50" autocomplete="nickname" :disabled="busy" /></label>
-    <label class="block text-sm font-medium" for="init-email">{{ i18n.t('auth.email') }}<AppInput id="init-email" v-model="email" type="email" class="mt-1" required autocomplete="email" :disabled="busy" /></label>
-    <label class="block text-sm font-medium" for="init-password">{{ i18n.t('auth.password') }}<AppInput id="init-password" v-model="password" type="password" class="mt-1" required minlength="8" maxlength="32" autocomplete="new-password" :disabled="busy" /></label>
-    <label class="block text-sm font-medium" for="init-password-confirm">{{ i18n.t('auth.repeat-pwd') }}<AppInput id="init-password-confirm" v-model="passwordConfirm" type="password" class="mt-1" required autocomplete="new-password" :disabled="busy" /></label>
+      <label class="block text-sm font-medium" for="init-nickname">{{ i18n.t('auth.nickname') }}<AppInput id="init-nickname" name="nickname" v-model="nickname" class="mt-1" required maxlength="50" autocomplete="nickname" :disabled="busy" /></label>
+    <label class="block text-sm font-medium" for="init-email">{{ i18n.t('auth.email') }}<AppInput id="init-email" name="email" v-model="email" type="email" class="mt-1" required autocomplete="email" :disabled="busy" /></label>
+    <label class="block text-sm font-medium" for="init-password">{{ i18n.t('auth.password') }}<AppInput id="init-password" name="password" v-model="password" type="password" class="mt-1" required minlength="8" maxlength="32" autocomplete="new-password" :disabled="busy" /></label>
+    <label class="block text-sm font-medium" for="init-password-confirm">{{ i18n.t('auth.repeat-pwd') }}<AppInput id="init-password-confirm" name="password-confirm" v-model="passwordConfirm" type="password" class="mt-1" required autocomplete="new-password" :disabled="busy" /></label>
       <div v-if="status.playerRequired">
-        <label class="block text-sm font-medium" for="init-player">{{ i18n.t('auth.player-name') }}<AppInput id="init-player" v-model="playerName" class="mt-1" required :minlength="status.playerNameMin" :maxlength="status.playerNameMax" :disabled="busy" /></label>
+        <label class="block text-sm font-medium" for="init-player">{{ i18n.t('auth.player-name') }}<AppInput id="init-player" name="player-name" v-model="playerName" class="mt-1" required :minlength="status.playerNameMin" :maxlength="status.playerNameMax" :disabled="busy" /></label>
         <p class="mt-1 text-xs text-muted">{{ i18n.t('auth.player_name_hint') }}</p>
       </div>
       <AppButton type="submit" class="btn-primary w-full" :loading="busy">{{ i18n.t('auth.initialize.submit') }}</AppButton>

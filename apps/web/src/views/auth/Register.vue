@@ -75,21 +75,21 @@ async function submit() {
     <AppForm v-else class="mt-6 space-y-4" @submit.prevent="submit">
       <div>
         <label class="mb-1 block text-sm font-medium" for="email">{{ i18n.t('auth.email') }}</label>
-        <AppInput id="email" v-model="email" type="email" required autocomplete="email" />
+        <AppInput id="email" name="email" v-model="email" type="email" required autocomplete="email" />
       </div>
       <div>
         <label class="mb-1 block text-sm font-medium" for="reg-password">{{ i18n.t('auth.password') }}</label>
-        <AppInput id="reg-password" v-model="password" type="password" required minlength="8" maxlength="32" autocomplete="new-password" />
+        <AppInput id="reg-password" name="reg-password" v-model="password" type="password" required minlength="8" maxlength="32" autocomplete="new-password" />
       </div>
       <div>
         <label class="mb-1 block text-sm font-medium" for="password2">{{ i18n.t('auth.repeat-pwd') }}</label>
-        <AppInput id="password2" v-model="passwordConfirm" type="password" required autocomplete="new-password" />
+        <AppInput id="password2" name="password2" v-model="passwordConfirm" type="password" required autocomplete="new-password" />
       </div>
       <div>
         <label class="mb-1 block text-sm font-medium" for="display">
           {{ withPlayerName ? i18n.t('auth.player-name') : i18n.t('auth.nickname') }}
         </label>
-        <AppInput id="display" v-model="displayName" required :minlength="withPlayerName ? Number(site.get('player_name_length_min')) || 3 : 1" :maxlength="withPlayerName ? Number(site.get('player_name_length_max')) || 16 : 50" />
+        <AppInput id="display" name="display" v-model="displayName" required :minlength="withPlayerName ? Number(site.get('player_name_length_min')) || 3 : 1" :maxlength="withPlayerName ? Number(site.get('player_name_length_max')) || 16 : 50" />
         <p v-if="withPlayerName" class="mt-1 text-xs text-muted">
           {{ i18n.t('auth.player_name_hint') }}
         </p>

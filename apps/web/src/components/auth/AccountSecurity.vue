@@ -129,7 +129,7 @@ function downloadCodes() {
         <SecondFactorForm v-if="verifying" reauth @complete="reauthenticated" @restart="verifying = false" />
         <AppForm v-else-if="data.enabled || data.hasPassword" class="space-y-3" @submit.prevent="reauth">
           <label v-if="!data.enabled" for="security-password" class="block text-sm font-medium">{{ i18n.t('auth.password') }}</label>
-          <AppInput v-if="!data.enabled" id="security-password" v-model="password" type="password" autocomplete="current-password" required />
+          <AppInput v-if="!data.enabled" id="security-password" name="password" v-model="password" type="password" autocomplete="current-password" required />
           <AppButton class="btn" type="submit" :loading="busy">{{ i18n.t('security.verify_identity') }}</AppButton>
         </AppForm>
         <div v-else class="flex flex-wrap gap-2">
@@ -154,7 +154,7 @@ function downloadCodes() {
           </div>
           <AppForm v-if="data.passkeysAvailable && supported" class="flex flex-wrap gap-2" @submit.prevent="registerKey">
             <label for="passkey-name" class="sr-only">{{ i18n.t('security.key_name') }}</label>
-            <AppInput id="passkey-name" v-model="keyName" class="min-w-0 flex-1" maxlength="100" required :placeholder="i18n.t('security.key_name')" :disabled="busy || !data.reauthenticated" />
+            <AppInput id="passkey-name" name="passkey-name" v-model="keyName" class="min-w-0 flex-1" maxlength="100" required :placeholder="i18n.t('security.key_name')" :disabled="busy || !data.reauthenticated" />
             <AppButton v-if="ceremony" class="btn" @click="cancelPasskeyCeremony()">{{ i18n.t('common.cancel') }}</AppButton>
             <AppButton type="submit" class="btn" :disabled="busy || !data.reauthenticated">{{ i18n.t('security.add_key') }}</AppButton>
           </AppForm>
@@ -170,7 +170,7 @@ function downloadCodes() {
         </template>
         <AppButton v-else class="btn-sm" :disabled="busy" @click="run(() => securityApi.resend(enrollment as 'email' | 'change-email'))">{{ i18n.t('security.send_code') }}</AppButton>
         <label for="enrollment-code" class="block text-sm font-medium">{{ i18n.t('security.code') }}</label>
-        <AppInput id="enrollment-code" v-model="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required :disabled="busy" />
+        <AppInput id="enrollment-code" name="code" v-model="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required :disabled="busy" />
         <AppButton type="submit" class="btn-primary" :loading="busy">{{ i18n.t('security.verify') }}</AppButton>
         <AppButton class="btn ml-2" :disabled="busy" @click="enrollment = ''; secret = ''; qr = ''; code = ''">{{ i18n.t('common.cancel') }}</AppButton>
       </AppForm>
@@ -181,7 +181,7 @@ function downloadCodes() {
         <AppForm class="space-y-2" @submit.prevent="changeEmail">
           <label for="security-new-email" class="block text-sm font-medium">{{ i18n.t('security.change_email') }}</label>
           <div class="flex flex-wrap gap-2">
-            <AppInput id="security-new-email" v-model="email" type="email" autocomplete="email" class="min-w-0 flex-1" required :disabled="busy || !data.reauthenticated" />
+            <AppInput id="security-new-email" name="email" v-model="email" type="email" autocomplete="email" class="min-w-0 flex-1" required :disabled="busy || !data.reauthenticated" />
             <AppButton type="submit" class="btn" :disabled="busy || !data.reauthenticated || !data.mailAvailable">{{ i18n.t('security.send_code') }}</AppButton>
           </div>
         </AppForm>

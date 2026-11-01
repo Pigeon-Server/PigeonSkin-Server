@@ -94,8 +94,8 @@ onMounted(load);
     </details>
     <AppDialog v-model="open" :title="i18n.t(editing ? 'connect.edit_client' : 'connect.new_client')" :busy="busy">
       <AppForm class="space-y-4" @submit.prevent="save">
-        <label class="block text-sm">{{ i18n.t('connect.client_name') }}<AppInput v-model="name" class="mt-1" required maxlength="100" /></label>
-        <label class="block text-sm">{{ i18n.t('connect.redirect_uris') }}<AppInput v-model="uris" multiline class="mt-1 font-mono text-sm" rows="3" required /></label>
+        <label class="block text-sm">{{ i18n.t('connect.client_name') }}<AppInput v-model="name" name="name" class="mt-1" required maxlength="100" /></label>
+        <label class="block text-sm">{{ i18n.t('connect.redirect_uris') }}<AppInput v-model="uris" name="redirect-uris" multiline class="mt-1 font-mono text-sm" rows="3" required /></label>
         <p class="text-xs text-muted">{{ i18n.t('oauth.redirect_help') }}</p>
         <div v-if="!editing" class="flex items-center gap-2 text-sm"><AppCheckbox v-model="confidential" :disabled="shared" :label="i18n.t('connect.confidential')" /><span>{{ i18n.t('connect.confidential') }}</span></div>
         <div v-if="admin" class="flex items-center gap-2 text-sm"><AppCheckbox v-model="shared" :disabled="confidential" :label="i18n.t('connect.shared')" /><span>{{ i18n.t('connect.shared') }}</span></div>
