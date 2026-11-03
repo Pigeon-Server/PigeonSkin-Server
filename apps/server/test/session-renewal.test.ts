@@ -1,5 +1,6 @@
-// 会话滑动续期（renewSession）的寿命契约回归：
-// 续期只能"延长 + 被绝对上限封顶"，不能缩短。
+// 会话寿命契约回归：
+// 1. 滑动续期（renewSession）只能"延长 + 被绝对上限封顶"，不能缩短；
+// 2. 没有记住我勾选框的登录路径（注册/OAuth 换发/账号初始化）按记住会话签发。
 //
 // 背景：记住我会话创建时空闲=90 天，但旧 renewSession 每次续期无条件把
 // expires_at 写成 now+2h，登录后第一次续期就把 90 天截断成 2 小时 ——
@@ -127,5 +128,26 @@ describe('滑动续期：只延长不缩短，绝对上限封顶', () => {
     const renewed = await activeSession(u.id);
     expect(renewed.expires_at).toBe(first.expires_at);
     expect(renewed.last_seen_at - first.last_seen_at).toBeLessThan(LIMITS.sessionRenewIntervalSeconds * 1000);
+  });
+});
+
+describe('无记住我勾选框的登录路径按记住会话签发', () => {
+  // OAuth 换发（/auth/token）与账号初始化的同类断言分别在
+  // oauth-social.test.ts / account-initialization.test.ts。
+  it('注册自动登录的会话是记住会话（90 天空闲与绝对）', async () => {
+    const before = Date.now();
+    const email = `register-ttl-${crypto.randomUUID()}@example.com`;
+    const res = await SELF.fetch('https://x/api/v1/auth/register', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+      body: JSON.stringify({
+        email, password: PASSWORD, nickname: 'register ttl',
+        playerName: `regttl${crypto.randomUUID().replaceAll('-', '').slice(0, 8)}`,
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { id } = await res.json<{ id: number }>();
+    const created = await activeSession(id);
+    expect(created.expires_at - before).toBeGreaterThan(89 * DAY);
+    expect(created.absolute_expires_at - before).toBeGreaterThan(89 * DAY);
   });
 });

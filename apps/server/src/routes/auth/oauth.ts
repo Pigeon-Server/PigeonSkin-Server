@@ -120,7 +120,8 @@ async function issueLoginRedirect(c: Ctx, userId: number, target: string): Promi
 }
 
 async function issueSession(c: Ctx, userId: number, target: string) {
-  if (await security.beginLogin(c, userId, { destination: target, loginSource: 'oauth' })) return c.redirect('/auth/two-factor');
+  // OAuth 流程没有记住我勾选框，2FA 完成后的会话也按记住会话签发
+  if (await security.beginLogin(c, userId, { remember: true, destination: target, loginSource: 'oauth' })) return c.redirect('/auth/two-factor');
   await revokeAllSessions(c.env, userId);
   const credentials = await c.env.DB.prepare('SELECT email, password_hash, needs_initialization FROM users WHERE id = ?').bind(userId).first<{ email: string; password_hash: string; needs_initialization: number }>();
   const destination = credentials && needsAccountInitialization(credentials.email, credentials.password_hash, credentials.needs_initialization)

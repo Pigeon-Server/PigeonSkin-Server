@@ -77,10 +77,13 @@ authRoutes.post('/register', async (c) => {
 
   const { userId } = await auth.register(c.env, body, await readRegistrationSettings(c.env), ip);
 
-  // 注册成功即自动登录（与旧版行为一致），令牌随响应交给前端保存
+  // 注册成功即自动登录（与旧版行为一致），令牌随响应交给前端保存。
+  // 这些路径没有记住我勾选框，一律按记住会话签发：2 小时空闲会把
+  // 重启浏览器回来的用户挡在门外。
   const grant = await issueTokensFor(c.env, userId, {
     ip,
     userAgent: c.req.header('user-agent') ?? null,
+    remember: true,
   });
 
   // 站点开启了"必须验证邮箱"时，注册成功就顺手把验证信发出去。
@@ -211,9 +214,11 @@ authRoutes.post('/token', async (c) => {
     .bind(await hashToken(body.code), Date.now())
     .first<{ user_id: number; destination: string }>();
   if (!row) throw fail.unauthorized();
+  // OAuth 社交登录与注册/初始化同理：无记住我勾选框，按记住会话签发
   const grant = await issueTokensFor(c.env, row.user_id, {
     ip: clientIp(c),
     userAgent: c.req.header('user-agent') ?? null,
+    remember: true,
   });
   return c.json({ ...tokenPayload(grant), destination: security.destination(row.destination) });
 });
@@ -244,7 +249,8 @@ authRoutes.post('/initialize', async c => {
   if (!sessionId) throw fail.unauthorized();
   const result = await initializeAccount(c.env, user.id, sessionId, body);
   await revokeAllSessions(c.env, user.id);
-  const grant = await issueTokensFor(c.env, user.id, { ip: clientIp(c), userAgent: c.req.header('user-agent') ?? null });
+  // 初始化完成即正式登录，按记住会话签发（与注册/OAuth 换发同理）
+  const grant = await issueTokensFor(c.env, user.id, { ip: clientIp(c), userAgent: c.req.header('user-agent') ?? null, remember: true });
   return c.json({ ...result, ...tokenPayload(grant) });
 });
 

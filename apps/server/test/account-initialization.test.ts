@@ -59,6 +59,10 @@ describe('OAuth account initialization', () => {
     const completedBody = await completed.json<{ redirect: string; needsEmailVerification: boolean; accessToken: string }>();
     expect({ redirect: completedBody.redirect, needsEmailVerification: completedBody.needsEmailVerification }).toEqual({ redirect: '/connect/authorize/preserved-interaction', needsEmailVerification: false });
     const freshCookie = completedBody.accessToken; expect(freshCookie).not.toBe(cookie);
+    // 该路径没有记住我勾选框，完成初始化签发的是记住会话（90 天空闲与绝对）
+    const freshSession = await env.DB.prepare('SELECT expires_at, absolute_expires_at FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').bind(uid).first<{ expires_at: number; absolute_expires_at: number }>();
+    expect(freshSession!.expires_at - Date.now()).toBeGreaterThan(89 * 86_400_000);
+    expect(freshSession!.absolute_expires_at - Date.now()).toBeGreaterThan(89 * 86_400_000);
     expect((await request('/api/v1/auth/session')).status).toBe(401);
     const session = await (await request('/api/v1/auth/session', undefined, 'GET', freshCookie)).json<{ needsInitialization: boolean; score: number; emailVerified: boolean; nickname: string }>();
     expect(session.needsInitialization).toBe(false); expect(session.score).toBe(1000); expect(session.emailVerified).toBe(true); expect(session.nickname).toBe('Initialized player');

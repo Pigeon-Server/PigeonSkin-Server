@@ -2,6 +2,7 @@ import { type Bindings } from './../src/core/env.ts';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { env, SELF, fetchMock, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { hashPassword, hashToken } from '@pigeon-skin/auth';
+import { totp } from '../src/services/security-crypto.ts';
 import { createApp } from '../src/app.ts';
 
 import { runMigrations } from './setup.ts';
@@ -76,6 +77,44 @@ describe('Third-party authorization', () => {
     expect(initialized.status).toBe(200); session = (await initialized.json<{ accessToken: string }>()).accessToken;
     expect((await json('/api/v1/me/oauth/github/unbind', {}, session)).status).toBe(200);
     const login = await json('/api/v1/auth/login', { identifier: 'remote@example.com', password: 'new-social-password-9' }, ''); expect(login.status).toBe(200);
+    fetchMock.assertNoPendingInterceptors();
+  });
+  it('code 换发的会话按记住会话签发（90 天空闲与绝对）', async () => {
+    const before = Date.now();
+    const auth = await begin(); github(105, 'ttl-oauth@example.com');
+    const exchanged = await finishExchange(auth); expect(exchanged.tokens).not.toBeNull();
+    const row = await env.DB.prepare(
+      'SELECT s.expires_at, s.absolute_expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.email = ? ORDER BY s.created_at DESC LIMIT 1',
+    ).bind('ttl-oauth@example.com').first<{ expires_at: number; absolute_expires_at: number }>();
+    expect(row!.expires_at - before).toBeGreaterThan(89 * 86_400_000);
+    expect(row!.absolute_expires_at - before).toBeGreaterThan(89 * 86_400_000);
+    fetchMock.assertNoPendingInterceptors();
+  });
+  it('OAuth + 2FA 完成后的会话也按记住会话签发（90 天空闲与绝对）', async () => {
+    const now = Date.now();
+    const email = `oauth-2fa-${crypto.randomUUID()}@example.com`;
+    const uid2 = (await env.DB.prepare("INSERT INTO users (email, nickname, password_hash, role, email_verified_at, created_at, updated_at) VALUES (?, 'OAuth 2FA user', ?, 'normal', ?, ?, ?) RETURNING id").bind(email, await hashPassword('oauth-2fa-pass-9'), now, now, now).first<{ id: number }>())!.id;
+    await env.DB.prepare('INSERT INTO user_identities (provider, provider_user_id, user_id, created_at) VALUES (?, ?, ?, ?)').bind('github', '110', uid2, now).run();
+    // 走 API 开启 TOTP：登录 → reauth → begin/confirm
+    const token = (await (await json('/api/v1/auth/login', { identifier: email, password: 'oauth-2fa-pass-9' }, '')).json<{ accessToken: string }>()).accessToken;
+    expect((await json('/api/v1/me/security/reauth', { password: 'oauth-2fa-pass-9' }, token)).status).toBe(200);
+    const beginEnroll = await json('/api/v1/me/security/totp/begin', {}, token);
+    expect(beginEnroll.status).toBe(200);
+    const { secret } = await beginEnroll.json<{ secret: string }>();
+    const enrollSession = [token, cookies(beginEnroll)].filter(Boolean).join('; ');
+    const confirm = await json('/api/v1/me/security/totp/confirm', { code: await totp(secret, Math.floor(Date.now() / 30000)) }, enrollSession);
+    expect(confirm.status).toBe(200);
+    // OAuth 回调 → 2FA 仪式 → verify
+    const before = Date.now();
+    const auth = await begin(); github(110, email);
+    const callback = await finish(auth);
+    expect(callback.headers.get('location')).toBe('/auth/two-factor');
+    const pending = [auth.session, cookies(callback)].filter(Boolean).join('; ');
+    const verified = await json('/api/v1/auth/2fa/verify', { method: 'totp', code: await totp(secret, Math.floor(Date.now() / 30000) + 1) }, pending);
+    expect(verified.status).toBe(200);
+    const row = await env.DB.prepare('SELECT expires_at, absolute_expires_at FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').bind(uid2).first<{ expires_at: number; absolute_expires_at: number }>();
+    expect(row!.expires_at - before).toBeGreaterThan(89 * 86_400_000);
+    expect(row!.absolute_expires_at - before).toBeGreaterThan(89 * 86_400_000);
     fetchMock.assertNoPendingInterceptors();
   });
   it('handles LittleSkin uid and its actual token endpoint', async () => {
