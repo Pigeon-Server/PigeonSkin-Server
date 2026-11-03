@@ -88,7 +88,11 @@ let inflight: Promise<TokenGrant | null> | null = null;
 
 /**
  * 用 refresh token 换新 access token（并发单飞）。
- * 成功返回令牌组并更新存储；失败返回 null 并清空本地状态（触发登出）。
+ * 成功返回令牌组并更新存储；失败返回 null。只有服务端**确定性拒绝**这份
+ * 凭据时才清空本地状态（触发登出）：401 = 会话已撤销/空闲或绝对过期，
+ * 422 = 令牌形状非法（本地存储损坏），留着也换不出令牌。其余失败
+ * （429 限流、5xx、WAF 拦截、网络抖动）保留本地令牌 —— 重启浏览器后的
+ * 一次瞬时错误不应把还活着的"记住我"会话在客户端提前作废。
  */
 export function refreshTokens(): Promise<TokenGrant | null> {
   if (inflight) return inflight;
@@ -102,7 +106,10 @@ export function refreshTokens(): Promise<TokenGrant | null> {
         body: JSON.stringify({ refreshToken: refresh }),
         signal: AbortSignal.timeout(30000),
       });
-      if (!response.ok) { clearTokens(); emit(null); return null; }
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 422) { clearTokens(); emit(null); }
+        return null;
+      }
       const grant = await response.json() as TokenGrant;
       saveTokens(grant.accessToken, grant.refreshToken);
       emit(grant);
